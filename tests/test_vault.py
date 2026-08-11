@@ -4,6 +4,7 @@ import pytest
 
 from alfred.audit import AuditLog
 from alfred.db import Database
+from alfred.documents import DocumentStore
 from alfred.memory_graph import MemoryGraph
 from alfred.vault import VaultError, VaultImporter, VaultProjector
 
@@ -86,7 +87,12 @@ def test_new_note_becomes_a_confirmed_evidence_backed_memory(tmp_path: Path) -> 
     evidence = graph.evidence_for("memory", memory.id)
     assert len(evidence) == 1
     with database.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM events WHERE source = 'obsidian_vault'").fetchone()[0] == 1
+        event_row = connection.execute("SELECT id FROM events WHERE source = 'obsidian_vault'").fetchone()
+        documents = DocumentStore.for_event(connection, event_row["id"])
+    assert len(documents) == 1
+    assert documents[0].uri.endswith("advisor.md")
+    assert documents[0].mime_type == "text/markdown"
+    assert documents[0].checksum
     assert AuditLog(database).verify() is True
 
 

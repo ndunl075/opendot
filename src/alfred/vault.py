@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from .audit import AuditEvent, AuditLog
 from .connector_records import ConnectorRecordStore
 from .db import Database
+from .documents import DocumentStore
 from .events import EventStore
 from .memory_graph import Entity, GraphError, Memory, MemoryGraph, Sensitivity
 
@@ -213,6 +214,16 @@ class VaultImporter:
                     content=statement[:200],
                     metadata={"path": record_id, "hash": content_hash},
                     sensitivity=sensitivity,
+                )
+                # The note itself is the raw artifact this event observed --
+                # a pointer to it, never a copy of its bytes.
+                DocumentStore.append(
+                    connection,
+                    event_id=event.id,
+                    uri=str(path),
+                    checksum=content_hash,
+                    mime_type="text/markdown",
+                    retention_policy="vault-local",
                 )
 
         outcome = "imported"
