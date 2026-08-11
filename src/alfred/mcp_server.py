@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .briefing import BriefingService
 from .config import Settings
+from .connector_health import connector_health
 from .db import Database
 from .memory_graph import GraphError, MemoryGraph, Sensitivity
 from .policy import PolicyError, PolicyStore
@@ -92,13 +93,9 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
 
     @server.tool()
     def connector_status() -> list[dict]:
-        """Report each connector's last sync outcome; never its credentials or synced content."""
+        """Report each connector's health; never its credentials or synced content."""
         policy.require_read(client_id, "connector_status")
-        with database.connect() as connection:
-            rows = connection.execute(
-                "SELECT connector, account, last_success_at, last_error, updated_at FROM sync_state ORDER BY connector, account"
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return [health.model_dump(mode="json") for health in connector_health(database)]
 
     return server
 

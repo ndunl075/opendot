@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -98,23 +99,26 @@ def test_connector_status_reports_sync_health_without_credentials(tmp_path: Path
     database_path = tmp_path / "alfred.db"
     database = Database(database_path)
     database.migrate()
+    # connector_health() compares against real wall-clock time (the MCP tool
+    # takes no `now` override, by design), so this must stay recent relative
+    # to whenever the test actually runs rather than a fixed historical date.
+    recent = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
     with database.connect() as connection:
         with database.transaction(connection):
             connection.execute(
                 "INSERT INTO sync_state (connector, account, cursor, last_success_at, last_error, updated_at) "
-                "VALUES ('github', 'self', NULL, '2026-08-11T09:00:00+00:00', NULL, '2026-08-11T09:00:00+00:00')"
+                "VALUES ('github', 'self', NULL, ?, NULL, ?)",
+                (recent, recent),
             )
     _grant(database_path)
     server = create_server(database_path)
 
     status = _call(server, "connector_status", {})
 
-    assert status == [
-        {
-            "connector": "github",
-            "account": "self",
-            "last_success_at": "2026-08-11T09:00:00+00:00",
-            "last_error": None,
-            "updated_at": "2026-08-11T09:00:00+00:00",
-        }
-    ]
+    assert len(status) == 1
+    assert status[0]["connector"] == "github"
+    assert status[0]["account"] == "self"
+    assert status[0]["state"] == "ok"
+    assert status[0]["last_error"] is None
+    # Pydantic's JSON mode renders UTC as "Z"; compare the parsed instant, not the string form.
+    assert datetime.fromisoformat(status[0]["last_success_at"]) == datetime.fromisoformat(recent)

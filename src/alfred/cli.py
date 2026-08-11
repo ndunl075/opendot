@@ -10,6 +10,7 @@ from typing import Sequence
 
 from .audit import AuditEvent, AuditLog
 from .config import Settings
+from .connector_health import connector_health
 from .db import Database
 from .briefing import BriefingService
 from .jobs import JobRunner
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
+    subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
     audit = subcommands.add_parser("audit", help="append a redacted audit record")
     audit.add_argument("--actor", required=True)
     audit.add_argument("--tool", required=True)
@@ -177,6 +179,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "status":
         print(json.dumps(database.status()))
+        return 0
+    if args.command == "connector-status":
+        print(json.dumps([health.model_dump(mode="json") for health in connector_health(database)]))
         return 0
     audit_log = AuditLog(database)
     if args.command == "audit":

@@ -33,6 +33,13 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
     assert json.loads(capsys.readouterr().out) == {"valid": True}
 
 
+def test_cli_reports_connector_status_without_any_configured_connector(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert main(["--db", str(database_path), "connector-status"]) == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
 def test_cli_handles_a_paired_telegram_task(tmp_path: Path, capsys) -> None:
     database_path = tmp_path / "alfred.db"
     update_file = tmp_path / "telegram-update.json"

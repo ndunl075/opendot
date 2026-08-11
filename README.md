@@ -78,6 +78,11 @@ next sync automatically.
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
 
+`alfred connector-status` (or the `connector_status` MCP tool) reports every
+connector's health without ever exposing a credential or synced content: `ok`,
+`stale` (no success in the last 24 hours), `error` (the most recent attempt
+failed), or `never_synced`.
+
 ## Running continuously
 
 Every command above is a one-shot CLI invocation; something still has to keep
