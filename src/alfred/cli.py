@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
 from .audit import AuditEvent, AuditLog
 from .config import Settings
 from .db import Database
+from .briefing import BriefingService
+from .jobs import JobRunner
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -40,6 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
     telegram_input.add_argument("--update-file", type=Path, help="path to a Telegram update JSON object")
     telegram.add_argument("--chat-id", required=True, type=int, help="locally paired Telegram chat ID")
     telegram.add_argument("--user-id", required=True, type=int, help="locally paired Telegram user ID")
+    run_due = subcommands.add_parser("run-due", help="move due jobs to the delivery outbox")
+    run_due.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
+    brief = subcommands.add_parser("brief", help="render the deterministic local morning brief")
+    brief.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     return parser
 
 
@@ -88,7 +95,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         receipt = gateway.handle(update)
         print(receipt.model_dump_json())
         return 0
+    if args.command == "run-due":
+        now = _parse_timestamp(args.now) if args.now else None
+        executed = JobRunner(database).run_due(now)
+        print(json.dumps({"processed": [item.model_dump(mode="json") for item in executed]}))
+        return 0
+    if args.command == "brief":
+        now = _parse_timestamp(args.now) if args.now else None
+        print(BriefingService(database).morning_brief(now).render())
+        return 0
     raise AssertionError(f"Unhandled command: {args.command}")
+
+
+def _parse_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise SystemExit("--now must include a timezone")
+    return parsed
 
 
 if __name__ == "__main__":

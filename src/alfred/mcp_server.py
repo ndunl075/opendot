@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from .briefing import BriefingService
 from .config import Settings
 from .db import Database
 
@@ -20,6 +21,11 @@ def create_server(database_path: Path | str | None = None) -> FastMCP:
     def system_status() -> dict[str, int | str]:
         """Return Alfred's non-sensitive local health and schema status."""
         return database.status()
+
+    @server.tool()
+    def agenda_get() -> str:
+        """Return Alfred's deterministic local task agenda with freshness."""
+        return BriefingService(database).morning_brief().render()
 
     return server
 
