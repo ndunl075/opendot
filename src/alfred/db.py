@@ -8,6 +8,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Iterator
 
+import sqlite_vec
+
 
 class Database:
     """A single-process SQLite owner with explicit migrations and transactions."""
@@ -23,6 +25,9 @@ class Database:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA busy_timeout = 5000")
+        connection.enable_load_extension(True)
+        sqlite_vec.load(connection)
+        connection.enable_load_extension(False)
         return connection
 
     def migrate(self) -> int:

@@ -55,6 +55,18 @@ memory superseded and creates a new one that points back to it. `alfred forget
 memory, drops it from search, and records an audit entry, but a superseded memory
 it once replaced stays visible as history until it is separately forgotten.
 
+## Local vector search (optional)
+
+`MemoryGraph` accepts an optional `embedding_provider`. Without one, `memory-search`
+stays FTS5 keyword-only, exactly as before. With one—for example
+`alfred.embeddings.OllamaEmbeddingProvider`, pointed at a local Ollama—`remember`,
+`memory-correct`, and `forget` also keep a versioned vector per memory in the
+`embeddings` table, and `memory-search` folds in nearby vector matches (within a
+cosine-distance cutoff) once keyword hits are exhausted. Vectors are namespaced by
+model name, so trying a different embedding model never mixes incomparable spaces;
+switching models means re-embedding, not migrating data. Nothing in the CLI or MCP
+server wires a live provider in yet—that's local configuration, not core behavior.
+
 ## Development rules
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior.

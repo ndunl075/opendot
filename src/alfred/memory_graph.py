@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from .audit import AuditEvent, AuditLog
 from .db import Database
+from .embeddings import EmbeddingIndex, EmbeddingProvider
 
 Sensitivity = Literal["public", "personal", "sensitive", "secret"]
 MemoryStatus = Literal["candidate", "confirmed", "superseded", "rejected", "deleted"]
@@ -72,8 +73,10 @@ class GraphError(ValueError):
 class MemoryGraph:
     """The authoritative structured layer above raw local events and documents."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, embedding_provider: EmbeddingProvider | None = None) -> None:
+        """``embedding_provider`` is opt-in; without it, search stays FTS-only as before."""
         self.database = database
+        self._embedding_index = EmbeddingIndex(database, embedding_provider) if embedding_provider else None
 
     def ensure_self(self, label: str, *, actor: str = "user:cli") -> Entity:
         """Create the one permanent owner identity, or return the existing one."""
@@ -245,7 +248,9 @@ class MemoryGraph:
                 row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
                 memory = self._memory_from_row(row)
                 self._audit(connection, actor, "memory_create", {"memory_id": memory.id, "kind": kind})
-                return memory
+        if self._embedding_index is not None:
+            self._embedding_index.upsert(subject_kind="memory", subject_id=memory.id, text=normalized_statement)
+        return memory
 
     def supersede_memory(
         self,
@@ -298,7 +303,9 @@ class MemoryGraph:
                 row = connection.execute("SELECT * FROM memories WHERE id = ?", (replacement_id,)).fetchone()
                 replacement = self._memory_from_row(row)
                 self._audit(connection, actor, "memory_supersede", {"old_memory_id": memory_id, "new_memory_id": replacement_id})
-                return replacement
+        if self._embedding_index is not None:
+            self._embedding_index.upsert(subject_kind="memory", subject_id=replacement.id, text=normalized_statement)
+        return replacement
 
     def forget_memory(
         self,
@@ -329,7 +336,9 @@ class MemoryGraph:
                 row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
                 memory = self._memory_from_row(row)
                 self._audit(connection, actor, "memory_forget", {"memory_id": memory_id, "reason": reason})
-                return memory
+        if self._embedding_index is not None:
+            self._embedding_index.delete(subject_kind="memory", subject_id=memory_id)
+        return memory
 
     def search(
         self,
@@ -338,7 +347,12 @@ class MemoryGraph:
         limit: int = 8,
         allowed_sensitivities: set[str] | None = None,
     ) -> SearchResult:
-        """Use local FTS anchors, then one active graph hop as a compact context pack."""
+        """Use local FTS anchors plus, when configured, vector recall, then one active graph hop.
+
+        Keyword matches are trusted first since bm25 ranks exact-term precision;
+        vector hits fill in only the remaining budget, catching paraphrases FTS
+        would miss. Without an embedding provider this is unchanged FTS-only search.
+        """
         match_query = self._fts_query(query)
         if not match_query:
             return SearchResult()
@@ -346,6 +360,11 @@ class MemoryGraph:
         if not sensitivities:
             return SearchResult()
         self.database.migrate()
+        vector_memory_ids: list[str] = []
+        if self._embedding_index is not None:
+            vector_memory_ids = [
+                subject_id for subject_id, _distance in self._embedding_index.search(query, subject_kind="memory", limit=limit)
+            ]
         with self.database.connect() as connection:
             entity_rows = connection.execute(
                 "SELECT entity_id FROM entity_fts WHERE entity_fts MATCH ? ORDER BY bm25(entity_fts) LIMIT ?",
@@ -356,8 +375,12 @@ class MemoryGraph:
                 (match_query, limit),
             ).fetchall()
             entity_ids = [row["entity_id"] for row in entity_rows]
+            memory_ids = [row["memory_id"] for row in memory_rows]
+            for subject_id in vector_memory_ids:
+                if subject_id not in memory_ids and len(memory_ids) < limit:
+                    memory_ids.append(subject_id)
             entities = self._entities_by_ids(connection, entity_ids, sensitivities)
-            memories = self._memories_by_ids(connection, [row["memory_id"] for row in memory_rows], sensitivities)
+            memories = self._memories_by_ids(connection, memory_ids, sensitivities)
             relationships = self._active_relationship_hop(connection, [entity.id for entity in entities], limit, sensitivities=sensitivities)
         return SearchResult(entities=entities, memories=memories, relationships=relationships)
 

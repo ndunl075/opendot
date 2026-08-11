@@ -107,6 +107,46 @@ def test_forget_rejects_an_already_deleted_memory(tmp_path: Path) -> None:
         graph.forget_memory(memory.id)
 
 
+class _FakeEmbeddingProvider:
+    """Hand-built vectors: 'stressed about deadline' is close to 'anxious about due date'."""
+
+    model_name = "fake-v1"
+    _vectors = {
+        "I feel anxious about my thesis due date.": [1.0, 0.0],
+        "Remember to buy milk.": [0.0, 1.0],
+        "stressed about deadline": [0.9, 0.1],
+    }
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self._vectors[text] for text in texts]
+
+
+def test_hybrid_search_surfaces_a_semantic_match_fts_alone_would_miss(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database, embedding_provider=_FakeEmbeddingProvider())
+    relevant = graph.remember("I feel anxious about my thesis due date.")
+    graph.remember("Remember to buy milk.")
+
+    keyword_only = MemoryGraph(database).search("stressed about deadline")
+    hybrid = graph.search("stressed about deadline")
+
+    assert keyword_only.memories == []
+    assert [memory.id for memory in hybrid.memories] == [relevant.id]
+
+
+def test_forget_removes_the_embedding_alongside_the_fts_row(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database, embedding_provider=_FakeEmbeddingProvider())
+    memory = graph.remember("I feel anxious about my thesis due date.")
+
+    graph.forget_memory(memory.id)
+
+    with database.connect() as connection:
+        count = connection.execute("SELECT COUNT(*) FROM embeddings WHERE subject_id = ?", (memory.id,)).fetchone()[0]
+    assert count == 0
+    assert graph.search("stressed about deadline").memories == []
+
+
 def test_correction_supersedes_memory_without_erasing_history(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     graph = MemoryGraph(database)
