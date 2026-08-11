@@ -259,6 +259,8 @@ Rules:
 
 Local software can cost `$0/month`; electricity, existing subscriptions, a domain, or optional cloud inference are not free. The PC must be awake for live replies and scheduled work. Persistent jobs run missed executions once after restart and label the result late.
 
+The single Python service from decision 3 currently runs as a foreground CLI process (`alfred run`), not an installed OS service. It depends on an external keep-alive — a login-triggered Task Scheduler entry or a terminal left open — to actually stay up across reboots. Packaging it as a real background service is unbuilt future work, not yet a safe assumption.
+
 ## 7. MCP surface
 
 Expose semantic Alfred operations rather than every provider endpoint:
@@ -347,7 +349,7 @@ These change configuration, not the architecture:
 - PC RAM, GPU/VRAM, available disk, and sleep behavior (determines local model size).
 - Exact wearable model/account and whether its data is present in Google Health API.
 - School Canvas base URL and whether personal tokens are permitted.
-- Google account type and which Calendar/Gmail scopes are acceptable.
+- Google account type (personal vs. Workspace changes what an org admin can restrict). Calendar/Gmail scopes default to `calendar.events` (read/write, matching the approval-gated event write) and `gmail.readonly`; override with `alfred google-auth --scope` if a narrower or different grant is preferred.
 - Current ChatGPT/Claude plans; ChatGPT write-capable custom MCP access is plan-dependent.
 - Phone OS and whether offline Markdown editing is important beyond Telegram; this selects the optional free vault-sync adapter.
 - Desired morning-brief time, timezone, quiet hours, and cloud-spend ceiling.
