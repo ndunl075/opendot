@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -61,6 +62,18 @@ class Memory(BaseModel):
     sensitivity: Sensitivity
 
 
+class Evidence(BaseModel):
+    id: str
+    subject_kind: str
+    subject_id: str
+    source_event_id: str | None
+    document_reference: str | None
+    source_account: str | None
+    extraction_version: str | None
+    excerpt_hash: str | None
+    created_at: datetime
+
+
 class SearchResult(BaseModel):
     entities: list[Entity] = Field(default_factory=list)
     memories: list[Memory] = Field(default_factory=list)
@@ -110,6 +123,7 @@ class MemoryGraph:
         sensitivity: Sensitivity = "personal",
         confidence: float = 1.0,
         confirmed: bool = True,
+        source_event_id: str | None = None,
         actor: str = "user:cli",
     ) -> Entity:
         """Create a durable named entity only from a confirmed registry type."""
@@ -125,6 +139,13 @@ class MemoryGraph:
                     sensitivity=sensitivity,
                     confidence=confidence,
                     confirmed=confirmed,
+                )
+                self._record_evidence(
+                    connection,
+                    subject_kind="entity",
+                    subject_id=entity.id,
+                    source_event_id=source_event_id,
+                    excerpt=label,
                 )
                 self._audit(connection, actor, "entity_create", {"entity_id": entity.id, "type": entity_type})
                 return entity
@@ -142,6 +163,7 @@ class MemoryGraph:
         sensitivity: Sensitivity = "personal",
         confidence: float = 1.0,
         confirmed: bool = True,
+        source_event_id: str | None = None,
         actor: str = "user:cli",
     ) -> Relationship:
         """Record a typed relationship and close a replaced single-valued state."""
@@ -194,6 +216,13 @@ class MemoryGraph:
                 )
                 row = connection.execute("SELECT * FROM relationships WHERE id = ?", (relationship_id,)).fetchone()
                 relationship = self._relationship_from_row(row)
+                self._record_evidence(
+                    connection,
+                    subject_kind="relationship",
+                    subject_id=relationship.id,
+                    source_event_id=source_event_id,
+                    excerpt=f"{source_entity_id} {predicate} {target_entity_id}",
+                )
                 self._audit(
                     connection,
                     actor,
@@ -248,6 +277,13 @@ class MemoryGraph:
                 connection.execute("INSERT INTO memory_fts (memory_id, statement) VALUES (?, ?)", (memory_id, normalized_statement))
                 row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
                 memory = self._memory_from_row(row)
+                self._record_evidence(
+                    connection,
+                    subject_kind="memory",
+                    subject_id=memory.id,
+                    source_event_id=source_event_id,
+                    excerpt=normalized_statement,
+                )
                 self._audit(connection, actor, "memory_create", {"memory_id": memory.id, "kind": kind})
         if self._embedding_index is not None:
             self._embedding_index.upsert(subject_kind="memory", subject_id=memory.id, text=normalized_statement)
@@ -303,6 +339,13 @@ class MemoryGraph:
                 connection.execute("INSERT INTO memory_fts (memory_id, statement) VALUES (?, ?)", (replacement_id, normalized_statement))
                 row = connection.execute("SELECT * FROM memories WHERE id = ?", (replacement_id,)).fetchone()
                 replacement = self._memory_from_row(row)
+                self._record_evidence(
+                    connection,
+                    subject_kind="memory",
+                    subject_id=replacement.id,
+                    source_event_id=existing["source_event_id"],
+                    excerpt=normalized_statement,
+                )
                 self._audit(connection, actor, "memory_supersede", {"old_memory_id": memory_id, "new_memory_id": replacement_id})
         if self._embedding_index is not None:
             self._embedding_index.upsert(subject_kind="memory", subject_id=replacement.id, text=normalized_statement)
@@ -410,6 +453,16 @@ class MemoryGraph:
             entity = self._entity_from_row(row)
             relationships = self._active_relationship_hop(connection, [entity.id], 16, outgoing_only=True, sensitivities=sensitivities)
         return entity, relationships
+
+    def evidence_for(self, subject_kind: str, subject_id: str) -> list[Evidence]:
+        """Return every raw-event link recorded for one memory, entity, or relationship."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM evidence WHERE subject_kind = ? AND subject_id = ? ORDER BY created_at",
+                (subject_kind, subject_id),
+            ).fetchall()
+        return [self._evidence_from_row(row) for row in rows]
 
     def _create_entity(
         self,
@@ -549,6 +602,51 @@ class MemoryGraph:
             confidence=row["confidence"],
             confirmed=bool(row["confirmed"]),
             sensitivity=row["sensitivity"],
+        )
+
+    @staticmethod
+    def _evidence_from_row(row: sqlite3.Row) -> Evidence:
+        return Evidence(
+            id=row["id"],
+            subject_kind=row["subject_kind"],
+            subject_id=row["subject_id"],
+            source_event_id=row["source_event_id"],
+            document_reference=row["document_reference"],
+            source_account=row["source_account"],
+            extraction_version=row["extraction_version"],
+            excerpt_hash=row["excerpt_hash"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    @staticmethod
+    def _record_evidence(
+        connection: sqlite3.Connection,
+        *,
+        subject_kind: str,
+        subject_id: str,
+        source_event_id: str | None,
+        excerpt: str,
+    ) -> None:
+        """Link a derived claim back to the raw event it came from, when one is known.
+
+        A hash of the excerpt is kept, not the excerpt itself: evidence proves
+        what was derived from what without duplicating the archive.
+        """
+        if source_event_id is None:
+            return
+        connection.execute(
+            """
+            INSERT INTO evidence (id, subject_kind, subject_id, source_event_id, excerpt_hash, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid4()),
+                subject_kind,
+                subject_id,
+                source_event_id,
+                hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
+                datetime.now(UTC).isoformat(),
+            ),
         )
 
     @staticmethod

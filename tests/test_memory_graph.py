@@ -5,6 +5,7 @@ import pytest
 
 from alfred.audit import AuditLog
 from alfred.db import Database
+from alfred.events import EventStore
 from alfred.memory_graph import GraphError, MemoryGraph
 
 
@@ -161,3 +162,76 @@ def test_correction_supersedes_memory_without_erasing_history(tmp_path: Path) ->
     assert old["status"] == "superseded"
     assert old["valid_to"] is not None
     assert history["next_status"] == "superseded"
+
+
+def _append_event(database: Database, external_id: str, content: str) -> str:
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            event = EventStore.append(
+                connection,
+                source="test",
+                external_id=external_id,
+                occurred_at=datetime(2026, 8, 11, tzinfo=UTC),
+                content=content,
+                metadata={},
+            )
+    return event.id
+
+
+def test_remember_with_a_source_event_records_evidence(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    event_id = _append_event(database, "one", "my paper is due Friday")
+    graph = MemoryGraph(database)
+
+    memory = graph.remember("Paper due Friday.", source_event_id=event_id)
+
+    evidence = graph.evidence_for("memory", memory.id)
+    assert len(evidence) == 1
+    assert evidence[0].source_event_id == event_id
+    assert evidence[0].subject_kind == "memory"
+    assert evidence[0].excerpt_hash is not None
+
+
+def test_remember_without_a_source_event_records_no_evidence(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+
+    memory = graph.remember("No provenance for this one.")
+
+    assert graph.evidence_for("memory", memory.id) == []
+
+
+def test_supersede_carries_evidence_forward_to_the_replacement(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    event_id = _append_event(database, "two", "brief time is 7am")
+    graph = MemoryGraph(database)
+    original = graph.remember("Preferred brief time is 7 AM.", source_event_id=event_id)
+
+    replacement = graph.supersede_memory(original.id, "Preferred brief time is 8 AM.")
+
+    original_evidence = graph.evidence_for("memory", original.id)
+    replacement_evidence = graph.evidence_for("memory", replacement.id)
+    assert [item.source_event_id for item in original_evidence] == [event_id]
+    assert [item.source_event_id for item in replacement_evidence] == [event_id]
+
+
+def test_entity_and_relationship_creation_record_evidence(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    entity_event = _append_event(database, "three", "I work on Alfred Capstone")
+    relation_event = _append_event(database, "four", "Nico works on Alfred Capstone")
+    graph = MemoryGraph(database)
+    owner = graph.ensure_self("Nico")
+    project = graph.create_entity(entity_type="project", label="Alfred Capstone", source_event_id=entity_event)
+
+    relationship = graph.add_relationship(
+        source_entity_id=owner.id,
+        predicate="works_on",
+        target_entity_id=project.id,
+        source_event_id=relation_event,
+    )
+
+    assert [item.source_event_id for item in graph.evidence_for("entity", project.id)] == [entity_event]
+    assert [item.source_event_id for item in graph.evidence_for("relationship", relationship.id)] == [relation_event]
+    # ensure_self was called with no source event, so it stays unevidenced.
+    assert graph.evidence_for("entity", owner.id) == []
