@@ -10,6 +10,7 @@ from typing import Sequence
 from .audit import AuditEvent, AuditLog
 from .config import Settings
 from .db import Database
+from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
 def _database_from_args(args: argparse.Namespace) -> Database:
@@ -33,6 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--result", default="{}", help="JSON object; do not include secrets")
     audit.add_argument("--correlation-id")
     subcommands.add_parser("audit-verify", help="verify the local audit hash chain")
+    telegram = subcommands.add_parser("telegram-handle", help="handle one paired Telegram update from JSON")
+    telegram_input = telegram.add_mutually_exclusive_group(required=True)
+    telegram_input.add_argument("--update", help="Telegram update JSON object")
+    telegram_input.add_argument("--update-file", type=Path, help="path to a Telegram update JSON object")
+    telegram.add_argument("--chat-id", required=True, type=int, help="locally paired Telegram chat ID")
+    telegram.add_argument("--user-id", required=True, type=int, help="locally paired Telegram user ID")
     return parser
 
 
@@ -71,6 +78,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         valid = audit_log.verify()
         print(json.dumps({"valid": valid}))
         return 0 if valid else 1
+    if args.command == "telegram-handle":
+        try:
+            update_json = args.update_file.read_text(encoding="utf-8") if args.update_file else args.update
+            update = TelegramUpdate.model_validate_json(update_json)
+        except ValueError as error:
+            raise SystemExit(f"invalid Telegram update JSON: {error}") from error
+        gateway = TelegramGateway(database, {TelegramPair(chat_id=args.chat_id, user_id=args.user_id)})
+        receipt = gateway.handle(update)
+        print(receipt.model_dump_json())
+        return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

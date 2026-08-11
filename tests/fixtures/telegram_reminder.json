@@ -1,0 +1,10 @@
+{
+  "update_id": 101,
+  "message": {
+    "message_id": 1,
+    "date": 1786198400,
+    "chat": {"id": 20},
+    "from": {"id": 10},
+    "text": "/remind 2026-08-14T09:00:00Z submit paper"
+  }
+}
