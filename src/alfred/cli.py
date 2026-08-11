@@ -18,12 +18,14 @@ from .vault import VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
+from .google_oauth import DEFAULT_SCOPES, GoogleOAuthClient, authorize_interactively
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubClient, GitHubNotificationsSync
 from .gmail import GmailClient, GmailSync
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
+from .runner import AlfredRunner, ConnectorSync
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -117,17 +119,23 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument("--chat-id", action="append", required=True, type=int, help="locally allowed destination chat ID")
     deliver.add_argument("--secret-name", default="telegram-bot-token")
     deliver.add_argument("--limit", type=int, default=20)
+    google_auth = subcommands.add_parser(
+        "google-auth",
+        help="one-time interactive OAuth grant for Calendar + Gmail; stores a refresh token locally",
+    )
+    google_auth.add_argument("--port", type=int, default=8765, help="local loopback redirect port")
+    google_auth.add_argument("--scope", action="append", default=[], help="override the default OAuth scopes")
+    google_auth.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
+    google_auth.add_argument("--timeout", type=int, default=300, help="seconds to wait for the browser redirect")
     calendar_sync = subcommands.add_parser("calendar-sync", help="read-sync Google Calendar into local source events")
     calendar_sync.add_argument("--calendar-id", default="primary")
-    calendar_sync.add_argument("--secret-name", default="google-calendar-access-token")
     calendar_sync.add_argument("--days", type=int, default=14, help="initial sync window length (1-90 days)")
     canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync Canvas upcoming and missing assignments")
     canvas_sync.add_argument("--base-url", required=True, help="your school Canvas HTTPS URL")
     canvas_sync.add_argument("--secret-name", default="canvas-api-token")
     github_sync = subcommands.add_parser("github-sync", help="read-sync unread GitHub notifications")
     github_sync.add_argument("--secret-name", default="github-token")
-    gmail_sync = subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
-    gmail_sync.add_argument("--secret-name", default="google-gmail-access-token")
+    subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
     calendar_propose = subcommands.add_parser(
         "calendar-event-propose", help="preview a calendar event write; nothing is sent to Google yet"
     )
@@ -142,7 +150,22 @@ def build_parser() -> argparse.ArgumentParser:
     calendar_execute.add_argument("--approval-id", required=True)
     calendar_execute.add_argument("--actor", required=True)
     calendar_execute.add_argument("--token", required=True)
-    calendar_execute.add_argument("--secret-name", default="google-calendar-access-token")
+    run = subcommands.add_parser(
+        "run", help="run Alfred continuously: Telegram intake/delivery, due jobs, and connector sync"
+    )
+    run.add_argument("--pair", action="append", default=[], help="locally paired CHAT_ID:USER_ID; enables Telegram intake")
+    run.add_argument(
+        "--chat-id", action="append", type=int, default=[], help="locally allowed delivery chat ID; enables Telegram delivery"
+    )
+    run.add_argument("--telegram-secret-name", default="telegram-bot-token")
+    run.add_argument("--calendar-id", default="primary")
+    run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
+    run.add_argument("--canvas-secret-name", default="canvas-api-token")
+    run.add_argument("--github-secret-name", default="github-token")
+    run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")
+    run.add_argument("--idle-sleep", type=float, default=5.0, help="seconds to rest between cycles")
+    run.add_argument("--connector-interval", type=float, default=900.0, help="minimum seconds between each connector sync")
+    run.add_argument("--iterations", type=int, help="stop after N cycles instead of running forever (mainly for testing)")
     return parser
 
 
@@ -295,11 +318,79 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(json.dumps([item.model_dump(mode="json") for item in result]))
         return 0
+    if args.command == "run":
+        pairs = frozenset(_parse_telegram_pair(value) for value in args.pair)
+        chat_ids = frozenset(args.chat_id)
+        telegram_transport = (
+            TelegramBotClient(SystemKeyringSecretStore().get_required(args.telegram_secret_name))
+            if pairs or chat_ids
+            else None
+        )
+        connectors: list[ConnectorSync] = [
+            ConnectorSync(
+                name="google_calendar",
+                interval_seconds=args.connector_interval,
+                run=lambda: _calendar_sync_once(database, args.calendar_id),
+            ),
+            ConnectorSync(
+                name="github",
+                interval_seconds=args.connector_interval,
+                run=lambda: _github_sync_once(database, args.github_secret_name),
+            ),
+            ConnectorSync(name="gmail", interval_seconds=args.connector_interval, run=lambda: _gmail_sync_once(database)),
+        ]
+        if args.canvas_base_url:
+            connectors.append(
+                ConnectorSync(
+                    name="canvas",
+                    interval_seconds=args.connector_interval,
+                    run=lambda: _canvas_sync_once(database, args.canvas_base_url, args.canvas_secret_name),
+                )
+            )
+        runner = AlfredRunner(
+            database,
+            telegram_transport=telegram_transport,
+            telegram_pairs=pairs,
+            telegram_chat_ids=chat_ids,
+            connectors=tuple(connectors),
+            poll_timeout_seconds=args.poll_timeout,
+            idle_sleep_seconds=args.idle_sleep,
+        )
+        try:
+            runner.run_forever(iterations=args.iterations)
+        except KeyboardInterrupt:
+            print("\n[alfred run] stopped")
+        finally:
+            if telegram_transport is not None:
+                telegram_transport.close()
+        return 0
+    if args.command == "google-auth":
+        secret_store = SystemKeyringSecretStore()
+        client_id = secret_store.get_required("google-oauth-client-id")
+        client_secret = secret_store.get_required("google-oauth-client-secret")
+        scopes = tuple(args.scope) if args.scope else DEFAULT_SCOPES
+        token = authorize_interactively(
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=scopes,
+            port=args.port,
+            timeout_seconds=args.timeout,
+            open_browser=not args.no_browser,
+            on_url=lambda url: print(f"Open this URL to authorize Alfred:\n{url}"),
+        )
+        if not token.refresh_token:
+            raise SystemExit(
+                "Google did not return a refresh token. Revoke Alfred's prior access at "
+                "https://myaccount.google.com/permissions and run 'alfred google-auth' again."
+            )
+        secret_store.store("google-oauth-refresh-token", token.refresh_token)
+        print(json.dumps({"granted_scopes": token.scope, "refresh_token_stored": True}))
+        return 0
     if args.command == "calendar-sync":
         if not 1 <= args.days <= 90:
             raise SystemExit("--days must be between 1 and 90")
         start, _ = default_sync_window()
-        client = GoogleCalendarClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        client = GoogleCalendarClient(_google_access_token())
         try:
             result = GoogleCalendarSync(database, client).sync(
                 calendar_id=args.calendar_id,
@@ -327,7 +418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.model_dump_json())
         return 0
     if args.command == "gmail-sync":
-        client = GmailClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        client = GmailClient(_google_access_token())
         try:
             result = GmailSync(database, client).sync()
         finally:
@@ -346,7 +437,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     if args.command == "calendar-event-execute":
-        client = GoogleCalendarClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        client = GoogleCalendarClient(_google_access_token())
         try:
             receipt = GoogleCalendarActions(database, approvals, client).execute(
                 args.approval_id, actor=args.actor, token=args.token
@@ -356,6 +447,51 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(receipt.model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
+
+
+def _google_access_token() -> str:
+    """Mint a fresh access token from the stored refresh token; never cached locally."""
+    secret_store = SystemKeyringSecretStore()
+    oauth_client = GoogleOAuthClient(
+        secret_store.get_required("google-oauth-client-id"),
+        secret_store.get_required("google-oauth-client-secret"),
+    )
+    try:
+        return oauth_client.refresh_access_token(secret_store.get_required("google-oauth-refresh-token")).access_token
+    finally:
+        oauth_client.close()
+
+
+def _calendar_sync_once(database: Database, calendar_id: str) -> None:
+    client = GoogleCalendarClient(_google_access_token())
+    try:
+        GoogleCalendarSync(database, client).sync(calendar_id=calendar_id)
+    finally:
+        client.close()
+
+
+def _canvas_sync_once(database: Database, base_url: str, secret_name: str) -> None:
+    client = CanvasClient(base_url, SystemKeyringSecretStore().get_required(secret_name))
+    try:
+        CanvasSync(database, client).sync()
+    finally:
+        client.close()
+
+
+def _github_sync_once(database: Database, secret_name: str) -> None:
+    client = GitHubClient(SystemKeyringSecretStore().get_required(secret_name))
+    try:
+        GitHubNotificationsSync(database, client).sync()
+    finally:
+        client.close()
+
+
+def _gmail_sync_once(database: Database) -> None:
+    client = GmailClient(_google_access_token())
+    try:
+        GmailSync(database, client).sync()
+    finally:
+        client.close()
 
 
 def _parse_timestamp(value: str) -> datetime:

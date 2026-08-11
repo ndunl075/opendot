@@ -10,7 +10,9 @@ a CLI, a narrow read-only stdio MCP server, a typed temporal memory graph with
 optional local vector search, an Obsidian-compatible Markdown vault, local
 Telegram polling and delivery, durable jobs with missed-run recovery,
 read-only Calendar/Canvas/GitHub/Gmail sync feeding a deterministic morning
-brief, and Alfred's first real write: an approval-gated Calendar event create.
+brief, Alfred's first real write (an approval-gated Calendar event create), a
+real Google OAuth refresh flow, and `alfred run`, a persistent process that
+ties all of the above into one always-on loop.
 
 ## Local setup
 
@@ -31,16 +33,22 @@ credential manager under service `alfred`, account `telegram-bot-token`, then ru
 `alfred telegram-poll` with explicitly paired chat/user IDs. Alfred never writes
 the token to its database, audit log, Markdown vault, or Git.
 
-Google Calendar is read-only and opt-in. It expects a short-lived access token in
-the same credential manager under service `alfred`, account
-`google-calendar-access-token`; `alfred calendar-sync` reads the primary calendar
-into local source events. The sync stores title, timing, status, and a source
-link—never event descriptions or attendee lists. Token refresh/OAuth setup is a
-later local feature, so this command does nothing until you deliberately provide
-that credential.
+Google Calendar and Gmail share one real OAuth 2.0 flow, not a hand-pasted
+access token. First, in Google Cloud Console, create an OAuth client of type
+"Desktop app" (no redirect URI to register—Alfred's local loopback flow is
+exempt) and save its client ID and secret under service `alfred`, accounts
+`google-oauth-client-id` and `google-oauth-client-secret`. Then run `alfred
+google-auth`: it opens a browser to Google's consent screen, receives the
+redirect on a local port, and stores a long-lived refresh token under
+`google-oauth-refresh-token`. Every later sync mints a fresh access token from
+that refresh token; none is cached, and no token is ever written to the
+database, audit log, Markdown vault, or Git. Re-run `google-auth` any time the
+grant is revoked.
 
-Calendar also has Alfred's first real write, and it is preview-then-confirm, not
-one step. `alfred calendar-event-propose --actor nico --summary "..." --start
+`alfred calendar-sync` reads the primary calendar into local source events—
+title, timing, status, and a source link, never event descriptions or attendee
+lists. Calendar also has Alfred's first real write, and it is preview-then-confirm,
+not one step. `alfred calendar-event-propose --actor nico --summary "..." --start
 <ISO-8601> --end <ISO-8601>` creates a local preview and never touches Google.
 Approve it with `alfred approval-approve --approval-id <ID> --actor nico`, which
 prints a one-time token, then `alfred calendar-event-execute --approval-id <ID>
@@ -61,17 +69,38 @@ notification's title, repository, reason (mention, review requested, etc.),
 subject type, and a browser deep link—never issue/PR body text or comments.
 Resolved or read notifications drop out of the next sync automatically.
 
-Gmail is also read-only and opt-in, and needs the same kind of short-lived OAuth
-access token as Calendar. Save it under service `alfred`, account
-`google-gmail-access-token`, then run `alfred gmail-sync`. It copies only the
+Gmail is also read-only and opt-in, and reuses the same `google-auth` grant as
+Calendar (the default scopes cover both). `alfred gmail-sync` copies only the
 unread inbox message's subject, sender, and Gmail's own short snippet—never the
 message body or attachments. Reading or archiving a message drops it out of the
 next sync automatically.
 
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
-Run `alfred run-due` and then `alfred telegram-deliver` from the PC's local
-scheduler; delivery is still restricted to the explicitly allowed chat IDs.
+
+## Running continuously
+
+Every command above is a one-shot CLI invocation; something still has to keep
+running them. `alfred run` is that process—the "always-on PC" service decision
+3 describes. It loops forever: each cycle handles Telegram intake/delivery and
+any due jobs (reminders, the morning brief), and each configured connector
+syncs on its own interval (15 minutes by default). A missing credential or a
+failed connector is logged to the audit trail and skipped; it never stops the
+loop or any other connector.
+
+```powershell
+.\.venv\Scripts\alfred run --pair 123:456 --chat-id 123 --canvas-base-url https://your-school.instructure.com
+```
+
+Calendar, GitHub, and Gmail sync are always attempted and simply skip
+themselves if their credential isn't configured yet; Canvas needs
+`--canvas-base-url` to be included at all. Omit `--pair`/`--chat-id` to run
+with Telegram disabled. Stop it with Ctrl+C.
+
+`alfred run` is a foreground process, not a Windows service. To keep it running
+unattended, use Windows Task Scheduler with a trigger of "At log on", running
+`pythonw.exe` against this same command—or start it manually in a terminal you
+leave open. Packaging it as an actual service is future work.
 
 ## Local memory graph
 

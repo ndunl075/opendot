@@ -1,0 +1,148 @@
+from pathlib import Path
+
+from alfred.audit import AuditLog
+from alfred.db import Database
+from alfred.outbox import Outbox
+from alfred.runner import AlfredRunner, ConnectorSync
+from alfred.telegram import TelegramPair
+
+
+class FakeTelegram:
+    def __init__(self, updates: list[dict] | None = None) -> None:
+        self.updates = updates or []
+        self.sent: list[tuple[int, str]] = []
+
+    def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
+        return [update for update in self.updates if offset is None or update.get("update_id", -1) >= offset]
+
+    def send_message(self, *, chat_id: int, text: str) -> int:
+        self.sent.append((chat_id, text))
+        return 1
+
+
+def _reminder_update() -> dict:
+    # A reminder time well in the past means the scheduled job is already
+    # due, so one run_once() cycle carries it from intake through delivery.
+    return {
+        "update_id": 1,
+        "message": {
+            "message_id": 1,
+            "date": 1_786_198_400,
+            "chat": {"id": 20},
+            "from": {"id": 10},
+            "text": "/remind 2020-01-01T09:00:00Z submit paper",
+        },
+    }
+
+
+def test_run_once_carries_a_reminder_from_intake_through_delivery(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    fake = FakeTelegram([_reminder_update()])
+    runner = AlfredRunner(
+        database,
+        telegram_transport=fake,
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        telegram_chat_ids=frozenset({20}),
+    )
+
+    report = runner.run_once()
+
+    assert report.telegram_polled is True
+    assert report.errors == []
+    assert report.jobs_executed == 1
+    # The immediate "saved" receipt and the already-due reminder both deliver in this cycle.
+    # Both land in the same outbox second, so delivery order between them is not guaranteed.
+    assert report.telegram_delivered == 2
+    assert sorted(fake.sent) == sorted(
+        [
+            (20, "Saved reminder for 2020-01-01T09:00:00+00:00: submit paper"),
+            (20, "Late reminder (scheduled 2020-01-01T09:00:00+00:00): submit paper"),
+        ]
+    )
+    assert AuditLog(database).verify() is True
+
+
+def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    runner = AlfredRunner(database)
+
+    report = runner.run_once()
+
+    assert report.telegram_polled is False
+    assert report.telegram_delivered == 0
+    assert report.errors == []
+
+
+def test_connector_sync_runs_once_per_configured_interval(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    calls: list[int] = []
+    clock = {"t": 0.0}
+    connector = ConnectorSync(name="canvas", interval_seconds=100, run=lambda: calls.append(1))
+    runner = AlfredRunner(database, connectors=(connector,), now=lambda: clock["t"])
+
+    first = runner.run_once()
+    clock["t"] = 50
+    second = runner.run_once()
+    clock["t"] = 150
+    third = runner.run_once()
+
+    assert first.connectors_synced == ["canvas"]
+    assert second.connectors_synced == []
+    assert third.connectors_synced == ["canvas"]
+    assert len(calls) == 2
+
+
+def test_a_failing_connector_does_not_stop_the_loop_or_other_connectors(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    calls: list[str] = []
+
+    def failing() -> None:
+        raise RuntimeError("boom")
+
+    def working() -> None:
+        calls.append("worked")
+
+    runner = AlfredRunner(
+        database,
+        connectors=(
+            ConnectorSync(name="broken", interval_seconds=0, run=failing),
+            ConnectorSync(name="fine", interval_seconds=0, run=working),
+        ),
+    )
+
+    report = runner.run_once()
+
+    assert calls == ["worked"]
+    assert report.connectors_synced == ["fine"]
+    assert len(report.errors) == 1
+    assert "broken" in report.errors[0]
+    assert "boom" in report.errors[0]
+    assert AuditLog(database).verify() is True
+
+
+def test_run_forever_stops_after_the_configured_iteration_count(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    sleeps: list[float] = []
+    runner = AlfredRunner(database, idle_sleep_seconds=7, sleep=sleeps.append)
+
+    runner.run_forever(iterations=3)
+
+    # Slept between cycles but not after the final one.
+    assert sleeps == [7, 7]
+
+
+def test_pending_reminder_is_delivered_even_without_a_new_telegram_message(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            Outbox.enqueue(
+                connection, destination="telegram:20", payload={"text": "already due"}, idempotency_key="preexisting"
+            )
+    fake = FakeTelegram()
+    runner = AlfredRunner(database, telegram_transport=fake, telegram_chat_ids=frozenset({20}))
+
+    report = runner.run_once()
+
+    assert report.telegram_delivered == 1
+    assert fake.sent == [(20, "already due")]
