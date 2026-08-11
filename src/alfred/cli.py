@@ -16,6 +16,9 @@ from .jobs import JobRunner
 from .memory_graph import MemoryGraph
 from .vault import VaultProjector
 from .policy import ApprovalService, PolicyStore
+from .secret_store import SystemKeyringSecretStore
+from .telegram_bot import TelegramBotClient
+from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -91,6 +94,14 @@ def build_parser() -> argparse.ArgumentParser:
     consume.add_argument("--approval-id", required=True)
     consume.add_argument("--actor", required=True)
     consume.add_argument("--token", required=True)
+    poll = subcommands.add_parser("telegram-poll", help="long-poll Telegram locally once")
+    poll.add_argument("--pair", action="append", required=True, help="locally paired CHAT_ID:USER_ID")
+    poll.add_argument("--secret-name", default="telegram-bot-token")
+    poll.add_argument("--timeout", type=int, default=25)
+    deliver = subcommands.add_parser("telegram-deliver", help="deliver local pending Telegram outbox messages")
+    deliver.add_argument("--chat-id", action="append", required=True, type=int, help="locally allowed destination chat ID")
+    deliver.add_argument("--secret-name", default="telegram-bot-token")
+    deliver.add_argument("--limit", type=int, default=20)
     return parser
 
 
@@ -207,6 +218,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "approval-consume":
         print(approvals.consume(args.approval_id, actor=args.actor, token=args.token).model_dump_json())
         return 0
+    if args.command == "telegram-poll":
+        client = TelegramBotClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            result = TelegramLongPoller(database, client, {_parse_telegram_pair(value) for value in args.pair}).poll_once(
+                timeout_seconds=args.timeout
+            )
+        finally:
+            client.close()
+        print(result.model_dump_json())
+        return 0
+    if args.command == "telegram-deliver":
+        client = TelegramBotClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            result = TelegramOutboxWorker(database, client, set(args.chat_id)).deliver_pending(limit=args.limit)
+        finally:
+            client.close()
+        print(json.dumps([item.model_dump(mode="json") for item in result]))
+        return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 
 
@@ -215,6 +244,16 @@ def _parse_timestamp(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise SystemExit("--now must include a timezone")
     return parsed
+
+
+def _parse_telegram_pair(value: str) -> TelegramPair:
+    chat_id, separator, user_id = value.partition(":")
+    if not separator:
+        raise SystemExit("--pair must be CHAT_ID:USER_ID")
+    try:
+        return TelegramPair(chat_id=int(chat_id), user_id=int(user_id))
+    except ValueError as error:
+        raise SystemExit("--pair must be CHAT_ID:USER_ID") from error
 
 
 if __name__ == "__main__":
