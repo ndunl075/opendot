@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -17,6 +17,7 @@ from .memory_graph import MemoryGraph
 from .vault import VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
+from .google_calendar import GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -102,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument("--chat-id", action="append", required=True, type=int, help="locally allowed destination chat ID")
     deliver.add_argument("--secret-name", default="telegram-bot-token")
     deliver.add_argument("--limit", type=int, default=20)
+    calendar_sync = subcommands.add_parser("calendar-sync", help="read-sync Google Calendar into local source events")
+    calendar_sync.add_argument("--calendar-id", default="primary")
+    calendar_sync.add_argument("--secret-name", default="google-calendar-access-token")
+    calendar_sync.add_argument("--days", type=int, default=14, help="initial sync window length (1-90 days)")
     return parser
 
 
@@ -235,6 +240,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             client.close()
         print(json.dumps([item.model_dump(mode="json") for item in result]))
+        return 0
+    if args.command == "calendar-sync":
+        if not 1 <= args.days <= 90:
+            raise SystemExit("--days must be between 1 and 90")
+        start, _ = default_sync_window()
+        client = GoogleCalendarClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            result = GoogleCalendarSync(database, client).sync(
+                calendar_id=args.calendar_id,
+                time_min=start,
+                time_max=start + timedelta(days=args.days),
+            )
+        finally:
+            client.close()
+        print(result.model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 
