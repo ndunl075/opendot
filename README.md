@@ -40,6 +40,11 @@ token, save it under service `alfred`, account `canvas-api-token`, then invoke
 only upcoming/missing assignment title, deadline, course label, and source link;
 grades, submissions, files, and assignment body text stay out of Alfred.
 
+To queue a daily local morning brief for a paired Telegram chat, use for example
+`alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
+Run `alfred run-due` and then `alfred telegram-deliver` from the PC's local
+scheduler; delivery is still restricted to the explicitly allowed chat IDs.
+
 ## Development rules
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior.

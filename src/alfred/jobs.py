@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pydantic import BaseModel
 
 from .audit import AuditEvent, AuditLog
+from .brief_schedule import next_daily_occurrence
+from .briefing import BriefingService
 from .db import Database
 from .outbox import Outbox
 
@@ -35,7 +37,7 @@ class JobRunner:
             with self.database.transaction(connection):
                 due_jobs = connection.execute(
                     """
-                    SELECT id, kind, next_run_at, payload_json
+                    SELECT id, kind, schedule_json, next_run_at, payload_json
                     FROM jobs
                     WHERE state = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?
                     ORDER BY next_run_at ASC, id ASC
@@ -43,33 +45,42 @@ class JobRunner:
                     (run_at.isoformat(),),
                 ).fetchall()
                 for job in due_jobs:
-                    if job["kind"] != "telegram_reminder":
-                        continue
                     scheduled_at = datetime.fromisoformat(job["next_run_at"])
                     payload = json.loads(job["payload_json"])
                     late = run_at - scheduled_at > self.late_after
-                    prefix = f"Late reminder (scheduled {scheduled_at.isoformat()}): " if late else "Reminder: "
+                    if job["kind"] == "telegram_reminder":
+                        prefix = f"Late reminder (scheduled {scheduled_at.isoformat()}): " if late else "Reminder: "
+                        text = f"{prefix}{payload['text']}"
+                        next_run_at = None
+                        state = "completed"
+                    elif job["kind"] == "telegram_morning_brief":
+                        text = BriefingService(self.database).morning_brief(run_at).render()
+                        schedule = json.loads(job["schedule_json"])
+                        next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
+                        state = "active"
+                    else:
+                        continue
                     outbox = Outbox.enqueue(
                         connection,
                         destination=f"telegram:{payload['chat_id']}",
-                        payload={"text": f"{prefix}{payload['text']}", "task_id": payload["task_id"]},
+                        payload={"text": text, "task_id": payload.get("task_id")},
                         idempotency_key=f"job-delivery:{job['id']}:{job['next_run_at']}",
                         job_id=job["id"],
                     )
                     connection.execute(
                         """
                         UPDATE jobs
-                        SET state = 'completed', next_run_at = NULL, updated_at = ?
+                        SET state = ?, next_run_at = ?, updated_at = ?
                         WHERE id = ? AND state = 'active'
                         """,
-                        (run_at.isoformat(), job["id"]),
+                        (state, next_run_at, run_at.isoformat(), job["id"]),
                     )
                     AuditLog.append_in_transaction(
                         connection,
                         AuditEvent(
                             actor="system:scheduler",
                             client="jobs",
-                            tool="reminder_deliver",
+                            tool="morning_brief_deliver" if job["kind"] == "telegram_morning_brief" else "reminder_deliver",
                             outcome="outbox_enqueued",
                             arguments={"job_id": job["id"], "scheduled_at": scheduled_at.isoformat()},
                             result={"outbox_id": outbox.id, "late": late},

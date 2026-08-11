@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -19,6 +19,7 @@ from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .canvas import CanvasClient, CanvasSync
+from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -55,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_due.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     brief = subcommands.add_parser("brief", help="render the deterministic local morning brief")
     brief.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
+    schedule_brief = subcommands.add_parser("schedule-brief", help="schedule one local daily Telegram morning brief")
+    schedule_brief.add_argument("--chat-id", required=True, type=int)
+    schedule_brief.add_argument("--at", required=True, help="local 24-hour HH:MM time")
+    schedule_brief.add_argument("--timezone", required=True, help="IANA timezone, e.g. America/New_York")
     self_node = subcommands.add_parser("memory-self", help="create Alfred's one owner identity")
     self_node.add_argument("--label", required=True)
     entity = subcommands.add_parser("memory-entity", help="create a confirmed graph entity")
@@ -167,6 +172,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "brief":
         now = _parse_timestamp(args.now) if args.now else None
         print(BriefingService(database).morning_brief(now).render())
+        return 0
+    if args.command == "schedule-brief":
+        try:
+            hour, minute = (int(value) for value in args.at.split(":"))
+            local_time = time(hour, minute)
+        except ValueError as error:
+            raise SystemExit("--at must be a valid HH:MM local time") from error
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                job_id = create_daily(connection, chat_id=args.chat_id, local_time=local_time, timezone_name=args.timezone)
+        print(json.dumps({"job_id": job_id}))
         return 0
     graph = MemoryGraph(database)
     if args.command == "memory-self":
