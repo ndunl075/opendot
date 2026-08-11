@@ -15,6 +15,7 @@ from .briefing import BriefingService
 from .jobs import JobRunner
 from .memory_graph import MemoryGraph
 from .vault import VaultProjector
+from .policy import ApprovalService, PolicyStore
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -74,6 +75,22 @@ def build_parser() -> argparse.ArgumentParser:
     export_memory = subcommands.add_parser("vault-export-memory", help="project one confirmed memory into local Markdown")
     export_memory.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_memory.add_argument("--memory-id", required=True)
+    grant = subcommands.add_parser("client-grant", help="grant a local client explicit scoped access")
+    grant.add_argument("--client-id", required=True)
+    grant.add_argument("--sensitivity", action="append", default=[])
+    grant.add_argument("--tool", action="append", default=[])
+    grant.add_argument("--allow-write", action="store_true")
+    propose = subcommands.add_parser("approval-propose", help="create a local preview approval")
+    propose.add_argument("--actor", required=True)
+    propose.add_argument("--action-type", required=True)
+    propose.add_argument("--preview", required=True, help="JSON object without secrets")
+    approve = subcommands.add_parser("approval-approve", help="approve a local preview and issue a one-time token")
+    approve.add_argument("--approval-id", required=True)
+    approve.add_argument("--actor", required=True)
+    consume = subcommands.add_parser("approval-consume", help="consume a fresh local approval token once")
+    consume.add_argument("--approval-id", required=True)
+    consume.add_argument("--actor", required=True)
+    consume.add_argument("--token", required=True)
     return parser
 
 
@@ -163,6 +180,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "vault-export-memory":
         print(VaultProjector(database, args.vault).project_memory(args.memory_id).model_dump_json())
+        return 0
+    if args.command == "client-grant":
+        print(
+            PolicyStore(database).grant(
+                client_id=args.client_id,
+                allowed_sensitivities=set(args.sensitivity),
+                allowed_tools=set(args.tool),
+                allow_write=args.allow_write,
+            ).model_dump_json()
+        )
+        return 0
+    approvals = ApprovalService(database)
+    if args.command == "approval-propose":
+        try:
+            preview = json.loads(args.preview)
+        except json.JSONDecodeError as error:
+            raise SystemExit(f"invalid preview JSON: {error.msg}") from error
+        if not isinstance(preview, dict):
+            raise SystemExit("--preview must be a JSON object")
+        print(approvals.propose(actor=args.actor, action_type=args.action_type, preview=preview).model_dump_json())
+        return 0
+    if args.command == "approval-approve":
+        print(approvals.approve(args.approval_id, actor=args.actor).model_dump_json())
+        return 0
+    if args.command == "approval-consume":
+        print(approvals.consume(args.approval_id, actor=args.actor, token=args.token).model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 

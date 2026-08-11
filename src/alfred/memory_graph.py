@@ -300,10 +300,19 @@ class MemoryGraph:
                 self._audit(connection, actor, "memory_supersede", {"old_memory_id": memory_id, "new_memory_id": replacement_id})
                 return replacement
 
-    def search(self, query: str, *, limit: int = 8) -> SearchResult:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 8,
+        allowed_sensitivities: set[str] | None = None,
+    ) -> SearchResult:
         """Use local FTS anchors, then one active graph hop as a compact context pack."""
         match_query = self._fts_query(query)
         if not match_query:
+            return SearchResult()
+        sensitivities = {"public", "personal"} if allowed_sensitivities is None else allowed_sensitivities
+        if not sensitivities:
             return SearchResult()
         self.database.migrate()
         with self.database.connect() as connection:
@@ -316,9 +325,9 @@ class MemoryGraph:
                 (match_query, limit),
             ).fetchall()
             entity_ids = [row["entity_id"] for row in entity_rows]
-            entities = self._entities_by_ids(connection, entity_ids)
-            memories = self._memories_by_ids(connection, [row["memory_id"] for row in memory_rows])
-            relationships = self._active_relationship_hop(connection, entity_ids, limit)
+            entities = self._entities_by_ids(connection, entity_ids, sensitivities)
+            memories = self._memories_by_ids(connection, [row["memory_id"] for row in memory_rows], sensitivities)
+            relationships = self._active_relationship_hop(connection, [entity.id for entity in entities], limit, sensitivities=sensitivities)
         return SearchResult(entities=entities, memories=memories, relationships=relationships)
 
     def get_entity(self, entity_id: str) -> Entity | None:
@@ -335,15 +344,16 @@ class MemoryGraph:
             row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
         return self._memory_from_row(row) if row else None
 
-    def profile(self) -> tuple[Entity | None, list[Relationship]]:
+    def profile(self, *, allowed_sensitivities: set[str] | None = None) -> tuple[Entity | None, list[Relationship]]:
         """Return the owner node and its current outgoing relationships."""
         self.database.migrate()
         with self.database.connect() as connection:
             row = connection.execute("SELECT * FROM entities WHERE entity_type = 'self'").fetchone()
-            if row is None:
+            sensitivities = {"public", "personal"} if allowed_sensitivities is None else allowed_sensitivities
+            if row is None or row["sensitivity"] not in sensitivities:
                 return None, []
             entity = self._entity_from_row(row)
-            relationships = self._active_relationship_hop(connection, [entity.id], 16, outgoing_only=True)
+            relationships = self._active_relationship_hop(connection, [entity.id], 16, outgoing_only=True, sensitivities=sensitivities)
         return entity, relationships
 
     def _create_entity(
@@ -391,21 +401,26 @@ class MemoryGraph:
         terms = re.findall(r"[\w]+", query, flags=re.UNICODE)
         return " AND ".join(f'"{term}"' for term in terms)
 
-    def _entities_by_ids(self, connection: sqlite3.Connection, ids: list[str]) -> list[Entity]:
+    def _entities_by_ids(self, connection: sqlite3.Connection, ids: list[str], sensitivities: set[str]) -> list[Entity]:
         if not ids:
             return []
         placeholders = ",".join("?" for _ in ids)
-        rows = connection.execute(f"SELECT * FROM entities WHERE id IN ({placeholders})", ids).fetchall()
+        sensitivity_placeholders = ",".join("?" for _ in sensitivities)
+        rows = connection.execute(
+            f"SELECT * FROM entities WHERE id IN ({placeholders}) AND sensitivity IN ({sensitivity_placeholders})",
+            [*ids, *sorted(sensitivities)],
+        ).fetchall()
         by_id = {row["id"]: self._entity_from_row(row) for row in rows}
         return [by_id[item_id] for item_id in ids if item_id in by_id]
 
-    def _memories_by_ids(self, connection: sqlite3.Connection, ids: list[str]) -> list[Memory]:
+    def _memories_by_ids(self, connection: sqlite3.Connection, ids: list[str], sensitivities: set[str]) -> list[Memory]:
         if not ids:
             return []
         placeholders = ",".join("?" for _ in ids)
+        sensitivity_placeholders = ",".join("?" for _ in sensitivities)
         rows = connection.execute(
-            f"SELECT * FROM memories WHERE id IN ({placeholders}) AND status NOT IN ('deleted', 'rejected')",
-            ids,
+            f"SELECT * FROM memories WHERE id IN ({placeholders}) AND sensitivity IN ({sensitivity_placeholders}) AND status NOT IN ('deleted', 'rejected')",
+            [*ids, *sorted(sensitivities)],
         ).fetchall()
         by_id = {row["id"]: self._memory_from_row(row) for row in rows}
         return [by_id[item_id] for item_id in ids if item_id in by_id]
@@ -417,15 +432,17 @@ class MemoryGraph:
         limit: int,
         *,
         outgoing_only: bool = False,
+        sensitivities: set[str],
     ) -> list[Relationship]:
         if not entity_ids:
             return []
         placeholders = ",".join("?" for _ in entity_ids)
         condition = f"source_entity_id IN ({placeholders})" if outgoing_only else f"(source_entity_id IN ({placeholders}) OR target_entity_id IN ({placeholders}))"
         params = entity_ids if outgoing_only else [*entity_ids, *entity_ids]
+        sensitivity_placeholders = ",".join("?" for _ in sensitivities)
         rows = connection.execute(
-            f"SELECT * FROM relationships WHERE valid_to IS NULL AND {condition} ORDER BY valid_from DESC LIMIT ?",
-            [*params, limit],
+            f"SELECT * FROM relationships WHERE valid_to IS NULL AND sensitivity IN ({sensitivity_placeholders}) AND {condition} ORDER BY valid_from DESC LIMIT ?",
+            [*sorted(sensitivities), *params, limit],
         ).fetchall()
         return [self._relationship_from_row(row) for row in rows]
 
