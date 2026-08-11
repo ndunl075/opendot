@@ -321,6 +321,20 @@ class MemoryGraph:
             relationships = self._active_relationship_hop(connection, entity_ids, limit)
         return SearchResult(entities=entities, memories=memories, relationships=relationships)
 
+    def get_entity(self, entity_id: str) -> Entity | None:
+        """Load one entity for a controlled projection or client response."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
+        return self._entity_from_row(row) if row else None
+
+    def get_memory(self, memory_id: str) -> Memory | None:
+        """Load one memory without exposing its raw source archive."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        return self._memory_from_row(row) if row else None
+
     def profile(self) -> tuple[Entity | None, list[Relationship]]:
         """Return the owner node and its current outgoing relationships."""
         self.database.migrate()
