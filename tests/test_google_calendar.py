@@ -3,9 +3,11 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from alfred.db import Database
-from alfred.google_calendar import GoogleCalendarClient, GoogleCalendarSync, SyncTokenExpired
+from alfred.google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, SyncTokenExpired
+from alfred.policy import ApprovalService, PolicyError
 
 
 def _event(event_id: str, updated: str, summary: str = "Study group") -> dict:
@@ -118,3 +120,62 @@ def test_http_client_uses_read_only_events_list_contract() -> None:
         client.close()
     assert events[0]["id"] == "event-3"
     assert cursor == "next"
+
+
+class FakeWriteTransport:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def create_event(self, *, calendar_id, summary, start, end):
+        self.calls.append({"calendar_id": calendar_id, "summary": summary, "start": start, "end": end})
+        return {"id": f"created-{len(self.calls)}", "htmlLink": "https://calendar.google.com/event?eid=abc"}
+
+
+def test_calendar_event_is_never_created_without_a_consumed_approval(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    transport = FakeWriteTransport()
+    actions = GoogleCalendarActions(database, approvals, transport)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+    end = datetime(2026, 8, 15, 11, 0, tzinfo=UTC)
+
+    proposed = actions.propose_event(actor="nico", calendar_id="primary", summary="Advisor meeting", start=start, end=end)
+    assert transport.calls == []  # proposing alone must never touch Google
+
+    with pytest.raises(PolicyError, match="not ready to consume"):
+        actions.execute(proposed.id, actor="nico", token="not-a-real-token")
+    assert transport.calls == []
+
+    issued = approvals.approve(proposed.id, actor="nico")
+    receipt = actions.execute(proposed.id, actor="nico", token=issued.token)
+
+    assert receipt.replayed is False
+    assert receipt.calendar_event_id == "created-1"
+    assert transport.calls == [{"calendar_id": "primary", "summary": "Advisor meeting", "start": start, "end": end}]
+    with database.connect() as connection:
+        approval_state = connection.execute("SELECT state FROM approvals WHERE id = ?", (proposed.id,)).fetchone()[0]
+    assert approval_state == "consumed"
+
+
+def test_calendar_execute_replays_the_receipt_instead_of_creating_twice(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    transport = FakeWriteTransport()
+    actions = GoogleCalendarActions(database, approvals, transport)
+    start = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+    end = datetime(2026, 8, 15, 11, 0, tzinfo=UTC)
+    proposed = actions.propose_event(actor="nico", calendar_id="primary", summary="Advisor meeting", start=start, end=end)
+    issued = approvals.approve(proposed.id, actor="nico")
+
+    first = actions.execute(proposed.id, actor="nico", token=issued.token)
+    second = actions.execute(proposed.id, actor="nico", token=issued.token)
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert second.calendar_event_id == first.calendar_event_id
+    assert len(transport.calls) == 1  # Google was only ever asked to create the event once
+
+    with pytest.raises(PolicyError, match="does not match"):
+        actions.execute(proposed.id, actor="someone-else", token=issued.token)
+    with pytest.raises(PolicyError, match="invalid"):
+        actions.execute(proposed.id, actor="nico", token="wrong-token")

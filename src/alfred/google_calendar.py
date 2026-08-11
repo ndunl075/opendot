@@ -1,7 +1,8 @@
-"""Read-only Google Calendar sync with local, privacy-minimizing storage."""
+"""Google Calendar sync (read) plus one narrowly scoped, approval-gated write."""
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -12,6 +13,7 @@ from .audit import AuditEvent, AuditLog
 from .connector_records import ConnectorRecordStore
 from .db import Database
 from .events import EventStore
+from .policy import ApprovalService, PolicyError
 
 
 class CalendarTransport(Protocol):
@@ -23,6 +25,12 @@ class CalendarTransport(Protocol):
         time_min: datetime | None,
         time_max: datetime | None,
     ) -> tuple[list[dict[str, Any]], str | None]: ...
+
+
+class CalendarWriteTransport(Protocol):
+    def create_event(
+        self, *, calendar_id: str, summary: str, start: datetime, end: datetime
+    ) -> dict[str, Any]: ...
 
 
 class SyncTokenExpired(RuntimeError):
@@ -93,6 +101,21 @@ class GoogleCalendarClient:
             if not isinstance(page_token, str):
                 raise ValueError("Google Calendar response has invalid nextPageToken")
             params["pageToken"] = page_token
+
+    def create_event(
+        self, *, calendar_id: str, summary: str, start: datetime, end: datetime
+    ) -> dict[str, Any]:
+        """Create one event; callers are responsible for approval and idempotency."""
+        response = self._client.post(
+            f"/calendars/{calendar_id}/events",
+            json={
+                "summary": summary,
+                "start": {"dateTime": _rfc3339(start)},
+                "end": {"dateTime": _rfc3339(end)},
+            },
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 class CalendarSyncResult(BaseModel):
@@ -236,6 +259,121 @@ class GoogleCalendarSync:
                     """,
                     (self.connector_name, calendar_id, reason, now),
                 )
+
+
+class CalendarEventReceipt(BaseModel):
+    calendar_event_id: str
+    html_url: str | None
+    idempotency_key: str
+    replayed: bool
+
+
+class GoogleCalendarActions:
+    """A narrowly scoped, approval-gated write: create one calendar event.
+
+    Matches the connector contract's ``propose()``/``execute()`` shape and
+    decision 8's rule that calendar writes are "preview + confirm initially".
+    Nothing reaches Google until a proposal has been explicitly approved and
+    its one-time token is presented to execute().
+    """
+
+    connector_name = "google_calendar"
+    action_type = "calendar_event_create"
+
+    def __init__(
+        self, database: Database, approvals: ApprovalService, transport: CalendarWriteTransport | None = None
+    ) -> None:
+        """``transport`` is only required for execute(); propose_event() never touches Google."""
+        self.database = database
+        self.approvals = approvals
+        self.transport = transport
+
+    def propose_event(
+        self, *, actor: str, calendar_id: str, summary: str, start: datetime, end: datetime
+    ) -> Any:
+        """Preview a calendar write without sending anything to Google yet."""
+        if end <= start:
+            raise ValueError("event end must be after start")
+        preview = {
+            "calendar_id": calendar_id,
+            "summary": summary,
+            "start": start.astimezone(UTC).isoformat(),
+            "end": end.astimezone(UTC).isoformat(),
+        }
+        return self.approvals.propose(actor=actor, action_type=self.action_type, preview=preview)
+
+    def execute(self, approval_id: str, *, actor: str, token: str) -> CalendarEventReceipt:
+        """Consume a fresh approval exactly once, then create the event idempotently.
+
+        The idempotency key is checked *before* the token is consumed, so a
+        retry after a successful run replays the stored receipt instead of
+        re-consuming an already-spent token or double-creating the event. A
+        retry that lands in the narrow window after Google accepts the write
+        but before the local receipt commits will instead fail closed with a
+        "token already consumed" error rather than risk a duplicate event;
+        that gap is a known, deliberate trade-off for this first write action.
+        """
+        self.database.migrate()
+        idempotency_key = f"{self.action_type}:{approval_id}"
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        if existing is not None:
+            self.approvals.verify(approval_id, actor=actor, token=token)
+            if existing["actor"] != actor:
+                raise PolicyError("approval actor does not match the requested action")
+            payload = json.loads(existing["payload_json"])
+            return CalendarEventReceipt(idempotency_key=idempotency_key, replayed=True, **payload)
+
+        transport = self.transport
+        if transport is None:
+            raise ValueError("execute() requires a transport to reach Google")
+        approval = self.approvals.consume(approval_id, actor=actor, token=token)
+        preview = approval.preview
+        created = transport.create_event(
+            calendar_id=preview["calendar_id"],
+            summary=preview["summary"],
+            start=datetime.fromisoformat(preview["start"]),
+            end=datetime.fromisoformat(preview["end"]),
+        )
+        event_id = created.get("id")
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("Google Calendar did not return an event id")
+        html_link = created.get("htmlLink")
+        payload = {"calendar_event_id": event_id, "html_url": html_link if isinstance(html_link, str) else None}
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """
+                    INSERT INTO action_receipts (idempotency_key, connector, action_type, approval_id, actor, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        idempotency_key,
+                        self.connector_name,
+                        self.action_type,
+                        approval_id,
+                        actor,
+                        json.dumps(payload, sort_keys=True),
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+                AuditLog.append_in_transaction(
+                    connection,
+                    AuditEvent(
+                        actor=actor,
+                        client="google_calendar",
+                        tool=self.action_type,
+                        outcome="ok",
+                        arguments={"approval_id": approval_id},
+                        result=payload,
+                        correlation_id=approval_id,
+                    ),
+                )
+        return CalendarEventReceipt(idempotency_key=idempotency_key, replayed=False, **payload)
 
 
 def default_sync_window(now: datetime | None = None) -> tuple[datetime, datetime]:

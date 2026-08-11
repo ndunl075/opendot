@@ -17,7 +17,7 @@ from .memory_graph import MemoryGraph
 from .vault import VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
-from .google_calendar import GoogleCalendarClient, GoogleCalendarSync, default_sync_window
+from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubClient, GitHubNotificationsSync
 from .gmail import GmailClient, GmailSync
@@ -128,6 +128,21 @@ def build_parser() -> argparse.ArgumentParser:
     github_sync.add_argument("--secret-name", default="github-token")
     gmail_sync = subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
     gmail_sync.add_argument("--secret-name", default="google-gmail-access-token")
+    calendar_propose = subcommands.add_parser(
+        "calendar-event-propose", help="preview a calendar event write; nothing is sent to Google yet"
+    )
+    calendar_propose.add_argument("--actor", required=True)
+    calendar_propose.add_argument("--calendar-id", default="primary")
+    calendar_propose.add_argument("--summary", required=True)
+    calendar_propose.add_argument("--start", required=True, help="ISO-8601 time with timezone")
+    calendar_propose.add_argument("--end", required=True, help="ISO-8601 time with timezone")
+    calendar_execute = subcommands.add_parser(
+        "calendar-event-execute", help="consume a fresh approval token and create the previewed event"
+    )
+    calendar_execute.add_argument("--approval-id", required=True)
+    calendar_execute.add_argument("--actor", required=True)
+    calendar_execute.add_argument("--token", required=True)
+    calendar_execute.add_argument("--secret-name", default="google-calendar-access-token")
     return parser
 
 
@@ -318,6 +333,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             client.close()
         print(result.model_dump_json())
+        return 0
+    if args.command == "calendar-event-propose":
+        start = _parse_timestamp(args.start)
+        end = _parse_timestamp(args.end)
+        # No Google credential is touched here; proposing is pure local bookkeeping.
+        actions = GoogleCalendarActions(database, approvals)
+        print(
+            actions.propose_event(
+                actor=args.actor, calendar_id=args.calendar_id, summary=args.summary, start=start, end=end
+            ).model_dump_json()
+        )
+        return 0
+    if args.command == "calendar-event-execute":
+        client = GoogleCalendarClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            receipt = GoogleCalendarActions(database, approvals, client).execute(
+                args.approval_id, actor=args.actor, token=args.token
+            )
+        finally:
+            client.close()
+        print(receipt.model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 

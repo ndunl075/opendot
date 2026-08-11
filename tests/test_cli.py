@@ -9,7 +9,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
 
     assert main(["--db", str(database_path), "init"]) == 0
     initialized = json.loads(capsys.readouterr().out)
-    assert initialized["schema_version"] == 7
+    assert initialized["schema_version"] == 8
 
     assert (
         main(
@@ -119,3 +119,30 @@ def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None
     remaining_ids = [item["id"] for item in json.loads(capsys.readouterr().out)["memories"]]
     assert corrected["id"] not in remaining_ids
     assert remaining_ids == [memory_id]
+
+
+def test_cli_proposes_a_calendar_event_without_any_google_credential(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert (
+        main(
+            [
+                "--db",
+                str(database_path),
+                "calendar-event-propose",
+                "--actor",
+                "nico",
+                "--summary",
+                "Advisor meeting",
+                "--start",
+                "2026-08-15T10:00:00-04:00",
+                "--end",
+                "2026-08-15T11:00:00-04:00",
+            ]
+        )
+        == 0
+    )
+    proposed = json.loads(capsys.readouterr().out)
+    assert proposed["action_type"] == "calendar_event_create"
+    assert proposed["preview"]["summary"] == "Advisor meeting"
+    assert proposed["state"] == "pending"

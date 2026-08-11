@@ -68,6 +68,33 @@ def test_approval_is_actor_bound_expiring_hash_backed_and_single_use(tmp_path: P
     assert AuditLog(database).verify() is True
 
 
+def test_verify_checks_a_consumed_token_without_changing_state(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    now = datetime(2026, 8, 11, 9, 0, tzinfo=UTC)
+    proposed = approvals.propose(actor="nico", action_type="calendar_event_create", preview={}, now=now)
+    issued = approvals.approve(proposed.id, actor="nico", now=now)
+    approvals.consume(issued.approval.id, actor="nico", token=issued.token, now=now)
+
+    verified = approvals.verify(issued.approval.id, actor="nico", token=issued.token)
+    assert verified.state == "consumed"
+    # A second verify still succeeds: unlike consume(), it never changes state.
+    assert approvals.verify(issued.approval.id, actor="nico", token=issued.token).state == "consumed"
+
+    with pytest.raises(PolicyError, match="does not match"):
+        approvals.verify(issued.approval.id, actor="someone-else", token=issued.token)
+    with pytest.raises(PolicyError, match="invalid"):
+        approvals.verify(issued.approval.id, actor="nico", token="wrong-token")
+
+
+def test_verify_rejects_a_never_approved_proposal(tmp_path: Path) -> None:
+    approvals = ApprovalService(Database(tmp_path / "alfred.db"))
+    proposed = approvals.propose(actor="nico", action_type="calendar_event_create", preview={})
+
+    with pytest.raises(PolicyError, match="not usable: pending"):
+        approvals.verify(proposed.id, actor="nico", token="anything")
+
+
 def test_expired_approval_cannot_be_approved(tmp_path: Path) -> None:
     approvals = ApprovalService(Database(tmp_path / "alfred.db"))
     now = datetime(2026, 8, 11, 9, 0, tzinfo=UTC)

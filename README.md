@@ -8,8 +8,9 @@ This repository implements ARCHITECTURE.md's build slices through "Daily
 secretary" and most of "Memory": SQLite migrations, an append-only audit log,
 a CLI, a narrow read-only stdio MCP server, a typed temporal memory graph with
 optional local vector search, an Obsidian-compatible Markdown vault, local
-Telegram polling and delivery, durable jobs with missed-run recovery, and
-read-only Calendar/Canvas/GitHub/Gmail sync feeding a deterministic morning brief.
+Telegram polling and delivery, durable jobs with missed-run recovery,
+read-only Calendar/Canvas/GitHub/Gmail sync feeding a deterministic morning
+brief, and Alfred's first real write: an approval-gated Calendar event create.
 
 ## Local setup
 
@@ -37,6 +38,15 @@ into local source events. The sync stores title, timing, status, and a source
 link—never event descriptions or attendee lists. Token refresh/OAuth setup is a
 later local feature, so this command does nothing until you deliberately provide
 that credential.
+
+Calendar also has Alfred's first real write, and it is preview-then-confirm, not
+one step. `alfred calendar-event-propose --actor nico --summary "..." --start
+<ISO-8601> --end <ISO-8601>` creates a local preview and never touches Google.
+Approve it with `alfred approval-approve --approval-id <ID> --actor nico`, which
+prints a one-time token, then `alfred calendar-event-execute --approval-id <ID>
+--actor nico --token <TOKEN>` consumes that token and creates the event. A retry
+with the same approval ID and token replays the stored receipt instead of
+creating a duplicate event.
 
 Canvas is also read-only and opt-in. If your school permits a personal Canvas
 token, save it under service `alfred`, account `canvas-api-token`, then invoke

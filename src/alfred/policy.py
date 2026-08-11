@@ -246,6 +246,26 @@ class ApprovalService:
                 self._audit(connection, actor, "approval_consume", {"approval_id": approval_id})
                 return consumed
 
+    def verify(self, approval_id: str, *, actor: str, token: str) -> Approval:
+        """Read-only token check that never changes state.
+
+        For connectors whose ``execute()`` must replay an idempotent action:
+        the first execute() call already consumed the token, so a retry can't
+        call consume() again, but it still must not skip authentication.
+        """
+        self.database.migrate()
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if row is None:
+            raise PolicyError("approval does not exist")
+        if row["actor"] != actor:
+            raise PolicyError("approval actor does not match the requested action")
+        if row["state"] not in {"approved", "consumed"}:
+            raise PolicyError(f"approval is not usable: {row['state']}")
+        if not secrets.compare_digest(row["token_hash"] or "", self._token_hash(token)):
+            raise PolicyError("approval token is invalid")
+        return self._approval_from_row(row)
+
     def _load_for_change(self, connection: sqlite3.Connection, approval_id: str, now: datetime) -> sqlite3.Row:
         row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
         if row is None:
