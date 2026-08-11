@@ -13,6 +13,7 @@ from .config import Settings
 from .db import Database
 from .briefing import BriefingService
 from .jobs import JobRunner
+from .memory_graph import MemoryGraph
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -47,6 +48,25 @@ def build_parser() -> argparse.ArgumentParser:
     run_due.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     brief = subcommands.add_parser("brief", help="render the deterministic local morning brief")
     brief.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
+    self_node = subcommands.add_parser("memory-self", help="create Alfred's one owner identity")
+    self_node.add_argument("--label", required=True)
+    entity = subcommands.add_parser("memory-entity", help="create a confirmed graph entity")
+    entity.add_argument("--type", required=True)
+    entity.add_argument("--label", required=True)
+    entity.add_argument("--domain", action="append", default=[])
+    relation = subcommands.add_parser("memory-relation", help="create a typed temporal graph relationship")
+    relation.add_argument("--source-id", required=True)
+    relation.add_argument("--predicate", required=True)
+    relation.add_argument("--target-id", required=True)
+    relation.add_argument("--kind", choices=("state", "event"))
+    relation.add_argument("--cardinality", choices=("single", "multi"))
+    relation.add_argument("--valid-from", help="ISO-8601 time; defaults to now")
+    relation.add_argument("--domain", action="append", default=[])
+    remember = subcommands.add_parser("remember", help="store a confirmed local memory")
+    remember.add_argument("statement")
+    remember.add_argument("--kind", default="note")
+    search = subcommands.add_parser("memory-search", help="search local memories and graph anchors")
+    search.add_argument("query")
     return parser
 
 
@@ -103,6 +123,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "brief":
         now = _parse_timestamp(args.now) if args.now else None
         print(BriefingService(database).morning_brief(now).render())
+        return 0
+    graph = MemoryGraph(database)
+    if args.command == "memory-self":
+        print(graph.ensure_self(args.label).model_dump_json())
+        return 0
+    if args.command == "memory-entity":
+        print(graph.create_entity(entity_type=args.type, label=args.label, domains=args.domain).model_dump_json())
+        return 0
+    if args.command == "memory-relation":
+        valid_from = _parse_timestamp(args.valid_from) if args.valid_from else None
+        print(
+            graph.add_relationship(
+                source_entity_id=args.source_id,
+                predicate=args.predicate,
+                target_entity_id=args.target_id,
+                relation_kind=args.kind,
+                cardinality=args.cardinality,
+                valid_from=valid_from,
+                domains=args.domain,
+            ).model_dump_json()
+        )
+        return 0
+    if args.command == "remember":
+        print(graph.remember(args.statement, kind=args.kind).model_dump_json())
+        return 0
+    if args.command == "memory-search":
+        print(graph.search(args.query).model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 
