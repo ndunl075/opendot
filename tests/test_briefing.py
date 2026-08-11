@@ -37,3 +37,24 @@ def test_morning_brief_ranks_local_tasks_and_shows_freshness(tmp_path: Path) -> 
     assert [item.title for item in brief.upcoming] == ["next week reading"]
     assert [item.title for item in brief.no_due_date] == ["organize desk"]
     assert "Freshness: local Alfred tasks checked 2026-08-14T08:00:00+00:00." in brief.render()
+
+
+def test_morning_brief_includes_only_current_canvas_missing_assignments(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (connector, account, record_type, record_id, payload_json, observed_at, active)
+                VALUES ('canvas', 'self', 'missing', '1', ?, '2026-08-14T07:00:00+00:00', 1),
+                       ('canvas', 'self', 'missing', '2', ?, '2026-08-14T07:00:00+00:00', 0)
+                """,
+                (
+                    '{"title":"Missing essay","due_at":"2026-08-10T16:00:00Z","course_name":"Writing","html_url":"https://school.example/1"}',
+                    '{"title":"Already submitted","due_at":"2026-08-11T16:00:00Z","course_name":"Writing","html_url":null}',
+                ),
+            )
+    brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+    assert [item.title for item in brief.missing_assignments] == ["Missing essay"]
+    assert "Canvas missing:\n- Missing essay" in brief.render()

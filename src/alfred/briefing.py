@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel
@@ -12,6 +13,8 @@ from .db import Database
 class BriefItem(BaseModel):
     title: str
     due_at: datetime | None
+    source: str = "Alfred task"
+    url: str | None = None
 
 
 class MorningBrief(BaseModel):
@@ -20,6 +23,7 @@ class MorningBrief(BaseModel):
     due_today: list[BriefItem]
     upcoming: list[BriefItem]
     no_due_date: list[BriefItem]
+    missing_assignments: list[BriefItem] = []
 
     def render(self) -> str:
         """Render a concise, source-explicit local brief without a model call."""
@@ -31,15 +35,19 @@ class MorningBrief(BaseModel):
             ("Overdue", self.overdue),
             ("Due today", self.due_today),
             ("Next 7 days", self.upcoming),
+            ("Canvas missing", self.missing_assignments),
             ("No due date", self.no_due_date),
         ):
             if not items:
                 continue
             lines.append(f"\n{heading}:")
-            lines.extend(
-                f"- {item.title}" + (f" ({item.due_at.isoformat()})" if item.due_at else "")
-                for item in items
-            )
+            for item in items:
+                suffix = f" ({item.due_at.isoformat()})" if item.due_at else ""
+                if item.source != "Alfred task":
+                    suffix += f" — {item.source}"
+                if item.url:
+                    suffix += f" <{item.url}>"
+                lines.append(f"- {item.title}{suffix}")
         if len(lines) == 2:
             lines.append("\nNo open tasks yet.")
         return "\n".join(lines)
@@ -57,6 +65,12 @@ class BriefingService:
             rows = connection.execute(
                 "SELECT title, due_at FROM tasks WHERE state = 'open' ORDER BY due_at IS NULL, due_at, created_at"
             ).fetchall()
+            canvas_rows = connection.execute(
+                """
+                SELECT record_type, payload_json FROM connector_records
+                WHERE connector = 'canvas' AND account = 'self' AND active = 1
+                """
+            ).fetchall()
         brief = MorningBrief(generated_at=generated_at, overdue=[], due_today=[], upcoming=[], no_due_date=[])
         end_of_window = generated_at.date() + timedelta(days=7)
         for row in rows:
@@ -70,4 +84,32 @@ class BriefingService:
                 brief.due_today.append(item)
             elif due_at.date() <= end_of_window:
                 brief.upcoming.append(item)
+        for row in canvas_rows:
+            payload = json.loads(row["payload_json"])
+            due_at = _parse_optional_timestamp(payload.get("due_at"))
+            item = BriefItem(
+                title=payload.get("title", "Untitled Canvas assignment"),
+                due_at=due_at,
+                source="Canvas",
+                url=payload.get("html_url"),
+            )
+            if row["record_type"] == "missing":
+                brief.missing_assignments.append(item)
+            elif due_at is None:
+                brief.no_due_date.append(item)
+            elif due_at < generated_at:
+                brief.overdue.append(item)
+            elif due_at.date() == generated_at.date():
+                brief.due_today.append(item)
+            elif due_at.date() <= end_of_window:
+                brief.upcoming.append(item)
+        for collection in (brief.overdue, brief.due_today, brief.upcoming, brief.missing_assignments):
+            collection.sort(key=lambda item: (item.due_at is None, item.due_at or generated_at, item.title))
         return brief
+
+
+def _parse_optional_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

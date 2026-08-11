@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel
 
 from .audit import AuditEvent, AuditLog
+from .connector_records import ConnectorRecordStore
 from .db import Database
 from .events import EventStore
 
@@ -44,12 +45,21 @@ class CanvasClient:
         )
 
     def _get_paginated(self, path: str) -> list[dict[str, Any]]:
-        response = self._client.get(path, params={"per_page": 100})
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise ValueError("Canvas response must be a list")
-        return [item for item in payload if isinstance(item, dict)]
+        items: list[dict[str, Any]] = []
+        next_url: str | None = path
+        params: dict[str, int] | None = {"per_page": 100}
+        for _ in range(100):
+            if next_url is None:
+                return items
+            response = self._client.get(next_url, params=params)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("Canvas response must be a list")
+            items.extend(item for item in payload if isinstance(item, dict))
+            next_url = response.links.get("next", {}).get("url")
+            params = None
+        raise ValueError("Canvas pagination exceeded 100 pages")
 
 
 class CanvasSyncResult(BaseModel):
@@ -80,9 +90,24 @@ class CanvasSync:
         with self.database.connect() as connection:
             with self.database.transaction(connection):
                 for kind, records in (("upcoming", upcoming), ("missing", missing)):
+                    current_records: dict[str, dict[str, Any]] = {}
                     for record in records:
-                        if EventStore.append(connection, **_normalize_assignment(record, kind)).is_new:
+                        event = _normalize_assignment(record, kind)
+                        if EventStore.append(connection, **event).is_new:
                             stored += 1
+                        current_records[str(event["metadata"]["assignment_id"])] = {
+                            "title": event["content"],
+                            "due_at": event["metadata"]["due_at"],
+                            "course_name": event["metadata"]["course_name"],
+                            "html_url": event["metadata"]["html_url"],
+                        }
+                    ConnectorRecordStore.replace_snapshot(
+                        connection,
+                        connector=self.connector_name,
+                        account=self.account_name,
+                        record_type=kind,
+                        records=current_records,
+                    )
                 self._store_success_in_transaction(connection)
                 AuditLog.append_in_transaction(
                     connection,

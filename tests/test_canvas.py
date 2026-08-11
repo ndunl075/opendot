@@ -48,6 +48,22 @@ def test_canvas_sync_stores_only_assignment_brief_fields(tmp_path: Path) -> None
         assert connection.execute("SELECT last_success_at FROM sync_state WHERE connector = 'canvas'").fetchone()[0]
 
 
+def test_canvas_snapshot_marks_resolved_missing_assignment_inactive(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    CanvasSync(database, FakeCanvas()).sync()
+
+    class ResolvedCanvas:
+        def list_assignments(self):
+            return ([], [])
+
+    CanvasSync(database, ResolvedCanvas()).sync()
+    with database.connect() as connection:
+        active = connection.execute(
+            "SELECT active FROM connector_records WHERE connector = 'canvas' AND record_type = 'missing' AND record_id = '9'"
+        ).fetchone()[0]
+    assert active == 0
+
+
 def test_canvas_client_uses_current_user_read_only_endpoints() -> None:
     seen: list[str] = []
 
