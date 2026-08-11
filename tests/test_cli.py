@@ -97,3 +97,25 @@ def test_cli_creates_and_searches_local_graph_records(tmp_path: Path, capsys) ->
     assert json.loads(capsys.readouterr().out)["predicate"] == "works_on"
     assert main(["--db", str(database_path), "memory-search", "Alfred"]) == 0
     assert json.loads(capsys.readouterr().out)["entities"][0]["id"] == project_id
+
+
+def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert main(["--db", str(database_path), "remember", "Preferred brief time is 7 AM."]) == 0
+    memory_id = json.loads(capsys.readouterr().out)["id"]
+
+    assert main(["--db", str(database_path), "memory-correct", "--memory-id", memory_id, "Preferred brief time is 8 AM."]) == 0
+    corrected = json.loads(capsys.readouterr().out)
+    assert corrected["supersedes_memory_id"] == memory_id
+    assert corrected["statement"] == "Preferred brief time is 8 AM."
+
+    assert main(["--db", str(database_path), "forget", "--memory-id", corrected["id"], "--reason", "test cleanup"]) == 0
+    forgotten = json.loads(capsys.readouterr().out)
+    assert forgotten["status"] == "deleted"
+
+    assert main(["--db", str(database_path), "memory-search", "brief time"]) == 0
+    # The forgotten (corrected) statement is gone; the superseded original stays visible as history.
+    remaining_ids = [item["id"] for item in json.loads(capsys.readouterr().out)["memories"]]
+    assert corrected["id"] not in remaining_ids
+    assert remaining_ids == [memory_id]

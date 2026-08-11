@@ -45,6 +45,16 @@ To queue a daily local morning brief for a paired Telegram chat, use for example
 Run `alfred run-due` and then `alfred telegram-deliver` from the PC's local
 scheduler; delivery is still restricted to the explicitly allowed chat IDs.
 
+## Local memory graph
+
+`alfred remember "statement"` stores a confirmed local memory; `alfred memory-search
+"query"` returns FTS anchors plus one active graph hop. Corrections never rewrite
+history: `alfred memory-correct --memory-id ID "corrected statement"` marks the old
+memory superseded and creates a new one that points back to it. `alfred forget
+--memory-id ID [--reason "..."]` is scoped, single-item deletion—it tombstones the
+memory, drops it from search, and records an audit entry, but a superseded memory
+it once replaced stays visible as history until it is separately forgotten.
+
 ## Development rules
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior.

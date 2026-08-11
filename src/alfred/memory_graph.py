@@ -300,6 +300,37 @@ class MemoryGraph:
                 self._audit(connection, actor, "memory_supersede", {"old_memory_id": memory_id, "new_memory_id": replacement_id})
                 return replacement
 
+    def forget_memory(
+        self,
+        memory_id: str,
+        *,
+        reason: str = "user requested deletion",
+        actor: str = "user:cli",
+    ) -> Memory:
+        """Scoped deletion of one memory: tombstone it, but keep raw evidence intact."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                existing = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+                if existing is None:
+                    raise GraphError(f"memory does not exist: {memory_id}")
+                if existing["status"] == "deleted":
+                    raise GraphError("memory is already deleted")
+                now = datetime.now(UTC).isoformat()
+                connection.execute(
+                    "UPDATE memories SET status = 'deleted', valid_to = ?, updated_at = ? WHERE id = ?",
+                    (now, now, memory_id),
+                )
+                connection.execute("DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,))
+                connection.execute(
+                    "INSERT INTO memory_history (id, memory_id, previous_status, next_status, actor, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (str(uuid4()), memory_id, existing["status"], "deleted", actor, reason, now),
+                )
+                row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+                memory = self._memory_from_row(row)
+                self._audit(connection, actor, "memory_forget", {"memory_id": memory_id, "reason": reason})
+                return memory
+
     def search(
         self,
         query: str,

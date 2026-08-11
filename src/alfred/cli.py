@@ -79,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
     remember.add_argument("--kind", default="note")
     search = subcommands.add_parser("memory-search", help="search local memories and graph anchors")
     search.add_argument("query")
+    correct = subcommands.add_parser("memory-correct", help="supersede a memory with a corrected statement")
+    correct.add_argument("--memory-id", required=True)
+    correct.add_argument("statement")
+    forget = subcommands.add_parser("forget", help="scoped deletion of one local memory; evidence is kept")
+    forget.add_argument("--memory-id", required=True)
+    forget.add_argument("--reason", default="user requested deletion")
     export_entity = subcommands.add_parser("vault-export-entity", help="project one entity into local Markdown")
     export_entity.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_entity.add_argument("--entity-id", required=True)
@@ -211,6 +217,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "memory-search":
         print(graph.search(args.query).model_dump_json())
+        return 0
+    if args.command == "memory-correct":
+        print(graph.supersede_memory(args.memory_id, args.statement).model_dump_json())
+        return 0
+    if args.command == "forget":
+        print(graph.forget_memory(args.memory_id, reason=args.reason).model_dump_json())
         return 0
     if args.command == "vault-export-entity":
         print(VaultProjector(database, args.vault).project_entity(args.entity_id).model_dump_json())

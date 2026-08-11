@@ -74,6 +74,39 @@ def test_fts_search_returns_memory_and_one_hop_relationship_context(tmp_path: Pa
     assert AuditLog(database).verify() is True
 
 
+def test_forget_tombstones_a_memory_and_removes_it_from_search(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    memory = graph.remember("My locker combination is 12-34-56.")
+
+    forgotten = graph.forget_memory(memory.id, reason="no longer relevant")
+
+    assert forgotten.status == "deleted"
+    assert graph.search("locker combination").memories == []
+    with database.connect() as connection:
+        row = connection.execute("SELECT valid_to FROM memories WHERE id = ?", (memory.id,)).fetchone()
+        history = connection.execute(
+            "SELECT previous_status, next_status, reason FROM memory_history WHERE memory_id = ?", (memory.id,)
+        ).fetchone()
+        fts_hit = connection.execute("SELECT COUNT(*) FROM memory_fts WHERE memory_id = ?", (memory.id,)).fetchone()[0]
+    assert row["valid_to"] is not None
+    assert history["previous_status"] == "confirmed"
+    assert history["next_status"] == "deleted"
+    assert history["reason"] == "no longer relevant"
+    assert fts_hit == 0
+    assert AuditLog(database).verify() is True
+
+
+def test_forget_rejects_an_already_deleted_memory(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    memory = graph.remember("Temporary note.")
+    graph.forget_memory(memory.id)
+
+    with pytest.raises(GraphError, match="already deleted"):
+        graph.forget_memory(memory.id)
+
+
 def test_correction_supersedes_memory_without_erasing_history(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     graph = MemoryGraph(database)
