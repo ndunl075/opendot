@@ -51,6 +51,33 @@ def test_sync_stores_minimized_immutable_calendar_events_and_cursor(tmp_path: Pa
         assert "private@example.com" not in event["metadata_json"]
         assert metadata["calendar_event_id"] == "event-1"
         assert connection.execute("SELECT cursor FROM sync_state WHERE connector = 'google_calendar'").fetchone()[0] == "cursor-1"
+        assert connection.execute(
+            "SELECT active FROM connector_records WHERE connector = 'google_calendar' AND record_id = 'event-1'"
+        ).fetchone()[0] == 1
+
+
+def test_incremental_cancelled_event_is_removed_from_current_projection(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+
+    class Changes:
+        def __init__(self):
+            self.calls = 0
+
+        def list_events(self, *, calendar_id, sync_token, time_min, time_max):
+            self.calls += 1
+            if self.calls == 1:
+                return [_event("event-4", "2026-08-12T12:00:00Z")], "cursor-4"
+            cancelled = _event("event-4", "2026-08-13T12:00:00Z")
+            cancelled["status"] = "cancelled"
+            return [cancelled], "cursor-5"
+
+    sync = GoogleCalendarSync(database, Changes())
+    sync.sync()
+    sync.sync()
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT active FROM connector_records WHERE connector = 'google_calendar' AND record_id = 'event-4'"
+        ).fetchone()[0] == 0
 
 
 def test_expired_cursor_resets_to_full_sync(tmp_path: Path) -> None:

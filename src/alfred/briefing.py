@@ -24,6 +24,7 @@ class MorningBrief(BaseModel):
     upcoming: list[BriefItem]
     no_due_date: list[BriefItem]
     missing_assignments: list[BriefItem] = []
+    calendar_today: list[BriefItem] = []
 
     def render(self) -> str:
         """Render a concise, source-explicit local brief without a model call."""
@@ -36,6 +37,7 @@ class MorningBrief(BaseModel):
             ("Due today", self.due_today),
             ("Next 7 days", self.upcoming),
             ("Canvas missing", self.missing_assignments),
+            ("Today's calendar", self.calendar_today),
             ("No due date", self.no_due_date),
         ):
             if not items:
@@ -71,6 +73,12 @@ class BriefingService:
                 WHERE connector = 'canvas' AND account = 'self' AND active = 1
                 """
             ).fetchall()
+            calendar_rows = connection.execute(
+                """
+                SELECT payload_json FROM connector_records
+                WHERE connector = 'google_calendar' AND account = 'primary' AND record_type = 'event' AND active = 1
+                """
+            ).fetchall()
         brief = MorningBrief(generated_at=generated_at, overdue=[], due_today=[], upcoming=[], no_due_date=[])
         end_of_window = generated_at.date() + timedelta(days=7)
         for row in rows:
@@ -103,7 +111,19 @@ class BriefingService:
                 brief.due_today.append(item)
             elif due_at.date() <= end_of_window:
                 brief.upcoming.append(item)
-        for collection in (brief.overdue, brief.due_today, brief.upcoming, brief.missing_assignments):
+        for row in calendar_rows:
+            payload = json.loads(row["payload_json"])
+            start = _parse_optional_timestamp(payload.get("start"))
+            if start and start.date() == generated_at.date():
+                brief.calendar_today.append(
+                    BriefItem(
+                        title=payload.get("title", "Untitled calendar event"),
+                        due_at=start,
+                        source="Google Calendar",
+                        url=payload.get("html_url"),
+                    )
+                )
+        for collection in (brief.overdue, brief.due_today, brief.upcoming, brief.missing_assignments, brief.calendar_today):
             collection.sort(key=lambda item: (item.due_at is None, item.due_at or generated_at, item.title))
         return brief
 

@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel
 
 from .audit import AuditEvent, AuditLog
+from .connector_records import ConnectorRecordStore
 from .db import Database
 from .events import EventStore
 
@@ -143,10 +144,41 @@ class GoogleCalendarSync:
         stored = 0
         with self.database.connect() as connection:
             with self.database.transaction(connection):
+                current_records: dict[str, dict[str, Any]] = {}
                 for item in items:
                     event = _normalize_event(item, calendar_id)
                     if EventStore.append(connection, **event).is_new:
                         stored += 1
+                    metadata = event["metadata"]
+                    current_records[metadata["calendar_event_id"]] = {
+                        "title": event["content"],
+                        "start": metadata["start"],
+                        "end": metadata["end"],
+                        "html_url": metadata["html_link"],
+                    }
+                if cursor is None or reset_cursor:
+                    ConnectorRecordStore.replace_snapshot(
+                        connection,
+                        connector=self.connector_name,
+                        account=calendar_id,
+                        record_type="event",
+                        records={
+                            record_id: payload
+                            for record_id, payload in current_records.items()
+                            if _event_status(items, record_id) != "cancelled"
+                        },
+                    )
+                else:
+                    for record_id, payload in current_records.items():
+                        ConnectorRecordStore.upsert(
+                            connection,
+                            connector=self.connector_name,
+                            account=calendar_id,
+                            record_type="event",
+                            record_id=record_id,
+                            payload=payload,
+                            active=_event_status(items, record_id) != "cancelled",
+                        )
                 self._store_success_in_transaction(connection, calendar_id, next_cursor)
                 AuditLog.append_in_transaction(
                     connection,
@@ -247,3 +279,11 @@ def _event_time(value: Any) -> str | None:
 
 def _rfc3339(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _event_status(items: list[dict[str, Any]], event_id: str) -> str | None:
+    for item in items:
+        if item.get("id") == event_id:
+            status = item.get("status")
+            return status if isinstance(status, str) else None
+    return None

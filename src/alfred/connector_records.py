@@ -37,3 +37,35 @@ class ConnectorRecordStore:
                 """,
                 (connector, account, record_type, record_id, json.dumps(payload, sort_keys=True), observed_at),
             )
+
+    @staticmethod
+    def upsert(
+        connection: sqlite3.Connection,
+        *,
+        connector: str,
+        account: str,
+        record_type: str,
+        record_id: str,
+        payload: dict[str, Any],
+        active: bool,
+    ) -> None:
+        observed_at = datetime.now(UTC).isoformat()
+        connection.execute(
+            """
+            INSERT INTO connector_records (connector, account, record_type, record_id, payload_json, observed_at, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(connector, account, record_type, record_id) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                observed_at = excluded.observed_at,
+                active = excluded.active
+            """,
+            (
+                connector,
+                account,
+                record_type,
+                record_id,
+                json.dumps(payload, sort_keys=True),
+                observed_at,
+                int(active),
+            ),
+        )
