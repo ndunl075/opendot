@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel
 
 from .audit import AuditEvent, AuditLog
+from .connector_records import ConnectorRecordStore
 from .db import Database
-from .memory_graph import Entity, GraphError, Memory, MemoryGraph
+from .events import EventStore
+from .memory_graph import Entity, GraphError, Memory, MemoryGraph, Sensitivity
 
 
 class VaultError(ValueError):
@@ -124,3 +128,151 @@ class VaultProjector:
             f"# {slug.title()}\n\n"
             f"{memory.statement}\n"
         )
+
+
+class VaultImportResult(BaseModel):
+    scanned: int
+    imported: int
+    updated: int
+    skipped: int
+
+
+class VaultImporter:
+    """Read-only import: user-authored Markdown becomes confirmed, evidence-backed memory.
+
+    This is the missing half of Section 5's vault sync, but it is a scan you
+    call periodically (via the CLI, or as a connector in AlfredRunner), not
+    an OS-level file watcher -- no inotify/ReadDirectoryChangesW is involved,
+    so a change is only picked up on the next sync(). Each import hashes the
+    note, appends a file event, and proposes (here, directly creates, since
+    the owner authoring a note in their own vault already counts as an
+    explicit statement) a memory from it. Alfred never writes back to an
+    imported file -- identity and change detection live entirely in Alfred's
+    own connector_records, keyed by the file's path relative to the vault
+    root -- so importing can never overwrite user prose. Deleting a note does
+    not delete the memory it produced; only the explicit `forget` command
+    does that, per the doc's "does not secretly erase" rule.
+    """
+
+    connector_name = "obsidian_vault"
+
+    def __init__(self, database: Database, vault_root: Path | str) -> None:
+        self.database = database
+        self.graph = MemoryGraph(database)
+        self.vault_root = Path(vault_root).resolve()
+
+    def sync(self, *, actor: str = "user:vault") -> VaultImportResult:
+        """Import every changed, non-generated note; unreadable or empty notes are skipped."""
+        self.database.migrate()
+        account = str(self.vault_root)
+        scanned = imported = updated = skipped = 0
+        for path in self._eligible_files():
+            scanned += 1
+            outcome = self._import_one(path, account=account, actor=actor)
+            if outcome == "imported":
+                imported += 1
+            elif outcome == "updated":
+                updated += 1
+            elif outcome == "skipped":
+                skipped += 1
+            # "unchanged" contributes only to `scanned`.
+        return VaultImportResult(scanned=scanned, imported=imported, updated=updated, skipped=skipped)
+
+    def _import_one(self, path: Path, *, account: str, actor: str) -> str:
+        raw = path.read_text(encoding="utf-8")
+        frontmatter, body = _split_frontmatter(raw)
+        if frontmatter.get("managed") == "true":
+            return "skipped"  # Alfred's own generated output; never re-imported as testimony.
+        statement = body.strip()
+        if not statement:
+            return "skipped"
+        content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        record_id = path.relative_to(self.vault_root).as_posix()
+        with self.database.connect() as connection:
+            previous_row = connection.execute(
+                "SELECT payload_json FROM connector_records WHERE connector = ? AND account = ? AND record_type = 'note' AND record_id = ?",
+                (self.connector_name, account, record_id),
+            ).fetchone()
+        previous = json.loads(previous_row["payload_json"]) if previous_row else None
+        if previous is not None and previous.get("hash") == content_hash:
+            return "unchanged"
+
+        frontmatter_sensitivity = frontmatter.get("sensitivity")
+        sensitivity: Sensitivity = (
+            cast(Sensitivity, frontmatter_sensitivity)
+            if frontmatter_sensitivity in {"public", "personal", "sensitive", "secret"}
+            else "personal"
+        )
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                event = EventStore.append(
+                    connection,
+                    source=self.connector_name,
+                    external_id=f"{record_id}:{content_hash}",
+                    occurred_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
+                    content=statement[:200],
+                    metadata={"path": record_id, "hash": content_hash},
+                    sensitivity=sensitivity,
+                )
+
+        outcome = "imported"
+        memory: Memory | None = None
+        if previous is not None and previous.get("memory_id"):
+            try:
+                memory = self.graph.supersede_memory(previous["memory_id"], statement, actor=actor)
+                outcome = "updated"
+            except GraphError:
+                memory = None  # the prior memory was forgotten; treat this as a fresh import
+        if memory is None:
+            memory = self.graph.remember(
+                statement,
+                kind="vault_note",
+                source_event_id=event.id,
+                sensitivity=sensitivity,
+                actor=actor,
+            )
+            outcome = "imported"
+
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                ConnectorRecordStore.upsert(
+                    connection,
+                    connector=self.connector_name,
+                    account=account,
+                    record_type="note",
+                    record_id=record_id,
+                    payload={"hash": content_hash, "memory_id": memory.id},
+                    active=True,
+                )
+        self._audit(actor, "vault_import_note", {"path": record_id, "outcome": outcome})
+        return outcome
+
+    def _eligible_files(self) -> list[Path]:
+        """Every Markdown file is scanned; ``managed: true`` frontmatter decides exclusion.
+
+        A folder-based Generated/ exclusion would miss a managed block written
+        elsewhere, and every file VaultProjector writes already carries
+        ``managed: true``, so that single marker is the correct and complete
+        signal -- not the folder it happens to live in.
+        """
+        return sorted(self.vault_root.rglob("*.md"))
+
+    def _audit(self, actor: str, tool: str, result: dict[str, str]) -> None:
+        AuditLog(self.database).append(
+            AuditEvent(actor=actor, client="vault", tool=tool, outcome="ok", result=result)
+        )
+
+
+def _split_frontmatter(raw: str) -> tuple[dict[str, str], str]:
+    """Parse the simple key: value frontmatter block VaultProjector itself writes."""
+    if not raw.startswith("---\n"):
+        return {}, raw
+    end = raw.find("\n---\n", 4)
+    if end == -1:
+        return {}, raw
+    frontmatter: dict[str, str] = {}
+    for line in raw[4:end].splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            frontmatter[key.strip()] = value.strip()
+    return frontmatter, raw[end + 5 :]

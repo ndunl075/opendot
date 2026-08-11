@@ -15,7 +15,7 @@ from .db import Database
 from .briefing import BriefingService
 from .jobs import JobRunner
 from .memory_graph import MemoryGraph
-from .vault import VaultProjector
+from .vault import VaultImporter, VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
@@ -97,6 +97,10 @@ def build_parser() -> argparse.ArgumentParser:
     export_memory = subcommands.add_parser("vault-export-memory", help="project one confirmed memory into local Markdown")
     export_memory.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_memory.add_argument("--memory-id", required=True)
+    import_vault = subcommands.add_parser(
+        "vault-import", help="import changed user-authored vault notes as confirmed memories"
+    )
+    import_vault.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     grant = subcommands.add_parser("client-grant", help="grant a local client explicit scoped access")
     grant.add_argument("--client-id", required=True)
     grant.add_argument("--sensitivity", action="append", default=[])
@@ -164,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
     run.add_argument("--canvas-secret-name", default="canvas-api-token")
     run.add_argument("--github-secret-name", default="github-token")
+    run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
     run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")
     run.add_argument("--idle-sleep", type=float, default=5.0, help="seconds to rest between cycles")
     run.add_argument("--connector-interval", type=float, default=900.0, help="minimum seconds between each connector sync")
@@ -279,6 +284,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "vault-export-memory":
         print(VaultProjector(database, args.vault).project_memory(args.memory_id).model_dump_json())
         return 0
+    if args.command == "vault-import":
+        print(VaultImporter(database, args.vault).sync().model_dump_json())
+        return 0
     if args.command == "client-grant":
         print(
             PolicyStore(database).grant(
@@ -350,6 +358,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     name="canvas",
                     interval_seconds=args.connector_interval,
                     run=lambda: _canvas_sync_once(database, args.canvas_base_url, args.canvas_secret_name),
+                )
+            )
+        if args.vault:
+            connectors.append(
+                ConnectorSync(
+                    name="obsidian_vault",
+                    interval_seconds=args.connector_interval,
+                    run=lambda: VaultImporter(database, args.vault).sync(),
                 )
             )
         runner = AlfredRunner(

@@ -7,12 +7,13 @@ interfaces.
 This repository implements ARCHITECTURE.md's build slices through "Daily
 secretary" and most of "Memory": SQLite migrations, an append-only audit log,
 a CLI, a policy-gated stdio MCP server, a typed temporal memory graph with
-optional local vector search, an Obsidian-compatible Markdown vault, local
-Telegram polling and delivery, durable jobs with missed-run recovery,
-read-only Calendar/Canvas/GitHub/Gmail sync feeding a deterministic morning
-brief, Alfred's first real write (an approval-gated Calendar event create), a
-real Google OAuth refresh flow, and `alfred run`, a persistent process that
-ties all of the above into one always-on loop.
+optional local vector search and evidence-backed provenance, a two-way
+Obsidian-compatible Markdown vault, local Telegram polling and delivery,
+durable jobs with missed-run recovery, read-only Calendar/Canvas/GitHub/Gmail
+sync feeding a deterministic morning brief, Alfred's first real write (an
+approval-gated Calendar event create), a real Google OAuth refresh flow, and
+`alfred run`, a persistent process that ties all of the above into one
+always-on loop.
 
 ## Local setup
 
@@ -116,6 +117,27 @@ memory superseded and creates a new one that points back to it. `alfred forget
 --memory-id ID [--reason "..."]` is scoped, single-item deletion—it tombstones the
 memory, drops it from search, and records an audit entry, but a superseded memory
 it once replaced stays visible as history until it is separately forgotten.
+
+## Obsidian vault
+
+`alfred vault-export-entity --entity-id ID` and `alfred vault-export-memory
+--memory-id ID` (both take `--vault PATH`, default `alfred-vault`) project one
+graph record into `Generated/`—plain, portable Markdown with an `alfred_id` and
+`managed: true` in frontmatter. A hand-edited file in that path is never
+silently overwritten; it's preserved and the projection instead becomes an
+`.alfred-conflict-<timestamp>.md` copy for review.
+
+`alfred vault-import --vault PATH` reads the other direction: any user-authored
+note anywhere in the vault (not just `Generated/`) becomes a confirmed,
+evidence-backed memory, since the owner writing something in their own vault
+already counts as an explicit statement. It's a scan you call periodically—via
+the CLI, or automatically as a connector when `alfred run` is given `--vault`—
+not an OS-level file watcher, so a change is only picked up on the next sync.
+Alfred never writes back to an imported file; change detection is tracked
+entirely in Alfred's own database by content hash, so editing a note supersedes
+its memory (the old version stays visible as history) and deleting a note from
+disk does not delete the memory it produced—only `forget` does that. Files
+Alfred itself generated (`managed: true`) are never re-imported as testimony.
 
 ## MCP server
 
