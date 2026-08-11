@@ -20,6 +20,7 @@ from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubClient, GitHubNotificationsSync
+from .gmail import GmailClient, GmailSync
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
@@ -125,6 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
     canvas_sync.add_argument("--secret-name", default="canvas-api-token")
     github_sync = subcommands.add_parser("github-sync", help="read-sync unread GitHub notifications")
     github_sync.add_argument("--secret-name", default="github-token")
+    gmail_sync = subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
+    gmail_sync.add_argument("--secret-name", default="google-gmail-access-token")
     return parser
 
 
@@ -304,6 +307,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
         try:
             result = GitHubNotificationsSync(database, client).sync()
+        finally:
+            client.close()
+        print(result.model_dump_json())
+        return 0
+    if args.command == "gmail-sync":
+        client = GmailClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            result = GmailSync(database, client).sync()
         finally:
             client.close()
         print(result.model_dump_json())

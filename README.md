@@ -9,7 +9,7 @@ secretary" and most of "Memory": SQLite migrations, an append-only audit log,
 a CLI, a narrow read-only stdio MCP server, a typed temporal memory graph with
 optional local vector search, an Obsidian-compatible Markdown vault, local
 Telegram polling and delivery, durable jobs with missed-run recovery, and
-read-only Calendar/Canvas/GitHub sync feeding a deterministic morning brief.
+read-only Calendar/Canvas/GitHub/Gmail sync feeding a deterministic morning brief.
 
 ## Local setup
 
@@ -50,6 +50,13 @@ access token (notifications: read) under service `alfred`, account
 notification's title, repository, reason (mention, review requested, etc.),
 subject type, and a browser deep link—never issue/PR body text or comments.
 Resolved or read notifications drop out of the next sync automatically.
+
+Gmail is also read-only and opt-in, and needs the same kind of short-lived OAuth
+access token as Calendar. Save it under service `alfred`, account
+`google-gmail-access-token`, then run `alfred gmail-sync`. It copies only the
+unread inbox message's subject, sender, and Gmail's own short snippet—never the
+message body or attachments. Reading or archiving a message drops it out of the
+next sync automatically.
 
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
