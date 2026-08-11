@@ -58,6 +58,7 @@ class Memory(BaseModel):
     supersedes_memory_id: str | None
     confidence: float
     confirmed: bool
+    sensitivity: Sensitivity
 
 
 class SearchResult(BaseModel):
@@ -547,6 +548,7 @@ class MemoryGraph:
             supersedes_memory_id=row["supersedes_memory_id"],
             confidence=row["confidence"],
             confirmed=bool(row["confirmed"]),
+            sensitivity=row["sensitivity"],
         )
 
     @staticmethod

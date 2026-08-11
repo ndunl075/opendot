@@ -6,7 +6,7 @@ interfaces.
 
 This repository implements ARCHITECTURE.md's build slices through "Daily
 secretary" and most of "Memory": SQLite migrations, an append-only audit log,
-a CLI, a narrow read-only stdio MCP server, a typed temporal memory graph with
+a CLI, a policy-gated stdio MCP server, a typed temporal memory graph with
 optional local vector search, an Obsidian-compatible Markdown vault, local
 Telegram polling and delivery, durable jobs with missed-run recovery,
 read-only Calendar/Canvas/GitHub/Gmail sync feeding a deterministic morning
@@ -112,6 +112,21 @@ memory superseded and creates a new one that points back to it. `alfred forget
 memory, drops it from search, and records an audit entry, but a superseded memory
 it once replaced stays visible as history until it is separately forgotten.
 
+## MCP server
+
+`alfred-mcp` runs Alfred's stdio MCP server for Claude Desktop/Code, Cursor,
+and other local MCP clients. Every tool is default-deny: a client gets nothing
+until explicitly granted, e.g. `alfred client-grant --client-id local-mcp
+--sensitivity public --sensitivity personal --tool memory_search --tool
+remember --tool forget --tool brief_get --tool connector_status --allow-write`.
+Current tools: `system_status`, `agenda_get`, `memory_search`, `profile_get`,
+`remember`, `forget`, `brief_get`, and `connector_status`. `remember`/`forget`
+additionally check the requested memory's sensitivity against the client's
+own scope, so a client granted only `public`/`personal` cannot write or erase
+a `secret` memory even with `--allow-write`. Consequential external actions
+(`message_draft`, `action_commit`—the calendar write, sending a message) are
+not on the MCP surface yet; they exist today only as CLI commands.
+
 ## Local vector search (optional)
 
 `MemoryGraph` accepts an optional `embedding_provider`. Without one, `memory-search`
@@ -129,8 +144,10 @@ server wires a live provider in yet—that's local configuration, not core behav
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior.
 - Keep the database as the source of truth; transports do not contain business logic.
 - Do not place credentials, raw personal data, or local databases in Git.
-- Consequential external actions require a later approval layer; this first MCP
-  surface is read-only.
+- Every MCP tool is gated by `PolicyStore`; an unregistered or narrowly scoped
+  client gets nothing by default. Consequential external actions (calendar
+  writes, sending messages) are not on the MCP surface yet—only local, already
+  approval-gated writes like `remember`/`forget` are.
 
 ## License
 

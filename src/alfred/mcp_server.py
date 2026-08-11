@@ -1,20 +1,31 @@
-"""Narrow stdio MCP surface for the walking skeleton."""
+"""Narrow stdio MCP surface, growing toward ARCHITECTURE.md section 7."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
 from .briefing import BriefingService
 from .config import Settings
 from .db import Database
-from .memory_graph import MemoryGraph
-from .policy import PolicyStore
+from .memory_graph import GraphError, MemoryGraph, Sensitivity
+from .policy import PolicyError, PolicyStore
+
+ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
 
 
 def create_server(database_path: Path | str | None = None, *, client_id: str = "local-mcp") -> FastMCP:
-    """Create a read-only server; actions arrive only after policy work exists."""
+    """Create Alfred's MCP server: local memory reads/writes and connector status.
+
+    Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
+    client gets nothing by default. Consequential external actions (calendar
+    writes, sending messages) are not exposed here yet -- action_commit and
+    message_draft need their own careful pass at how a stateless MCP tool
+    call should present a two-step propose/approve/execute flow.
+    """
     settings = Settings.from_environment(Path(database_path) if database_path else None)
     database = Database(settings.database_path)
     policy = PolicyStore(database)
@@ -45,6 +56,49 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             "owner": owner.model_dump(mode="json") if owner else None,
             "relationships": [relationship.model_dump(mode="json") for relationship in relationships],
         }
+
+    @server.tool()
+    def remember(statement: str, kind: str = "note", sensitivity: str = "personal") -> dict:
+        """Store a confirmed local memory; the calling client is recorded as actor."""
+        if sensitivity not in ALLOWED_SENSITIVITIES:
+            raise ValueError(f"unknown sensitivity: {sensitivity}")
+        scope = policy.require_write(client_id, "remember")
+        if sensitivity not in scope.allowed_sensitivities:
+            raise PolicyError(f"client is not scoped to write sensitivity: {sensitivity}")
+        memory = MemoryGraph(database).remember(
+            statement, kind=kind, sensitivity=cast(Sensitivity, sensitivity), actor=f"mcp:{client_id}"
+        )
+        return memory.model_dump(mode="json")
+
+    @server.tool()
+    def forget(memory_id: str, reason: str = "user requested deletion") -> dict:
+        """Scoped deletion of one memory the caller can see; evidence and audit are kept."""
+        scope = policy.require_write(client_id, "forget")
+        graph = MemoryGraph(database)
+        existing = graph.get_memory(memory_id)
+        if existing is None:
+            raise GraphError(f"memory does not exist: {memory_id}")
+        if existing.sensitivity not in scope.allowed_sensitivities:
+            raise PolicyError(f"client is not scoped to forget sensitivity: {existing.sensitivity}")
+        memory = graph.forget_memory(memory_id, reason=reason, actor=f"mcp:{client_id}")
+        return memory.model_dump(mode="json")
+
+    @server.tool()
+    def brief_get(now: str | None = None) -> str:
+        """Render the deterministic local morning brief on demand, not just on schedule."""
+        policy.require_read(client_id, "brief_get")
+        parsed = datetime.fromisoformat(now) if now else None
+        return BriefingService(database).morning_brief(parsed).render()
+
+    @server.tool()
+    def connector_status() -> list[dict]:
+        """Report each connector's last sync outcome; never its credentials or synced content."""
+        policy.require_read(client_id, "connector_status")
+        with database.connect() as connection:
+            rows = connection.execute(
+                "SELECT connector, account, last_success_at, last_error, updated_at FROM sync_state ORDER BY connector, account"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     return server
 
