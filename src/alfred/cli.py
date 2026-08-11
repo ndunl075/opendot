@@ -18,6 +18,7 @@ from .vault import VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarClient, GoogleCalendarSync, default_sync_window
+from .canvas import CanvasClient, CanvasSync
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -107,6 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     calendar_sync.add_argument("--calendar-id", default="primary")
     calendar_sync.add_argument("--secret-name", default="google-calendar-access-token")
     calendar_sync.add_argument("--days", type=int, default=14, help="initial sync window length (1-90 days)")
+    canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync Canvas upcoming and missing assignments")
+    canvas_sync.add_argument("--base-url", required=True, help="your school Canvas HTTPS URL")
+    canvas_sync.add_argument("--secret-name", default="canvas-api-token")
     return parser
 
 
@@ -252,6 +256,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 time_min=start,
                 time_max=start + timedelta(days=args.days),
             )
+        finally:
+            client.close()
+        print(result.model_dump_json())
+        return 0
+    if args.command == "canvas-sync":
+        client = CanvasClient(args.base_url, SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            result = CanvasSync(database, client).sync()
         finally:
             client.close()
         print(result.model_dump_json())

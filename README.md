@@ -34,6 +34,12 @@ link—never event descriptions or attendee lists. Token refresh/OAuth setup is 
 later local feature, so this command does nothing until you deliberately provide
 that credential.
 
+Canvas is also read-only and opt-in. If your school permits a personal Canvas
+token, save it under service `alfred`, account `canvas-api-token`, then invoke
+`alfred canvas-sync --base-url https://your-school.instructure.com`. It copies
+only upcoming/missing assignment title, deadline, course label, and source link;
+grades, submissions, files, and assignment body text stay out of Alfred.
+
 ## Development rules
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior.
