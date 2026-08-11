@@ -54,7 +54,10 @@ class JobRunner:
                         next_run_at = None
                         state = "completed"
                     elif job["kind"] == "telegram_morning_brief":
-                        text = BriefingService(self.database).morning_brief(run_at).render()
+                        brief_service = BriefingService(self.database)
+                        text = brief_service.morning_brief(
+                            run_at, scheduled_at=scheduled_at if late else None
+                        ).render()
                         schedule = json.loads(job["schedule_json"])
                         next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                         state = "active"

@@ -29,6 +29,28 @@ def test_daily_schedule_uses_wall_clock_timezone_and_recovers_to_next_run(tmp_pa
     assert job["state"] == "active"
     assert datetime.fromisoformat(job["next_run_at"]) == datetime(2026, 8, 15, 11, 30, tzinfo=UTC)
     assert message["text"].startswith("Morning brief")
+    assert "Note: delivered late (scheduled 2026-08-14T11:30:00+00:00" in message["text"]
+
+
+def test_on_time_daily_brief_carries_no_late_note(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            create_daily(
+                connection,
+                chat_id=20,
+                local_time=time(7, 30),
+                timezone_name="America/New_York",
+                now=datetime(2026, 8, 14, 11, 0, tzinfo=UTC),
+            )
+
+    executed = JobRunner(Database(database.path)).run_due(datetime(2026, 8, 14, 11, 30, tzinfo=UTC))
+
+    assert executed[0].late is False
+    with database.connect() as connection:
+        message = json.loads(connection.execute("SELECT payload_json FROM outbox").fetchone()[0])
+    assert "Note: delivered late" not in message["text"]
 
 
 def test_next_daily_occurrence_handles_a_late_run_without_replaying_every_missed_day() -> None:

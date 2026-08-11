@@ -25,6 +25,7 @@ class MorningBrief(BaseModel):
     no_due_date: list[BriefItem]
     missing_assignments: list[BriefItem] = []
     calendar_today: list[BriefItem] = []
+    scheduled_at: datetime | None = None
 
     def render(self) -> str:
         """Render a concise, source-explicit local brief without a model call."""
@@ -32,6 +33,9 @@ class MorningBrief(BaseModel):
             f"Morning brief — {self.generated_at.date().isoformat()}",
             f"Freshness: local Alfred tasks checked {self.generated_at.isoformat()}.",
         ]
+        if self.scheduled_at is not None:
+            lines.append(f"Note: delivered late (scheduled {self.scheduled_at.isoformat()}, sent after a missed run).")
+        empty_length = len(lines)
         for heading, items in (
             ("Overdue", self.overdue),
             ("Due today", self.due_today),
@@ -50,7 +54,7 @@ class MorningBrief(BaseModel):
                 if item.url:
                     suffix += f" <{item.url}>"
                 lines.append(f"- {item.title}{suffix}")
-        if len(lines) == 2:
+        if len(lines) == empty_length:
             lines.append("\nNo open tasks yet.")
         return "\n".join(lines)
 
@@ -59,8 +63,12 @@ class BriefingService:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def morning_brief(self, now: datetime | None = None) -> MorningBrief:
-        """Rank locally owned open tasks by deadline without any LLM dependency."""
+    def morning_brief(self, now: datetime | None = None, *, scheduled_at: datetime | None = None) -> MorningBrief:
+        """Rank locally owned open tasks by deadline without any LLM dependency.
+
+        ``scheduled_at`` is set only when this run is a late/missed-run recovery,
+        so the rendered brief can disclose the delay to the reader.
+        """
         generated_at = (now or datetime.now(UTC)).astimezone(UTC)
         self.database.migrate()
         with self.database.connect() as connection:
@@ -79,7 +87,9 @@ class BriefingService:
                 WHERE connector = 'google_calendar' AND account = 'primary' AND record_type = 'event' AND active = 1
                 """
             ).fetchall()
-        brief = MorningBrief(generated_at=generated_at, overdue=[], due_today=[], upcoming=[], no_due_date=[])
+        brief = MorningBrief(
+            generated_at=generated_at, scheduled_at=scheduled_at, overdue=[], due_today=[], upcoming=[], no_due_date=[]
+        )
         end_of_window = generated_at.date() + timedelta(days=7)
         for row in rows:
             due_at = datetime.fromisoformat(row["due_at"]) if row["due_at"] else None
