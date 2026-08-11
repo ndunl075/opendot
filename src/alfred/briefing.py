@@ -25,6 +25,7 @@ class MorningBrief(BaseModel):
     no_due_date: list[BriefItem]
     missing_assignments: list[BriefItem] = []
     calendar_today: list[BriefItem] = []
+    github_notifications: list[BriefItem] = []
     scheduled_at: datetime | None = None
 
     def render(self) -> str:
@@ -42,6 +43,7 @@ class MorningBrief(BaseModel):
             ("Next 7 days", self.upcoming),
             ("Canvas missing", self.missing_assignments),
             ("Today's calendar", self.calendar_today),
+            ("GitHub notifications", self.github_notifications),
             ("No due date", self.no_due_date),
         ):
             if not items:
@@ -85,6 +87,12 @@ class BriefingService:
                 """
                 SELECT payload_json FROM connector_records
                 WHERE connector = 'google_calendar' AND account = 'primary' AND record_type = 'event' AND active = 1
+                """
+            ).fetchall()
+            github_rows = connection.execute(
+                """
+                SELECT payload_json FROM connector_records
+                WHERE connector = 'github' AND account = 'self' AND record_type = 'notification' AND active = 1
                 """
             ).fetchall()
         brief = MorningBrief(
@@ -133,7 +141,26 @@ class BriefingService:
                         url=payload.get("html_url"),
                     )
                 )
-        for collection in (brief.overdue, brief.due_today, brief.upcoming, brief.missing_assignments, brief.calendar_today):
+        for row in github_rows:
+            payload = json.loads(row["payload_json"])
+            repo = payload.get("repo")
+            title = payload.get("title", "Untitled GitHub notification")
+            brief.github_notifications.append(
+                BriefItem(
+                    title=f"{repo}: {title}" if repo else title,
+                    due_at=None,
+                    source="GitHub",
+                    url=payload.get("html_url"),
+                )
+            )
+        for collection in (
+            brief.overdue,
+            brief.due_today,
+            brief.upcoming,
+            brief.missing_assignments,
+            brief.calendar_today,
+            brief.github_notifications,
+        ):
             collection.sort(key=lambda item: (item.due_at is None, item.due_at or generated_at, item.title))
         return brief
 

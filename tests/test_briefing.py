@@ -75,3 +75,24 @@ def test_morning_brief_includes_current_calendar_events_today(tmp_path: Path) ->
     brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
     assert [item.title for item in brief.calendar_today] == ["Advisor meeting"]
     assert "Today's calendar:\n- Advisor meeting" in brief.render()
+
+
+def test_morning_brief_includes_only_active_github_notifications(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (connector, account, record_type, record_id, payload_json, observed_at, active)
+                VALUES ('github', 'self', 'notification', '1', ?, '2026-08-14T07:00:00+00:00', 1),
+                       ('github', 'self', 'notification', '2', ?, '2026-08-14T07:00:00+00:00', 0)
+                """,
+                (
+                    '{"title":"Fix flaky test","repo":"example/alfred","html_url":"https://github.com/example/alfred/pull/42"}',
+                    '{"title":"Stale review request","repo":"example/alfred","html_url":null}',
+                ),
+            )
+    brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+    assert [item.title for item in brief.github_notifications] == ["example/alfred: Fix flaky test"]
+    assert "GitHub notifications:\n- example/alfred: Fix flaky test" in brief.render()

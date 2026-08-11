@@ -4,8 +4,12 @@ Alfred is a local-first, open-source personal secretary. Its core owns memory,
 tasks, schedules, audit records, and connector state; chat clients are replaceable
 interfaces.
 
-This repository currently contains the walking skeleton: SQLite migrations, an
-append-only audit log, a CLI, and a narrow read-only stdio MCP server.
+This repository implements ARCHITECTURE.md's build slices through "Daily
+secretary" and most of "Memory": SQLite migrations, an append-only audit log,
+a CLI, a narrow read-only stdio MCP server, a typed temporal memory graph with
+optional local vector search, an Obsidian-compatible Markdown vault, local
+Telegram polling and delivery, durable jobs with missed-run recovery, and
+read-only Calendar/Canvas/GitHub sync feeding a deterministic morning brief.
 
 ## Local setup
 
@@ -39,6 +43,13 @@ token, save it under service `alfred`, account `canvas-api-token`, then invoke
 `alfred canvas-sync --base-url https://your-school.instructure.com`. It copies
 only upcoming/missing assignment title, deadline, course label, and source link;
 grades, submissions, files, and assignment body text stay out of Alfred.
+
+GitHub is also read-only and opt-in. Save a repo-scoped fine-grained personal
+access token (notifications: read) under service `alfred`, account
+`github-token`, then run `alfred github-sync`. It copies only the unread
+notification's title, repository, reason (mention, review requested, etc.),
+subject type, and a browser deep link—never issue/PR body text or comments.
+Resolved or read notifications drop out of the next sync automatically.
 
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
