@@ -235,3 +235,46 @@ def test_entity_and_relationship_creation_record_evidence(tmp_path: Path) -> Non
     assert [item.source_event_id for item in graph.evidence_for("relationship", relationship.id)] == [relation_event]
     # ensure_self was called with no source event, so it stays unevidenced.
     assert graph.evidence_for("entity", owner.id) == []
+
+
+def test_add_alias_makes_an_entity_findable_by_its_alternate_name(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="person", label="Alexander")
+
+    graph.add_alias(entity.id, "Alex")
+
+    assert [alias.alias for alias in graph.aliases_for(entity.id)] == ["Alex"]
+    found = graph.search("Alex")
+    assert [item.id for item in found.entities] == [entity.id]
+    assert AuditLog(database).verify() is True
+
+
+def test_add_alias_rejects_an_unknown_entity(tmp_path: Path) -> None:
+    graph = MemoryGraph(Database(tmp_path / "alfred.db"))
+
+    with pytest.raises(GraphError, match="does not exist"):
+        graph.add_alias("missing-entity", "Alex")
+
+
+def test_add_alias_rejects_an_empty_alias(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="person", label="Alexander")
+
+    with pytest.raises(GraphError, match="cannot be empty"):
+        graph.add_alias(entity.id, "   ")
+
+
+def test_multiple_aliases_are_all_searchable_and_re_adding_one_does_not_duplicate(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="person", label="Alexander")
+
+    graph.add_alias(entity.id, "Alex")
+    graph.add_alias(entity.id, "Xander")
+    graph.add_alias(entity.id, "Alex")  # re-adding the same alias is idempotent
+
+    assert sorted(alias.alias for alias in graph.aliases_for(entity.id)) == ["Alex", "Xander"]
+    assert [item.id for item in graph.search("Xander").entities] == [entity.id]
+    assert [item.id for item in graph.search("Alex").entities] == [entity.id]

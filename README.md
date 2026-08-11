@@ -117,6 +117,8 @@ memory superseded and creates a new one that points back to it. `alfred forget
 --memory-id ID [--reason "..."]` is scoped, single-item deletion—it tombstones the
 memory, drops it from search, and records an audit entry, but a superseded memory
 it once replaced stays visible as history until it is separately forgotten.
+`alfred memory-alias --entity-id ID "Alternate Name"` adds a searchable alternate
+name for an entity—`memory-search` finds it by either name immediately after.
 
 ## Obsidian vault
 

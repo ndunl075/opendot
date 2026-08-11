@@ -80,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
     relation.add_argument("--cardinality", choices=("single", "multi"))
     relation.add_argument("--valid-from", help="ISO-8601 time; defaults to now")
     relation.add_argument("--domain", action="append", default=[])
+    alias = subcommands.add_parser("memory-alias", help="add a searchable alternate name for an entity")
+    alias.add_argument("--entity-id", required=True)
+    alias.add_argument("alias")
     remember = subcommands.add_parser("remember", help="store a confirmed local memory")
     remember.add_argument("statement")
     remember.add_argument("--kind", default="note")
@@ -265,6 +268,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 domains=args.domain,
             ).model_dump_json()
         )
+        return 0
+    if args.command == "memory-alias":
+        print(graph.add_alias(args.entity_id, args.alias).model_dump_json())
         return 0
     if args.command == "remember":
         print(graph.remember(args.statement, kind=args.kind).model_dump_json())

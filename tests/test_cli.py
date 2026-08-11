@@ -121,6 +121,16 @@ def test_cli_creates_and_searches_local_graph_records(tmp_path: Path, capsys) ->
     assert main(["--db", str(database_path), "memory-search", "Alfred"]) == 0
     assert json.loads(capsys.readouterr().out)["entities"][0]["id"] == project_id
 
+    assert main(["--db", str(database_path), "memory-alias", "--entity-id", project_id, "AlfredCore"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "entity_id": project_id,
+        "alias": "AlfredCore",
+        "source": "user:cli",
+        "confidence": 1.0,
+    }
+    assert main(["--db", str(database_path), "memory-search", "AlfredCore"]) == 0
+    assert json.loads(capsys.readouterr().out)["entities"][0]["id"] == project_id
+
 
 def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None:
     database_path = tmp_path / "alfred.db"

@@ -74,6 +74,13 @@ class Evidence(BaseModel):
     created_at: datetime
 
 
+class Alias(BaseModel):
+    entity_id: str
+    alias: str
+    source: str
+    confidence: float
+
+
 class SearchResult(BaseModel):
     entities: list[Entity] = Field(default_factory=list)
     memories: list[Memory] = Field(default_factory=list)
@@ -463,6 +470,58 @@ class MemoryGraph:
                 (subject_kind, subject_id),
             ).fetchall()
         return [self._evidence_from_row(row) for row in rows]
+
+    def add_alias(
+        self,
+        entity_id: str,
+        alias: str,
+        *,
+        source: str = "user:cli",
+        confidence: float = 1.0,
+        actor: str = "user:cli",
+    ) -> Alias:
+        """Add an alternate name for an entity; it becomes searchable immediately.
+
+        entity_fts's aliases column exists precisely for this -- until now
+        nothing ever wrote to it, so an entity could only ever be found by
+        its exact label.
+        """
+        normalized = alias.strip()
+        if not normalized:
+            raise GraphError("alias cannot be empty")
+        self.database.migrate()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                self._require_entity(connection, entity_id)
+                connection.execute(
+                    """
+                    INSERT INTO aliases (entity_id, alias, source, confidence)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(entity_id, alias) DO UPDATE SET source = excluded.source, confidence = excluded.confidence
+                    """,
+                    (entity_id, normalized, source, confidence),
+                )
+                all_aliases = [
+                    row["alias"]
+                    for row in connection.execute(
+                        "SELECT alias FROM aliases WHERE entity_id = ? ORDER BY alias", (entity_id,)
+                    )
+                ]
+                connection.execute(
+                    "UPDATE entity_fts SET aliases = ? WHERE entity_id = ?", (" ".join(all_aliases), entity_id)
+                )
+                self._audit(connection, actor, "entity_alias_add", {"entity_id": entity_id, "alias": normalized})
+        return Alias(entity_id=entity_id, alias=normalized, source=source, confidence=confidence)
+
+    def aliases_for(self, entity_id: str) -> list[Alias]:
+        """Return every alternate name recorded for one entity."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT entity_id, alias, source, confidence FROM aliases WHERE entity_id = ? ORDER BY alias",
+                (entity_id,),
+            ).fetchall()
+        return [Alias(entity_id=row["entity_id"], alias=row["alias"], source=row["source"], confidence=row["confidence"]) for row in rows]
 
     def _create_entity(
         self,
