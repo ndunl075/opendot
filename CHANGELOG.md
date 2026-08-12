@@ -7,6 +7,16 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- `gmail-sync` bounded to the most recent `--limit` unread messages
+  (default 500) instead of the entire unread backlog. An account with a
+  very large unread count (found live: north of 10,000) previously
+  hard-failed once Gmail's own pagination cap was reached; even after
+  raising that cap, fetching thousands of messages individually every sync
+  cycle wasn't actually useful. Bounding to the most recent window (Gmail's
+  own default ordering) fixes both.
+
 ### Added
 
 - Slack app setup (`deploy/slack-app/`): a ready-to-paste manifest

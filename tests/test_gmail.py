@@ -25,7 +25,7 @@ def _message(message_id: str, internal_date: str, *, subject: str = "Re: capston
 
 
 class FakeGmail:
-    def list_unread_inbox(self):
+    def list_unread_inbox(self, *, limit=500):
         return [_message("1", "1786190400000")]
 
 
@@ -53,7 +53,7 @@ def test_gmail_snapshot_marks_read_message_inactive(tmp_path: Path) -> None:
     GmailSync(database, FakeGmail()).sync()
 
     class ClearedInbox:
-        def list_unread_inbox(self):
+        def list_unread_inbox(self, *, limit=500):
             return []
 
     GmailSync(database, ClearedInbox()).sync()
@@ -111,6 +111,36 @@ def test_gmail_client_paginates_past_the_old_twenty_page_cap() -> None:
         client.close()
     assert len(messages) == total_pages
     assert calls["list"] == total_pages
+
+
+def test_gmail_client_stops_at_the_limit_instead_of_fetching_an_entire_huge_backlog() -> None:
+    """The actual bug this was written for: an account with tens of
+    thousands of unread messages must not hard-fail, and must not try to
+    fetch every one of them either -- it should stop at `limit`, well
+    within the page-count safety valve, using far fewer requests than a
+    full backlog would need."""
+    calls = {"list": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/gmail/v1/users/me/messages":
+            calls["list"] += 1
+            # Every page reports more pages available -- simulates a
+            # backlog far larger than any limit this test uses.
+            page_size = int(request.url.params["maxResults"])
+            page = calls["list"]
+            ids = [{"id": f"{page}-{i}"} for i in range(page_size)]
+            return httpx.Response(200, json={"messages": ids, "nextPageToken": str(page)})
+        message_id = request.url.path.rsplit("/", maxsplit=1)[-1]
+        return httpx.Response(200, json=_message(message_id, "1786190400000"))
+
+    client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        messages = client.list_unread_inbox(limit=250)
+    finally:
+        client.close()
+    assert len(messages) == 250
+    # 250 at up to 100/page is 3 list calls, not anywhere near the 100-page cap.
+    assert calls["list"] == 3
 
 
 def test_gmail_client_raises_a_clear_error_past_the_page_cap() -> None:

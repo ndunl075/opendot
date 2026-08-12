@@ -133,7 +133,14 @@ Gmail reuses the same `google-auth` grant as Calendar (the default scopes cover
 both). `alfred gmail-sync` reads the unread inbox and copies only each message's
 subject, sender, and Gmail's own short snippet—never the message body or
 attachments. Reading or archiving a message drops it out of the next sync
-automatically.
+automatically. It's bounded to the most recent `--limit` unread messages
+(default 500, Gmail's own newest-first ordering) rather than the entire
+backlog—an account with a very large unread count would otherwise mean
+thousands of individual per-message API calls every sync cycle for mail
+that's mostly not this-week actionable anyway. A message can drop out of the
+snapshot either because it was read/archived, or simply because it's no
+longer within that most-recent window on a later sync—both look the same in
+`connector-status`.
 
 Gmail drafts and sending are separate preview-then-confirm writes.
 `alfred gmail-draft-propose --actor nico --to recipient@example.com --subject
