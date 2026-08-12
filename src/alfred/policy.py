@@ -146,6 +146,18 @@ class ApprovalService:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    def get(self, approval_id: str) -> Approval | None:
+        """Read an approval's current state without checking or changing anything.
+
+        Used by generic dispatch (e.g. action_commit) that needs to know an
+        approval's action_type before deciding which handler's own
+        consume()/verify() should run the actual authorization check.
+        """
+        self.database.migrate()
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        return self._approval_from_row(row) if row is not None else None
+
     def propose(
         self,
         *,

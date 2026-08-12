@@ -8,7 +8,7 @@ import pytest
 
 from alfred.db import Database
 from alfred.mcp_server import create_server
-from alfred.policy import PolicyStore
+from alfred.policy import ApprovalService, PolicyStore
 
 
 def test_mcp_server_can_be_constructed(tmp_path: Path) -> None:
@@ -26,11 +26,12 @@ def _call(server: Any, name: str, arguments: dict) -> Any:
     return json.loads(content.text)
 
 
-def _grant(database_path: Path, *, allow_write: bool = True) -> None:
+def _grant(database_path: Path, *, allow_write: bool = True, allowed_tools: set[str] | None = None) -> None:
     PolicyStore(Database(database_path)).grant(
         client_id="local-mcp",
         allowed_sensitivities={"public", "personal"},
-        allowed_tools={"remember", "forget", "brief_get", "connector_status", "memory_search"},
+        allowed_tools=allowed_tools
+        or {"remember", "forget", "action_commit", "brief_get", "connector_status", "memory_search"},
         allow_write=allow_write,
     )
 
@@ -47,11 +48,40 @@ def test_remember_and_forget_round_trip_through_mcp(tmp_path: Path) -> None:
     found = _call(server, "memory_search", {"query": "7 AM brief"})
     assert [memory["id"] for memory in found["memories"]] == [remembered["id"]]
 
-    forgotten = _call(server, "forget", {"memory_id": remembered["id"]})
-    assert forgotten["status"] == "deleted"
+    proposed = _call(server, "forget", {"memory_id": remembered["id"]})
+    assert proposed["action_type"] == "memory_forget"
+    assert proposed["state"] == "pending"
+
+    # There is no MCP tool for approving: decision 8's "never unattended" is
+    # only real if the same automated client can't both propose and approve.
+    # A human (here, simulated directly through the policy layer, matching
+    # what 'alfred approval-approve' does from the CLI) approves it instead.
+    issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
+
+    receipt = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+    assert receipt == {
+        "memory_id": remembered["id"],
+        "idempotency_key": f"memory_forget:{proposed['id']}",
+        "replayed": False,
+    }
 
     after_forget = _call(server, "memory_search", {"query": "7 AM brief"})
     assert after_forget["memories"] == []
+
+
+def test_action_commit_requires_its_own_grant_even_with_a_valid_token(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"remember", "forget", "memory_search"})  # no action_commit
+    server = create_server(database_path)
+    remembered = _call(server, "remember", {"statement": "Should stay if action_commit is blocked."})
+    proposed = _call(server, "forget", {"memory_id": remembered["id"]})
+    issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
+
+    with pytest.raises(Exception, match="not allowed"):
+        asyncio.run(server.call_tool("action_commit", {"approval_id": proposed["id"], "token": issued.token}))
+
+    still_there = _call(server, "memory_search", {"query": "action_commit is blocked"})
+    assert len(still_there["memories"]) == 1
 
 
 def test_remember_rejects_a_sensitivity_outside_the_client_scope(tmp_path: Path) -> None:

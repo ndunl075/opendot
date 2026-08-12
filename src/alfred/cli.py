@@ -14,7 +14,7 @@ from .connector_health import connector_health
 from .db import Database
 from .briefing import BriefingService
 from .jobs import JobRunner
-from .memory_graph import MemoryGraph
+from .memory_graph import MemoryActions, MemoryGraph
 from .vault import VaultImporter, VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
@@ -91,9 +91,18 @@ def build_parser() -> argparse.ArgumentParser:
     correct = subcommands.add_parser("memory-correct", help="supersede a memory with a corrected statement")
     correct.add_argument("--memory-id", required=True)
     correct.add_argument("statement")
-    forget = subcommands.add_parser("forget", help="scoped deletion of one local memory; evidence is kept")
-    forget.add_argument("--memory-id", required=True)
-    forget.add_argument("--reason", default="user requested deletion")
+    forget_propose = subcommands.add_parser(
+        "memory-forget-propose", help="preview deleting one local memory; nothing is deleted until executed"
+    )
+    forget_propose.add_argument("--memory-id", required=True)
+    forget_propose.add_argument("--reason", default="user requested deletion")
+    forget_propose.add_argument("--actor", required=True)
+    forget_execute = subcommands.add_parser(
+        "memory-forget-execute", help="consume a fresh approval token and delete the previewed memory"
+    )
+    forget_execute.add_argument("--approval-id", required=True)
+    forget_execute.add_argument("--actor", required=True)
+    forget_execute.add_argument("--token", required=True)
     export_entity = subcommands.add_parser("vault-export-entity", help="project one entity into local Markdown")
     export_entity.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_entity.add_argument("--entity-id", required=True)
@@ -280,9 +289,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "memory-correct":
         print(graph.supersede_memory(args.memory_id, args.statement).model_dump_json())
-        return 0
-    if args.command == "forget":
-        print(graph.forget_memory(args.memory_id, reason=args.reason).model_dump_json())
         return 0
     if args.command == "vault-export-entity":
         print(VaultProjector(database, args.vault).project_entity(args.entity_id).model_dump_json())
@@ -471,6 +477,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         finally:
             client.close()
+        print(receipt.model_dump_json())
+        return 0
+    if args.command == "memory-forget-propose":
+        proposal = MemoryActions(database, approvals).propose_forget(args.memory_id, actor=args.actor, reason=args.reason)
+        print(proposal.model_dump_json())
+        return 0
+    if args.command == "memory-forget-execute":
+        receipt = MemoryActions(database, approvals).execute_forget(args.approval_id, actor=args.actor, token=args.token)
         print(receipt.model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")

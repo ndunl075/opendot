@@ -12,8 +12,8 @@ from .briefing import BriefingService
 from .config import Settings
 from .connector_health import connector_health
 from .db import Database
-from .memory_graph import GraphError, MemoryGraph, Sensitivity
-from .policy import PolicyError, PolicyStore
+from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
+from .policy import ApprovalService, PolicyError, PolicyStore
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
 
@@ -22,14 +22,18 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
     """Create Alfred's MCP server: local memory reads/writes and connector status.
 
     Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
-    client gets nothing by default. Consequential external actions (calendar
-    writes, sending messages) are not exposed here yet -- action_commit and
-    message_draft need their own careful pass at how a stateless MCP tool
-    call should present a two-step propose/approve/execute flow.
+    client gets nothing by default. Deleting data is itself consequential
+    (decision 8: strong-confirm, never unattended), so forget() only
+    previews a deletion; action_commit() performs whatever it previewed
+    after a fresh approval token is presented. action_commit currently only
+    knows how to finish a memory_forget -- wiring a live Google credential
+    into this stateless MCP process for the calendar write needs its own
+    pass, so that action stays CLI-only (calendar-event-execute) for now.
     """
     settings = Settings.from_environment(Path(database_path) if database_path else None)
     database = Database(settings.database_path)
     policy = PolicyStore(database)
+    approvals = ApprovalService(database)
     server = FastMCP("Alfred")
 
     @server.tool()
@@ -73,7 +77,12 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
 
     @server.tool()
     def forget(memory_id: str, reason: str = "user requested deletion") -> dict:
-        """Scoped deletion of one memory the caller can see; evidence and audit are kept."""
+        """Preview deleting one memory; nothing is deleted until action_commit confirms it.
+
+        Decision 8 classifies deleting data as strong-confirm, never
+        unattended, so an MCP client -- which can call tools without a human
+        watching in the moment -- cannot delete in a single call.
+        """
         scope = policy.require_write(client_id, "forget")
         graph = MemoryGraph(database)
         existing = graph.get_memory(memory_id)
@@ -81,8 +90,21 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             raise GraphError(f"memory does not exist: {memory_id}")
         if existing.sensitivity not in scope.allowed_sensitivities:
             raise PolicyError(f"client is not scoped to forget sensitivity: {existing.sensitivity}")
-        memory = graph.forget_memory(memory_id, reason=reason, actor=f"mcp:{client_id}")
-        return memory.model_dump(mode="json")
+        approval = MemoryActions(database, approvals).propose_forget(memory_id, actor=f"mcp:{client_id}", reason=reason)
+        return approval.model_dump(mode="json")
+
+    @server.tool()
+    def action_commit(approval_id: str, token: str) -> dict:
+        """Consume a fresh approval token and perform the action it previewed."""
+        policy.require_write(client_id, "action_commit")
+        actor = f"mcp:{client_id}"
+        approval = approvals.get(approval_id)
+        if approval is None:
+            raise PolicyError("approval does not exist")
+        if approval.action_type == "memory_forget":
+            receipt = MemoryActions(database, approvals).execute_forget(approval_id, actor=actor, token=token)
+            return receipt.model_dump(mode="json")
+        raise PolicyError(f"action_commit does not yet support this action type: {approval.action_type}")
 
     @server.tool()
     def brief_get(now: str | None = None) -> str:

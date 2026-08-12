@@ -113,10 +113,17 @@ leave open. Packaging it as an actual service is future work.
 `alfred remember "statement"` stores a confirmed local memory; `alfred memory-search
 "query"` returns FTS anchors plus one active graph hop. Corrections never rewrite
 history: `alfred memory-correct --memory-id ID "corrected statement"` marks the old
-memory superseded and creates a new one that points back to it. `alfred forget
---memory-id ID [--reason "..."]` is scoped, single-item deletion—it tombstones the
-memory, drops it from search, and records an audit entry, but a superseded memory
-it once replaced stays visible as history until it is separately forgotten.
+memory superseded and creates a new one that points back to it.
+
+Deleting is preview-then-confirm, the same as the calendar write, because decision
+8 classifies deleting data as strong-confirm and never unattended.
+`alfred memory-forget-propose --memory-id ID --actor nico [--reason "..."]` previews
+a scoped, single-item deletion without touching anything yet. Approve it with
+`alfred approval-approve --approval-id <ID> --actor nico`, then `alfred
+memory-forget-execute --approval-id <ID> --actor nico --token <TOKEN>` tombstones
+the memory, drops it from search, and records an audit entry—retrying with the same
+approval ID and token replays the receipt instead of erroring. A superseded memory
+stays visible as history until it is separately forgotten.
 `alfred memory-alias --entity-id ID "Alternate Name"` adds a searchable alternate
 name for an entity—`memory-search` finds it by either name immediately after.
 
@@ -147,14 +154,25 @@ Alfred itself generated (`managed: true`) are never re-imported as testimony.
 and other local MCP clients. Every tool is default-deny: a client gets nothing
 until explicitly granted, e.g. `alfred client-grant --client-id local-mcp
 --sensitivity public --sensitivity personal --tool memory_search --tool
-remember --tool forget --tool brief_get --tool connector_status --allow-write`.
-Current tools: `system_status`, `agenda_get`, `memory_search`, `profile_get`,
-`remember`, `forget`, `brief_get`, and `connector_status`. `remember`/`forget`
-additionally check the requested memory's sensitivity against the client's
-own scope, so a client granted only `public`/`personal` cannot write or erase
-a `secret` memory even with `--allow-write`. Consequential external actions
-(`message_draft`, `action_commit`—the calendar write, sending a message) are
-not on the MCP surface yet; they exist today only as CLI commands.
+remember --tool forget --tool action_commit --tool brief_get --tool
+connector_status --allow-write`. Current tools: `system_status`, `agenda_get`,
+`memory_search`, `profile_get`, `remember`, `forget`, `action_commit`,
+`brief_get`, and `connector_status`. `remember`/`forget` additionally check the
+requested memory's sensitivity against the client's own scope, so a client
+granted only `public`/`personal` cannot write or erase a `secret` memory even
+with `--allow-write`.
+
+Deleting is consequential, so `forget` only previews—`action_commit` performs
+whatever a previous tool call previewed, once given a fresh approval token.
+There is deliberately no MCP tool to approve one: decision 8's "never
+unattended" would be meaningless if the same automated client could both
+propose and approve its own deletion, so a human (or a trusted local channel
+outside the MCP client's own reach, e.g. `alfred approval-approve`) has to
+grant it. `action_commit` currently only knows how to finish a memory
+deletion; the calendar write and sending a message (`message_draft`) aren't on
+the MCP surface yet—wiring a live Google credential into this stateless
+process needs its own pass, so that action stays CLI-only for now
+(`calendar-event-execute`).
 
 ## Local vector search (optional)
 

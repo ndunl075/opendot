@@ -143,9 +143,51 @@ def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None
     assert corrected["supersedes_memory_id"] == memory_id
     assert corrected["statement"] == "Preferred brief time is 8 AM."
 
-    assert main(["--db", str(database_path), "forget", "--memory-id", corrected["id"], "--reason", "test cleanup"]) == 0
-    forgotten = json.loads(capsys.readouterr().out)
-    assert forgotten["status"] == "deleted"
+    assert (
+        main(
+            [
+                "--db",
+                str(database_path),
+                "memory-forget-propose",
+                "--memory-id",
+                corrected["id"],
+                "--reason",
+                "test cleanup",
+                "--actor",
+                "nico",
+            ]
+        )
+        == 0
+    )
+    proposal = json.loads(capsys.readouterr().out)
+    assert proposal["action_type"] == "memory_forget"
+    assert proposal["preview"] == {"memory_id": corrected["id"], "reason": "test cleanup"}
+
+    assert main(["--db", str(database_path), "approval-approve", "--approval-id", proposal["id"], "--actor", "nico"]) == 0
+    issued = json.loads(capsys.readouterr().out)
+
+    assert (
+        main(
+            [
+                "--db",
+                str(database_path),
+                "memory-forget-execute",
+                "--approval-id",
+                proposal["id"],
+                "--actor",
+                "nico",
+                "--token",
+                issued["token"],
+            ]
+        )
+        == 0
+    )
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt == {"memory_id": corrected["id"], "idempotency_key": f"memory_forget:{proposal['id']}", "replayed": False}
+
+    assert main(["--db", str(database_path), "memory-search", "brief time"]) == 0
+    remaining_ids = [item["id"] for item in json.loads(capsys.readouterr().out)["memories"]]
+    assert corrected["id"] not in remaining_ids
 
     assert main(["--db", str(database_path), "memory-search", "brief time"]) == 0
     # The forgotten (corrected) statement is gone; the superseded original stays visible as history.

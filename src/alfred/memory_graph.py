@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .embeddings import EmbeddingIndex, EmbeddingProvider
+from .policy import Approval, ApprovalService, PolicyError
 
 Sensitivity = Literal["public", "personal", "sensitive", "secret"]
 MemoryStatus = Literal["candidate", "confirmed", "superseded", "rejected", "deleted"]
@@ -714,3 +715,80 @@ class MemoryGraph:
             connection,
             AuditEvent(actor=actor, client="memory", tool=tool, outcome="ok", result=result),
         )
+
+
+class MemoryForgetReceipt(BaseModel):
+    memory_id: str
+    idempotency_key: str
+    replayed: bool
+
+
+class MemoryActions:
+    """Approval-gated deletion: decision 8 classifies deleting data as strong-confirm, never unattended.
+
+    MemoryGraph.forget_memory() itself stays an unconditional primitive --
+    still directly callable by trusted internal callers like VaultImporter's
+    forgotten-memory recovery path -- but the CLI and MCP surfaces route
+    through here instead, so an automated client can no longer delete a
+    memory in one unattended call. Mirrors GoogleCalendarActions's
+    propose()/execute() shape exactly.
+    """
+
+    action_type = "memory_forget"
+
+    def __init__(self, database: Database, approvals: ApprovalService) -> None:
+        self.database = database
+        self.approvals = approvals
+        self.graph = MemoryGraph(database)
+
+    def propose_forget(self, memory_id: str, *, actor: str, reason: str = "user requested deletion") -> Approval:
+        """Preview a deletion without touching the memory yet."""
+        existing = self.graph.get_memory(memory_id)
+        if existing is None:
+            raise GraphError(f"memory does not exist: {memory_id}")
+        preview = {"memory_id": memory_id, "reason": reason}
+        return self.approvals.propose(actor=actor, action_type=self.action_type, preview=preview)
+
+    def execute_forget(self, approval_id: str, *, actor: str, token: str) -> MemoryForgetReceipt:
+        """Consume a fresh approval exactly once, then delete idempotently.
+
+        See GoogleCalendarActions.execute() for the identical replay-before-
+        consume ordering and its documented crash-window trade-off.
+        """
+        self.database.migrate()
+        idempotency_key = f"{self.action_type}:{approval_id}"
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        if existing is not None:
+            self.approvals.verify(approval_id, actor=actor, token=token)
+            if existing["actor"] != actor:
+                raise PolicyError("approval actor does not match the requested action")
+            payload = json.loads(existing["payload_json"])
+            return MemoryForgetReceipt(memory_id=payload["memory_id"], idempotency_key=idempotency_key, replayed=True)
+
+        approval = self.approvals.consume(approval_id, actor=actor, token=token)
+        preview = approval.preview
+        memory = self.graph.forget_memory(preview["memory_id"], reason=preview.get("reason", "user requested deletion"), actor=actor)
+        payload = {"memory_id": memory.id}
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """
+                    INSERT INTO action_receipts (idempotency_key, connector, action_type, approval_id, actor, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        idempotency_key,
+                        "memory",
+                        self.action_type,
+                        approval_id,
+                        actor,
+                        json.dumps(payload, sort_keys=True),
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+        return MemoryForgetReceipt(memory_id=memory.id, idempotency_key=idempotency_key, replayed=False)
