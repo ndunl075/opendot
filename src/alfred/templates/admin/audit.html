@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block page_title %}Audit log{% endblock %}
+{% block page_meta %}last {{ records|length }}{% endblock %}
+{% block content %}
+  <div class="section">
+    <p class="section-label">Recent tool runs</p>
+    <div class="card">
+      <table class="audit-table">
+        <thead>
+          <tr><th>When</th><th>Actor</th><th>Tool</th><th>Outcome</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          {% for entry in records %}
+            <tr>
+              <td class="mono">{{ entry.record.occurred_at|dt }}</td>
+              <td>{{ entry.record.actor }}</td>
+              <td class="mono">{{ entry.record.tool }}</td>
+              <td><span class="pill {{ entry.record.outcome }}_outcome"><span class="pill-dot"></span>{{ entry.record.outcome }}</span></td>
+              <td class="mono">{{ entry.result_preview }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="empty-state">No audit records yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

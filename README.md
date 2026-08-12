@@ -385,6 +385,31 @@ authentication schemes). Whether your ChatGPT plan supports custom MCP
 connectors at all is between you and OpenAI, not something this repo
 controls.
 
+## Admin dashboard
+
+`alfred admin-ui-run` serves a small, read-only web dashboard: today's
+agenda, pending approvals, connector health, and the recent audit trail, at
+`http://127.0.0.1:8200`. There was no shape spec for this anywhere in
+ARCHITECTURE.md—unlike everything else built this session—so it's a
+deliberate design choice: one page per concern, no write actions (approving
+a pending action still goes through `alfred approval-approve`, never a
+button on this page, matching decision 8's "start read-only" precedent for
+every connector). No CDN fonts or icons; it works with the network off.
+
+```powershell
+.\.venv\Scripts\alfred admin-ui-token-generate
+.\.venv\Scripts\alfred admin-ui-run
+```
+
+Same loopback-only invariant as `mcp-http-run`—the host isn't configurable.
+Auth is the same bearer token, but delivered differently: since a browser
+can't attach a custom header to a plain navigation, visiting any page
+without one redirects to a login screen; entering the token there sets an
+`HttpOnly`, `SameSite=Strict` cookie whose value *is* the token (no separate
+session store)—exactly as sensitive as the token itself, and it never
+leaves `127.0.0.1` either way. Scripted/API access can still send
+`Authorization: Bearer <token>` directly and skip the cookie entirely.
+
 ## Local vector search (optional)
 
 `MemoryGraph` accepts an optional `embedding_provider`. Without one, `memory-search`

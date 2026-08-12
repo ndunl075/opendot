@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Approvals{% endblock %}
+{% block page_title %}Approvals{% endblock %}
+{% block page_meta %}{{ approvals|length }} pending{% endblock %}
+{% block content %}
+  <div class="section">
+    <p class="section-label">Awaiting a decision</p>
+    <div class="card">
+      {% for approval in approvals %}
+        <div class="row">
+          <div class="row-title">
+            {{ approval.action_type }}
+            <span class="mono">· {{ approval.actor }}</span>
+          </div>
+          <div class="row-meta">requested {{ approval.requested_at|dt }} · expires {{ approval.expires_at|dt }}</div>
+        </div>
+      {% else %}
+        <div class="empty-state">Nothing waiting. Every proposed action has been decided.</div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="section">
+    <p class="section-label">Deciding one</p>
+    <div class="card">
+      <div class="row">
+        <div class="row-title mono">alfred approval-approve --approval-id &lt;ID&gt; --actor &lt;you&gt;</div>
+      </div>
+    </div>
+    <p class="login-hint" style="margin-left:2px">This page is read-only by design (decision 8: approving stays a deliberate, out-of-band action) — it shows what's waiting, not a button to decide for you.</p>
+  </div>
+{% endblock %}
