@@ -25,6 +25,14 @@ python -m venv .venv
 .\.venv\Scripts\alfred status
 ```
 
+Or run the four steps above as one command with `.\scripts\install.ps1`. It is
+safe to re-run: it skips venv creation when one already exists, never touches
+any provider (no connector credential is read or requested), and every
+mutating step honors `-WhatIf` so you can preview it first. Add
+`-RegisterScheduledTask` to also register the Task Scheduler entry described
+in "Running continuously" below; see `Get-Help .\scripts\install.ps1 -Full`
+for every parameter.
+
 The default database path is `.alfred/alfred.db`. It is deliberately ignored by
 Git. To use another path, pass `--db <path>` or set `ALFRED_DB_PATH`.
 
@@ -191,7 +199,11 @@ Telegram disabled. Stop it with Ctrl+C.
 `alfred run` is a foreground process, not a Windows service. To keep it running
 unattended, use Windows Task Scheduler with a trigger of "At log on", running
 `pythonw.exe` against this same command—or start it manually in a terminal you
-leave open. Packaging it as an actual service is future work.
+leave open. `.\scripts\install.ps1 -RegisterScheduledTask -RunArgs "--pair
+123:456 --chat-id 123"` registers that same Task Scheduler entry for you;
+inspect it with `Get-ScheduledTask -TaskName Alfred` and remove it with
+`Unregister-ScheduledTask -TaskName Alfred`. Packaging it as an actual service
+is future work.
 
 ## Local memory graph
 
