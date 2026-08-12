@@ -9,6 +9,11 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Cloud model fallback (`OpenAICompatibleClient`, `AnthropicCompatibleClient`)
+  guarded by `GuardedCloudProvider`: pattern-based secret/PII redaction before
+  egress, a monthly spend cap that defaults to `$0` and fails closed, and
+  per-call cost/token tracking via the existing audit log. Nothing wires a
+  cloud provider in by default.
 - Streamable HTTP MCP transport (`alfred mcp-http-run`), bound to `127.0.0.1`
   only and authenticated with a bearer token (`alfred mcp-http-token-generate`)
   checked outside FastMCP's own request handling. Serves the same tool

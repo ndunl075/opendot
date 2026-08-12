@@ -254,8 +254,8 @@ Rules:
 - Cache embeddings, connector results, daily aggregates, and conversation summaries.
 - Use deterministic code for sync, sorting, due-date logic, and threshold alerts.
 - Use one small/local model pass for extraction and at most one for a routine brief.
-- Escalate to a cloud model only for explicitly classified hard tasks; redact secrets and sensitive health/message content first.
-- Track input/output tokens and estimated cost per run. Default monthly cloud budget is `$0`; fail closed when the configured cap is reached.
+- Escalate to a cloud model only for explicitly classified hard tasks; redact secrets and sensitive health/message content first. **Built:** `models.GuardedCloudProvider` wraps `OpenAICompatibleClient`/`AnthropicCompatibleClient` with pattern-based redaction (`Redactor`) applied before either ever leaves the process; nothing wires a cloud provider in by default, matching "a model call is never on the default path."
+- Track input/output tokens and estimated cost per run. Default monthly cloud budget is `$0`; fail closed when the configured cap is reached. **Built:** `GuardedCloudProvider` checks month-to-date spend (summed from its own audit records) before every call and refuses once the cap is already met, defaulting to `$0` so an unconfigured instance never calls out. This checks the cap before each call, not a per-call ceiling, so a single very large call can still exceed the cap within one run.
 
 Local software can cost `$0/month`; electricity, existing subscriptions, a domain, or optional cloud inference are not free. The PC must be awake for live replies and scheduled work. Persistent jobs run missed executions once after restart and label the result late.
 

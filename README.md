@@ -325,9 +325,36 @@ knowledge, and a failed or unreachable model falls back to the deterministic
 render rather than costing the user their brief. Every pass—success or
 failure—is audited with its token counts. Nothing in the CLI, MCP server, or job
 runner wires a live writer in by default, matching the rule that a model call is
-never on the default path; a cloud fallback, the monthly spend cap, and
-sensitive-data redaction before egress are still unbuilt, since there is no cloud
-caller yet for them to guard.
+never on the default path.
+
+Decision 6's cloud pieces are now built: `alfred.models.OpenAICompatibleClient`
+and `AnthropicCompatibleClient` speak the OpenAI chat-completions and Anthropic
+Messages API shapes respectively, but neither should be constructed bare—wrap
+either in `GuardedCloudProvider` first, which is what actually satisfies
+decision 6's three requirements for a cloud model:
+
+1. **Redaction.** `Redactor` scrubs common secret/PII shapes (emails, bearer
+   tokens, OpenAI/GitHub/Slack/AWS key patterns, SSNs, card-like digit runs,
+   phone numbers) from the prompt and system text before either reaches the
+   cloud provider. It's a best-effort pattern scrub, not a guarantee—keep
+   genuinely `secret`-tagged content out of a cloud prompt in the first place
+   rather than relying on this to catch it.
+2. **Monthly hard cap, fail closed.** `monthly_budget_usd` defaults to `0.0`,
+   so an unconfigured `GuardedCloudProvider` never calls out at all. Every
+   call checks month-to-date spend (summed from its own audit records)
+   *before* calling; once that's already at or past the cap, it raises
+   `CloudBudgetExceeded` instead of calling. This checks the cap before each
+   call, not a per-call ceiling—one very large call can still push the total
+   over the cap within that same run.
+3. **Cost tracking.** Every call, success or failure, is audited with the
+   model name, prompt/completion token counts, and an estimated USD cost
+   (from an operator-supplied `CloudPricing`, since this module hardcodes no
+   vendor price table)—never the raw prompt or response text. That audit
+   trail doubles as the spend ledger requirement 2 reads from.
+
+As with Ollama, nothing in the CLI, MCP server, or job runner constructs a
+cloud provider by default—an operator wires one in from their own
+configuration when they want it.
 
 ## Development rules
 
