@@ -113,9 +113,9 @@ class TelegramGateway:
             return TelegramReceipt(text=f"Saved task: {task.title}", task_id=task.id)
         reminder = ReminderStore.create(
             connection,
-            run_at=run_at,
-            task_id=task.id,
-            chat_id=chat_id,
+                run_at=run_at,
+                task_id=task.id,
+                destination=f"telegram:{chat_id}",
             text=task.title,
             idempotency_key=f"telegram-reminder:{update_id}",
         )

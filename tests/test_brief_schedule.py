@@ -53,6 +53,26 @@ def test_on_time_daily_brief_carries_no_late_note(tmp_path: Path) -> None:
     assert "Note: delivered late" not in message["text"]
 
 
+def test_daily_schedule_keeps_an_explicit_destination(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            job_id = create_daily(
+                connection,
+                destination="slack:D123",
+                local_time=time(7, 30),
+                timezone_name="America/New_York",
+                now=datetime(2026, 8, 14, 11, 0, tzinfo=UTC),
+            )
+
+    JobRunner(database).run_due(datetime(2026, 8, 14, 11, 30, tzinfo=UTC))
+
+    with database.connect() as connection:
+        destination = connection.execute("SELECT destination FROM outbox WHERE job_id = ?", (job_id,)).fetchone()[0]
+    assert destination == "slack:D123"
+
+
 def test_next_daily_occurrence_handles_a_late_run_without_replaying_every_missed_day() -> None:
     assert next_daily_occurrence(
         {"time": "07:30", "timezone": "America/New_York"}, datetime(2026, 8, 17, 18, 0, tzinfo=UTC)

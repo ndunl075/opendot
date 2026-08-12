@@ -24,19 +24,31 @@ class ReminderStore:
         *,
         run_at: datetime,
         task_id: str,
-        chat_id: int,
+        destination: str | None = None,
+        chat_id: int | None = None,
         text: str,
         idempotency_key: str,
     ) -> ReminderJob:
-        """Persist a future one-shot Telegram reminder exactly once."""
+        """Persist a future one-shot reminder for an explicit delivery destination.
+
+        ``chat_id`` remains only as a compatibility bridge for existing Telegram
+        callers.  New integrations must supply a complete destination such as
+        ``telegram:20`` or ``slack:D123``; the scheduler never guesses a channel.
+        """
         if run_at.tzinfo is None:
             raise ValueError("reminder time must include a timezone")
+        if destination is None:
+            if chat_id is None:
+                raise ValueError("reminder destination is required")
+            destination = f"telegram:{chat_id}"
+        if not destination.strip() or ":" not in destination:
+            raise ValueError("reminder destination must be a non-empty channel:recipient value")
         job_id = str(uuid4())
-        payload: dict[str, Any] = {"chat_id": chat_id, "task_id": task_id, "text": text}
+        payload: dict[str, Any] = {"destination": destination, "task_id": task_id, "text": text}
         connection.execute(
             """
             INSERT INTO jobs (id, kind, schedule_json, next_run_at, state, payload_json, idempotency_key, created_at, updated_at)
-            VALUES (?, 'telegram_reminder', ?, ?, 'active', ?, ?, ?, ?)
+            VALUES (?, 'reminder', ?, ?, 'active', ?, ?, ?, ?)
             ON CONFLICT(idempotency_key) DO NOTHING
             """,
             (

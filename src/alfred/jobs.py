@@ -48,16 +48,18 @@ class JobRunner:
                     scheduled_at = datetime.fromisoformat(job["next_run_at"])
                     payload = json.loads(job["payload_json"])
                     late = run_at - scheduled_at > self.late_after
-                    if job["kind"] == "telegram_reminder":
+                    if job["kind"] in {"reminder", "telegram_reminder"}:
                         prefix = f"Late reminder (scheduled {scheduled_at.isoformat()}): " if late else "Reminder: "
                         text = f"{prefix}{payload['text']}"
+                        destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
                         next_run_at = None
                         state = "completed"
-                    elif job["kind"] == "telegram_morning_brief":
+                    elif job["kind"] in {"morning_brief", "telegram_morning_brief"}:
                         brief_service = BriefingService(self.database)
                         text = brief_service.morning_brief(
                             run_at, scheduled_at=scheduled_at if late else None
                         ).render()
+                        destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
                         schedule = json.loads(job["schedule_json"])
                         next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                         state = "active"
@@ -65,7 +67,7 @@ class JobRunner:
                         continue
                     outbox = Outbox.enqueue(
                         connection,
-                        destination=f"telegram:{payload['chat_id']}",
+                        destination=destination,
                         payload={"text": text, "task_id": payload.get("task_id")},
                         idempotency_key=f"job-delivery:{job['id']}:{job['next_run_at']}",
                         job_id=job["id"],
@@ -83,7 +85,7 @@ class JobRunner:
                         AuditEvent(
                             actor="system:scheduler",
                             client="jobs",
-                            tool="morning_brief_deliver" if job["kind"] == "telegram_morning_brief" else "reminder_deliver",
+                            tool="morning_brief_deliver" if job["kind"] in {"morning_brief", "telegram_morning_brief"} else "reminder_deliver",
                             outcome="outbox_enqueued",
                             arguments={"job_id": job["id"], "scheduled_at": scheduled_at.isoformat()},
                             result={"outbox_id": outbox.id, "late": late},

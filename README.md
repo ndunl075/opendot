@@ -129,7 +129,9 @@ updates an existing one's title/due date when `--task-id` is given—omitting
 it. `alfred task-complete --task-id ID` marks an open task completed and is
 idempotent (completing an already-completed task is a no-op, not an error).
 `alfred reminder-set "text" --run-at ISO-8601 --chat-id ID [--task-id ID]`
-schedules a Telegram reminder, creating its own task if `--task-id` isn't given.
+schedules a Telegram reminder, creating its own task if `--task-id` isn't given. New channels use
+`--destination channel:recipient` instead (for example `slack:D123`); the durable job and outbox preserve that target
+rather than silently routing it to Telegram. Delivery workers still only exist for Telegram today.
 All three are also MCP tools (`task_upsert`, `task_complete`, `reminder_set`);
 `reminder_set` needs an explicit `chat_id` because Telegram is Alfred's only
 delivery channel today, so there's no channel-agnostic queue to defer that

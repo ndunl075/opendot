@@ -12,12 +12,19 @@ from zoneinfo import ZoneInfo
 def create_daily(
     connection: sqlite3.Connection,
     *,
-    chat_id: int,
+    destination: str | None = None,
+    chat_id: int | None = None,
     local_time: time,
     timezone_name: str,
     now: datetime | None = None,
 ) -> str:
-    """Create one daily delivery schedule, with the next occurrence stored in UTC."""
+    """Create one daily delivery schedule for an explicit channel destination."""
+    if destination is None:
+        if chat_id is None:
+            raise ValueError("morning brief destination is required")
+        destination = f"telegram:{chat_id}"
+    if not destination.strip() or ":" not in destination:
+        raise ValueError("morning brief destination must be a non-empty channel:recipient value")
     timezone = ZoneInfo(timezone_name)
     current = (now or datetime.now(UTC)).astimezone(timezone)
     candidate = datetime.combine(current.date(), local_time, tzinfo=timezone)
@@ -28,21 +35,21 @@ def create_daily(
     connection.execute(
         """
         INSERT INTO jobs (id, kind, schedule_json, next_run_at, state, payload_json, idempotency_key, created_at, updated_at)
-        VALUES (?, 'telegram_morning_brief', ?, ?, 'active', ?, ?, ?, ?)
+        VALUES (?, 'morning_brief', ?, ?, 'active', ?, ?, ?, ?)
         ON CONFLICT(idempotency_key) DO NOTHING
         """,
         (
             job_id,
             json.dumps(schedule, sort_keys=True),
             candidate.astimezone(UTC).isoformat(),
-            json.dumps({"chat_id": chat_id}, sort_keys=True),
-            f"daily-brief:{chat_id}:{timezone_name}:{schedule['time']}",
+            json.dumps({"destination": destination}, sort_keys=True),
+            f"daily-brief:{destination}:{timezone_name}:{schedule['time']}",
             datetime.now(UTC).isoformat(),
             datetime.now(UTC).isoformat(),
         ),
     )
     row = connection.execute(
-        "SELECT id FROM jobs WHERE idempotency_key = ?", (f"daily-brief:{chat_id}:{timezone_name}:{schedule['time']}",)
+        "SELECT id FROM jobs WHERE idempotency_key = ?", (f"daily-brief:{destination}:{timezone_name}:{schedule['time']}",)
     ).fetchone()
     if row is None:
         raise RuntimeError("morning brief schedule insert was ignored without an existing job")

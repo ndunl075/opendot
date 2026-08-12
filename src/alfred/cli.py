@@ -80,8 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_due.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     brief = subcommands.add_parser("brief", help="render the deterministic local morning brief")
     brief.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
-    schedule_brief = subcommands.add_parser("schedule-brief", help="schedule one local daily Telegram morning brief")
-    schedule_brief.add_argument("--chat-id", required=True, type=int)
+    schedule_brief = subcommands.add_parser("schedule-brief", help="schedule one local daily morning brief")
+    schedule_brief_destination = schedule_brief.add_mutually_exclusive_group(required=True)
+    schedule_brief_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
+    schedule_brief_destination.add_argument("--destination", help="explicit delivery target, e.g. telegram:20")
     schedule_brief.add_argument("--at", required=True, help="local 24-hour HH:MM time")
     schedule_brief.add_argument("--timezone", required=True, help="IANA timezone, e.g. America/New_York")
     task_upsert = subcommands.add_parser("task-upsert", help="create a task, or update one's title/due date by --task-id")
@@ -90,10 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     task_upsert.add_argument("--due-at", help="ISO-8601 time with timezone")
     task_complete = subcommands.add_parser("task-complete", help="mark an open task completed")
     task_complete.add_argument("--task-id", required=True)
-    reminder_set = subcommands.add_parser("reminder-set", help="schedule a local Telegram reminder")
+    reminder_set = subcommands.add_parser("reminder-set", help="schedule a local reminder")
     reminder_set.add_argument("text")
     reminder_set.add_argument("--run-at", required=True, help="ISO-8601 time with timezone")
-    reminder_set.add_argument("--chat-id", required=True, type=int, help="the paired Telegram chat to deliver to")
+    reminder_destination = reminder_set.add_mutually_exclusive_group(required=True)
+    reminder_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
+    reminder_destination.add_argument("--destination", help="explicit delivery target, e.g. telegram:20")
     reminder_set.add_argument("--task-id", help="link to an existing task instead of creating a new one")
     self_node = subcommands.add_parser("memory-self", help="create Alfred's one owner identity")
     self_node.add_argument("--label", required=True)
@@ -363,7 +367,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         database.migrate()
         with database.connect() as connection:
             with database.transaction(connection):
-                job_id = create_daily(connection, chat_id=args.chat_id, local_time=local_time, timezone_name=args.timezone)
+                job_id = create_daily(
+                    connection,
+                    destination=args.destination or f"telegram:{args.chat_id}",
+                    local_time=local_time,
+                    timezone_name=args.timezone,
+                )
         print(json.dumps({"job_id": job_id}))
         return 0
     if args.command == "task-upsert":
@@ -414,7 +423,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     connection,
                     run_at=run_at,
                     task_id=task_id,
-                    chat_id=args.chat_id,
+                    destination=args.destination or f"telegram:{args.chat_id}",
                     text=args.text,
                     idempotency_key=f"reminder:{task_id}:{run_at.isoformat()}",
                 )

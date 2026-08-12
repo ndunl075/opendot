@@ -3,7 +3,10 @@ from pathlib import Path
 
 from alfred.audit import AuditLog
 from alfred.db import Database
+from alfred.events import EventStore
 from alfred.jobs import JobRunner
+from alfred.reminders import ReminderStore
+from alfred.tasks import TaskStore
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -55,3 +58,33 @@ def test_late_reminder_is_labeled(tmp_path: Path) -> None:
     with Database(database_path).connect() as connection:
         delivery = connection.execute("SELECT payload_json FROM outbox WHERE job_id = ?", (receipt.reminder_job_id,)).fetchone()
     assert "Late reminder (scheduled 2026-08-14T09:00:00+00:00): submit paper" in delivery["payload_json"]
+
+
+def test_reminder_keeps_an_explicit_non_telegram_destination(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            event = EventStore.append(
+                connection,
+                source="slack",
+                external_id="event-1",
+                occurred_at=datetime(2026, 8, 14, 8, 0, tzinfo=UTC),
+                content="Check Slack",
+                metadata={},
+            )
+            task = TaskStore.create(connection, title="Check Slack", source_event_id=event.id)
+            job = ReminderStore.create(
+                connection,
+                run_at=datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
+                task_id=task.id,
+                destination="slack:D123",
+                text="Check Slack",
+                idempotency_key="slack-reminder",
+            )
+
+    JobRunner(database).run_due(datetime(2026, 8, 14, 9, 0, tzinfo=UTC))
+
+    with database.connect() as connection:
+        destination = connection.execute("SELECT destination FROM outbox WHERE job_id = ?", (job.id,)).fetchone()[0]
+    assert destination == "slack:D123"
