@@ -199,8 +199,8 @@ class GmailActions:
     7's own language ("message_draft and other consequential operations
     return a preview"): even a draft -- not a sent message -- is treated as
     consequential, so nothing reaches Gmail until a proposal is approved and
-    its one-time token is presented to execute(). Only drafting is built
-    here; sending is connector order's next phase and stays unbuilt.
+    its one-time token is presented to execute(). Sending is handled by the
+    separate GmailSendActions flow, never by this draft action.
     """
 
     connector_name = "gmail"

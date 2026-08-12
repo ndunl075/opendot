@@ -229,8 +229,8 @@ check the requested memory's sensitivity against the client's own scope, so a
 client granted only `public`/`personal` cannot write or erase a `secret`
 memory even with `--allow-write`.
 
-Deleting, calendar writes, and drafting a message are all consequential, so
-`forget`, `calendar_event_propose`, and `message_draft` only preview—
+Deleting, calendar writes, drafting a message, and sending a message are all consequential, so
+`forget`, `calendar_event_propose`, `message_draft`, and `message_send_propose` only preview—
 `action_commit` performs whatever a previous tool call previewed, once given a
 fresh approval token. There is deliberately no MCP tool to approve one:
 decision 8's "never unattended" (for deletes) and "preview + confirm" (for
@@ -238,10 +238,10 @@ calendar writes and messages) would be meaningless if the same automated
 client could both propose and approve its own action, so a human (or a
 trusted local channel outside the MCP client's own reach, e.g. `alfred
 approval-approve`) has to grant it. `action_commit` mints a fresh Google
-access token itself when finishing a calendar write or a Gmail draft, the same
-way the CLI's `calendar-event-execute`/`gmail-draft-execute` already do;
-nothing is cached. Sending a message is connector order's next phase and
-isn't built anywhere in this codebase yet.
+access token itself when finishing a calendar write, Gmail draft, or Gmail send,
+the same way the corresponding CLI commands do; nothing is cached. Gmail sends
+remain explicit, one-time approval-gated actions and never run from sync or a
+scheduled job.
 
 ## Local vector search (optional)
 

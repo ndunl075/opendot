@@ -32,7 +32,8 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
 
     Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
     client gets nothing by default. Consequential actions are two calls, not
-    one: forget(), calendar_event_propose(), and message_draft() only
+    one: forget(), calendar_event_propose(), message_draft(), and
+    message_send_propose() only
     preview; action_commit() performs whatever a prior call previewed, once
     a fresh approval token is presented. Decision 8 requires this for
     deleting data, calendar writes, and sending a message alike
@@ -40,9 +41,9 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
     MCP tool to grant that approval -- letting the same automated client
     both propose and approve its own action would defeat the point, so a
     human has to grant it through a channel outside the MCP client's own
-    reach (e.g. CLI's approval-approve). message_draft only ever creates a
-    Gmail draft, never sends one; sending is connector order's next phase
-    and is not built anywhere in this codebase yet.
+    reach (e.g. CLI's approval-approve). message_draft creates a Gmail draft;
+    message_send_propose is a separate explicit send preview, and neither
+    action can execute without a fresh human approval token.
     """
     settings = Settings.from_environment(Path(database_path) if database_path else None)
     database = Database(settings.database_path)
