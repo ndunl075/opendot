@@ -61,9 +61,13 @@ class GmailClient:
         return [self._get_message(message_id) for message_id in self._list_message_ids()]
 
     def _list_message_ids(self) -> list[str]:
+        # 100 pages of 100 matches the cap CanvasClient._get_paginated already
+        # uses in this codebase -- generous enough for a large real unread
+        # backlog (up to 10,000 messages) while still a real safety valve
+        # against a runaway loop, not an arbitrary number picked in isolation.
         ids: list[str] = []
         params: dict[str, Any] = {"q": "is:unread in:inbox", "maxResults": 100}
-        for _ in range(20):
+        for _ in range(100):
             response = self._client.get("/users/me/messages", params=params)
             response.raise_for_status()
             payload = response.json()
@@ -76,7 +80,7 @@ class GmailClient:
             if not page_token:
                 return ids
             params = {"q": "is:unread in:inbox", "maxResults": 100, "pageToken": page_token}
-        raise ValueError("Gmail pagination exceeded 20 pages")
+        raise ValueError("Gmail pagination exceeded 100 pages")
 
     def _get_message(self, message_id: str) -> dict[str, Any]:
         response = self._client.get(

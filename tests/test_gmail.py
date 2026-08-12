@@ -86,6 +86,47 @@ def test_gmail_client_lists_then_fetches_metadata_only() -> None:
     assert calls == ["/gmail/v1/users/me/messages", "/gmail/v1/users/me/messages/1"]
 
 
+def test_gmail_client_paginates_past_the_old_twenty_page_cap() -> None:
+    """Regression test: a real unread backlog larger than 2,000 messages
+    used to hard-fail at 20 pages; the cap now matches CanvasClient's own
+    100-page limit elsewhere in this codebase."""
+    total_pages = 25
+    calls = {"list": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/gmail/v1/users/me/messages":
+            calls["list"] += 1
+            page = calls["list"]
+            body: dict = {"messages": [{"id": str(page)}]}
+            if page < total_pages:
+                body["nextPageToken"] = str(page)
+            return httpx.Response(200, json=body)
+        message_id = request.url.path.rsplit("/", maxsplit=1)[-1]
+        return httpx.Response(200, json=_message(message_id, "1786190400000"))
+
+    client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        messages = client.list_unread_inbox()
+    finally:
+        client.close()
+    assert len(messages) == total_pages
+    assert calls["list"] == total_pages
+
+
+def test_gmail_client_raises_a_clear_error_past_the_page_cap() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/gmail/v1/users/me/messages":
+            return httpx.Response(200, json={"messages": [{"id": "x"}], "nextPageToken": "next"})
+        return httpx.Response(200, json=_message("x", "1786190400000"))
+
+    client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ValueError, match="100 pages"):
+            client.list_unread_inbox()
+    finally:
+        client.close()
+
+
 def test_gmail_client_create_draft_sends_a_valid_rfc2822_message() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/gmail/v1/users/me/drafts"
