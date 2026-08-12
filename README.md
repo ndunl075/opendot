@@ -171,27 +171,31 @@ Alfred itself generated (`managed: true`) are never re-imported as testimony.
 and other local MCP clients. Every tool is default-deny: a client gets nothing
 until explicitly granted, e.g. `alfred client-grant --client-id local-mcp
 --sensitivity public --sensitivity personal --tool memory_search --tool
-remember --tool forget --tool action_commit --tool brief_get --tool
-connector_status --allow-write`. Current tools: `system_status`, `agenda_get`,
-`memory_search`, `profile_get`, `remember`, `forget`, `action_commit`,
-`brief_get`, `connector_status`, `task_upsert`, `task_complete`, and
-`reminder_set`—11 of section 7's 12 documented tools; only `message_draft`
-(sending a message) remains. `remember`/`forget` additionally check the
-requested memory's sensitivity against the client's own scope, so a client
-granted only `public`/`personal` cannot write or erase a `secret` memory even
-with `--allow-write`.
+remember --tool forget --tool calendar_event_propose --tool action_commit
+--tool brief_get --tool connector_status --allow-write`. Current tools:
+`system_status`, `agenda_get`, `memory_search`, `profile_get`, `remember`,
+`forget`, `calendar_event_propose`, `action_commit`, `brief_get`,
+`connector_status`, `task_upsert`, `task_complete`, and `reminder_set`—11 of
+section 7's 12 documented tools (only `message_draft`, sending a message, is
+still missing), plus two not in that list: `system_status` and
+`calendar_event_propose`, which the generic `action_commit` needs since
+section 7 never names a tool for previewing a calendar write specifically.
+`remember`/`forget` additionally check the requested
+memory's sensitivity against the client's own scope, so a client granted only
+`public`/`personal` cannot write or erase a `secret` memory even with
+`--allow-write`.
 
-Deleting is consequential, so `forget` only previews—`action_commit` performs
-whatever a previous tool call previewed, once given a fresh approval token.
-There is deliberately no MCP tool to approve one: decision 8's "never
-unattended" would be meaningless if the same automated client could both
-propose and approve its own deletion, so a human (or a trusted local channel
-outside the MCP client's own reach, e.g. `alfred approval-approve`) has to
-grant it. `action_commit` currently only knows how to finish a memory
-deletion; the calendar write and sending a message (`message_draft`) aren't on
-the MCP surface yet—wiring a live Google credential into this stateless
-process needs its own pass, so that action stays CLI-only for now
-(`calendar-event-execute`).
+Deleting and calendar writes are consequential, so `forget` and
+`calendar_event_propose` only preview—`action_commit` performs whatever a
+previous tool call previewed, once given a fresh approval token. There is
+deliberately no MCP tool to approve one: decision 8's "never unattended" (for
+deletes) and "preview + confirm" (for calendar writes) would be meaningless if
+the same automated client could both propose and approve its own action, so a
+human (or a trusted local channel outside the MCP client's own reach, e.g.
+`alfred approval-approve`) has to grant it. `action_commit` mints a fresh
+Google access token itself when finishing a calendar write, the same way the
+CLI's `calendar-event-execute` already does; nothing is cached. Only sending a
+message (`message_draft`) remains off the MCP surface entirely.
 
 ## Local vector search (optional)
 

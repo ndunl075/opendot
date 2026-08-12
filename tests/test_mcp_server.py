@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -196,3 +197,89 @@ def test_reminder_set_creates_its_own_task_when_none_is_given(tmp_path: Path) ->
     with Database(database_path).connect() as connection:
         row = connection.execute("SELECT title, state FROM tasks WHERE id = ?", (job["task_id"],)).fetchone()
     assert (row["title"], row["state"]) == ("Call advisor", "open")
+
+
+class _FakeCalendarClient:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def close(self) -> None:
+        pass
+
+    def create_event(self, **kwargs: Any) -> dict:
+        self.calls.append(kwargs)
+        return {"id": f"created-{len(self.calls)}", "htmlLink": "https://calendar.google.com/event"}
+
+
+def test_calendar_event_propose_never_touches_a_google_credential(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"calendar_event_propose"})
+    server = create_server(database_path)
+
+    with mock.patch("alfred.mcp_server.current_access_token", side_effect=AssertionError("must not be called")):
+        proposed = _call(
+            server,
+            "calendar_event_propose",
+            {"summary": "Advisor meeting", "start": "2026-08-15T10:00:00-04:00", "end": "2026-08-15T11:00:00-04:00"},
+        )
+
+    assert proposed["action_type"] == "calendar_event_create"
+    assert proposed["state"] == "pending"
+
+
+def test_calendar_event_is_never_created_without_action_commit(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"calendar_event_propose", "action_commit"})
+    server = create_server(database_path)
+
+    proposed = _call(
+        server,
+        "calendar_event_propose",
+        {"summary": "Advisor meeting", "start": "2026-08-15T10:00:00-04:00", "end": "2026-08-15T11:00:00-04:00"},
+    )
+    assert proposed["action_type"] == "calendar_event_create"
+    assert proposed["state"] == "pending"
+
+    issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
+    fake_client = _FakeCalendarClient()
+    with (
+        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.mcp_server.GoogleCalendarClient", return_value=fake_client),
+    ):
+        receipt = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+
+    assert receipt["calendar_event_id"] == "created-1"
+    assert receipt["replayed"] is False
+    assert fake_client.calls == [
+        {
+            "calendar_id": "primary",
+            "summary": "Advisor meeting",
+            "start": datetime(2026, 8, 15, 14, 0, tzinfo=UTC),
+            "end": datetime(2026, 8, 15, 15, 0, tzinfo=UTC),
+        }
+    ]
+
+
+def test_action_commit_replays_a_calendar_event_instead_of_creating_twice(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"calendar_event_propose", "action_commit"})
+    server = create_server(database_path)
+    proposed = _call(
+        server,
+        "calendar_event_propose",
+        {"summary": "Advisor meeting", "start": "2026-08-15T10:00:00-04:00", "end": "2026-08-15T11:00:00-04:00"},
+    )
+    issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
+    fake_client = _FakeCalendarClient()
+
+    with (
+        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.mcp_server.GoogleCalendarClient", return_value=fake_client),
+    ):
+        first = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+        second = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+
+    assert first["replayed"] is False
+    assert second["replayed"] is True
+    assert second["calendar_event_id"] == first["calendar_event_id"]
+    assert len(fake_client.calls) == 1

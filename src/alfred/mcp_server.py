@@ -14,9 +14,12 @@ from .config import Settings
 from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
+from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
+from .google_oauth import current_access_token
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .policy import ApprovalService, PolicyError, PolicyStore
 from .reminders import ReminderStore
+from .secret_store import SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
@@ -26,13 +29,16 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
     """Create Alfred's MCP server: local memory reads/writes and connector status.
 
     Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
-    client gets nothing by default. Deleting data is itself consequential
-    (decision 8: strong-confirm, never unattended), so forget() only
-    previews a deletion; action_commit() performs whatever it previewed
-    after a fresh approval token is presented. action_commit currently only
-    knows how to finish a memory_forget -- wiring a live Google credential
-    into this stateless MCP process for the calendar write needs its own
-    pass, so that action stays CLI-only (calendar-event-execute) for now.
+    client gets nothing by default. Consequential actions are two calls, not
+    one: forget() and calendar_event_propose() only preview; action_commit()
+    performs whatever a prior call previewed, once a fresh approval token is
+    presented. Decision 8 requires this for deleting data and calendar
+    writes alike ("strong-confirm" / "preview + confirm"), and there is
+    deliberately no MCP tool to grant that approval -- letting the same
+    automated client both propose and approve its own action would defeat
+    the point, so a human has to grant it through a channel outside the MCP
+    client's own reach (e.g. CLI's approval-approve). message_draft (sending
+    a message) is the one section 7 tool still missing.
     """
     settings = Settings.from_environment(Path(database_path) if database_path else None)
     database = Database(settings.database_path)
@@ -98,6 +104,17 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
         return approval.model_dump(mode="json")
 
     @server.tool()
+    def calendar_event_propose(summary: str, start: str, end: str, calendar_id: str = "primary") -> dict:
+        """Preview a calendar event write; nothing reaches Google until action_commit confirms it."""
+        policy.require_write(client_id, "calendar_event_propose")
+        parsed_start, parsed_end = datetime.fromisoformat(start), datetime.fromisoformat(end)
+        actions = GoogleCalendarActions(database, approvals)
+        approval = actions.propose_event(
+            actor=f"mcp:{client_id}", calendar_id=calendar_id, summary=summary, start=parsed_start, end=parsed_end
+        )
+        return approval.model_dump(mode="json")
+
+    @server.tool()
     def action_commit(approval_id: str, token: str) -> dict:
         """Consume a fresh approval token and perform the action it previewed."""
         policy.require_write(client_id, "action_commit")
@@ -107,6 +124,13 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             raise PolicyError("approval does not exist")
         if approval.action_type == "memory_forget":
             receipt = MemoryActions(database, approvals).execute_forget(approval_id, actor=actor, token=token)
+            return receipt.model_dump(mode="json")
+        if approval.action_type == "calendar_event_create":
+            client = GoogleCalendarClient(current_access_token(SystemKeyringSecretStore()))
+            try:
+                receipt = GoogleCalendarActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
+            finally:
+                client.close()
             return receipt.model_dump(mode="json")
         raise PolicyError(f"action_commit does not yet support this action type: {approval.action_type}")
 

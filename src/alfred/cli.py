@@ -23,7 +23,7 @@ from .vault import VaultImporter, VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
-from .google_oauth import DEFAULT_SCOPES, GoogleOAuthClient, authorize_interactively
+from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubClient, GitHubNotificationsSync
 from .gmail import GmailClient, GmailSync
@@ -560,16 +560,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _google_access_token() -> str:
-    """Mint a fresh access token from the stored refresh token; never cached locally."""
-    secret_store = SystemKeyringSecretStore()
-    oauth_client = GoogleOAuthClient(
-        secret_store.get_required("google-oauth-client-id"),
-        secret_store.get_required("google-oauth-client-secret"),
-    )
-    try:
-        return oauth_client.refresh_access_token(secret_store.get_required("google-oauth-refresh-token")).access_token
-    finally:
-        oauth_client.close()
+    return current_access_token(SystemKeyringSecretStore())
 
 
 def _calendar_sync_once(database: Database, calendar_id: str) -> None:

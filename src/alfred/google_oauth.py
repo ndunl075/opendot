@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 from pydantic import BaseModel
 
+from .secret_store import SecretStore
+
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
@@ -189,5 +191,22 @@ def authorize_interactively(
     oauth_client = GoogleOAuthClient(client_id, client_secret, transport=transport)
     try:
         return oauth_client.exchange_code(result.code, redirect_uri=listener.redirect_uri)
+    finally:
+        oauth_client.close()
+
+
+def current_access_token(secret_store: SecretStore) -> str:
+    """Mint a fresh access token from the stored refresh token; nothing is cached locally.
+
+    Shared by every caller that needs a live Google credential -- the CLI's
+    connector-sync commands and, now, MCP's action_commit for the calendar
+    write -- so there is exactly one place that knows how to do this.
+    """
+    oauth_client = GoogleOAuthClient(
+        secret_store.get_required("google-oauth-client-id"),
+        secret_store.get_required("google-oauth-client-secret"),
+    )
+    try:
+        return oauth_client.refresh_access_token(secret_store.get_required("google-oauth-refresh-token")).access_token
     finally:
         oauth_client.close()
