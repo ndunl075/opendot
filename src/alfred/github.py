@@ -24,7 +24,11 @@ class GitHubTransport(Protocol):
 class GitHubIssueWriteTransport(Protocol):
     def create_issue(self, *, repository: str, title: str, body: str | None) -> dict[str, Any]: ...
 
+    def find_issue_by_marker(self, *, repository: str, marker: str) -> dict[str, Any] | None: ...
+
     def create_pr_comment(self, *, repository: str, pull_number: int, body: str) -> dict[str, Any]: ...
+
+    def find_pr_comment_by_marker(self, *, repository: str, pull_number: int, marker: str) -> dict[str, Any] | None: ...
 
 
 class GitHubClient:
@@ -76,6 +80,25 @@ class GitHubClient:
             raise ValueError("GitHub issue-create response must be an object")
         return result
 
+    def find_issue_by_marker(self, *, repository: str, marker: str) -> dict[str, Any] | None:
+        """Find one issue bearing Alfred's exact hidden recovery marker."""
+        owner, repo = _repository_parts(repository)
+        response = self._client.get(
+            "/search/issues",
+            params={"q": f"repo:{owner}/{repo} type:issue in:body {marker}", "per_page": 2},
+        )
+        response.raise_for_status()
+        items = response.json().get("items", [])
+        if not isinstance(items, list) or len(items) > 1:
+            raise ValueError("GitHub returned an ambiguous issue recovery result")
+        if not items:
+            return None
+        item = items[0]
+        body = item.get("body") if isinstance(item, dict) else None
+        if not isinstance(body, str) or marker not in body:
+            raise ValueError("GitHub issue recovery result did not contain its marker")
+        return item
+
     def create_pr_comment(self, *, repository: str, pull_number: int, body: str) -> dict[str, Any]:
         owner, repo = _repository_parts(repository)
         response = self._client.post(f"/repos/{owner}/{repo}/issues/{pull_number}/comments", json={"body": body})
@@ -84,6 +107,14 @@ class GitHubClient:
         if not isinstance(result, dict):
             raise ValueError("GitHub PR comment response must be an object")
         return result
+
+    def find_pr_comment_by_marker(self, *, repository: str, pull_number: int, marker: str) -> dict[str, Any] | None:
+        owner, repo = _repository_parts(repository)
+        comments = self._get_paginated(f"/repos/{owner}/{repo}/issues/{pull_number}/comments", {"per_page": 100})
+        matches = [comment for comment in comments if isinstance(comment.get("body"), str) and marker in comment["body"]]
+        if len(matches) > 1:
+            raise ValueError("GitHub returned an ambiguous PR-comment recovery result")
+        return matches[0] if matches else None
 
     def _get_paginated(self, path: str, params: dict[str, Any] | None) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -224,9 +255,12 @@ class GitHubActions:
         )
 
     def execute(self, approval_id: str, *, actor: str, token: str) -> GitHubIssueReceipt:
-        """Create the approved issue once locally, then retain its receipt for replay."""
+        """Create one issue, recovering a hidden-marked issue after a crash."""
         self.database.migrate()
         idempotency_key = f"{self.action_type}:{approval_id}"
+        approval = self.approvals.verify(approval_id, actor=actor, token=token)
+        if approval.action_type != self.action_type:
+            raise PolicyError("approval is not for GitHub issue creation")
         with self.database.connect() as connection:
             existing = connection.execute(
                 "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (idempotency_key,)
@@ -243,16 +277,20 @@ class GitHubActions:
                 replayed=True,
             )
 
-        approval = self.approvals.get(approval_id)
-        if approval is None or approval.action_type != self.action_type:
-            raise PolicyError("approval is not for GitHub issue creation")
         if self.transport is None:
             raise ValueError("execute() requires a transport to reach GitHub")
-        consumed = self.approvals.consume(approval_id, actor=actor, token=token)
-        preview = consumed.preview
-        created = self.transport.create_issue(
-            repository=preview["repository"], title=preview["title"], body=preview.get("body")
-        )
+        preview = approval.preview
+        marker = _issue_marker(approval_id)
+        if approval.state == "consumed":
+            created = self.transport.find_issue_by_marker(repository=preview["repository"], marker=marker)
+            if created is None:
+                raise RuntimeError(
+                    "GitHub issue outcome is unknown after a consumed approval; create a new preview instead of retrying"
+                )
+        else:
+            self.approvals.consume(approval_id, actor=actor, token=token)
+            body = _append_marker(preview.get("body"), marker)
+            created = self.transport.create_issue(repository=preview["repository"], title=preview["title"], body=body)
         issue_number = created.get("number")
         if not isinstance(issue_number, int) or issue_number <= 0:
             raise ValueError("GitHub did not return a valid issue number")
@@ -290,7 +328,11 @@ class GitHubActions:
             preview={"repository": repository, "pull_number": pull_number, "body": body})
 
     def execute_pr_comment(self, approval_id: str, *, actor: str, token: str) -> GitHubIssueReceipt:
+        self.database.migrate()
         key = f"{self.pr_comment_action_type}:{approval_id}"
+        approval = self.approvals.verify(approval_id, actor=actor, token=token)
+        if approval.action_type != self.pr_comment_action_type:
+            raise PolicyError("approval is not for GitHub PR comment")
         with self.database.connect() as connection:
             existing = connection.execute("SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (key,)).fetchone()
         if existing:
@@ -298,10 +340,22 @@ class GitHubActions:
             if existing["actor"] != actor: raise PolicyError("approval actor does not match the requested action")
             data = json.loads(existing["payload_json"])
             return GitHubIssueReceipt(issue_number=data["comment_id"], html_url=data.get("html_url"), idempotency_key=key, replayed=True)
-        approval = self.approvals.get(approval_id)
-        if approval is None or approval.action_type != self.pr_comment_action_type: raise PolicyError("approval is not for GitHub PR comment")
         if self.transport is None: raise ValueError("execute_pr_comment() requires a transport")
-        created = self.transport.create_pr_comment(**self.approvals.consume(approval_id, actor=actor, token=token).preview)
+        preview = approval.preview
+        marker = _pr_comment_marker(approval_id)
+        if approval.state == "consumed":
+            created = self.transport.find_pr_comment_by_marker(
+                repository=preview["repository"], pull_number=preview["pull_number"], marker=marker
+            )
+            if created is None:
+                raise RuntimeError(
+                    "GitHub PR-comment outcome is unknown after a consumed approval; create a new preview instead of retrying"
+                )
+        else:
+            self.approvals.consume(approval_id, actor=actor, token=token)
+            created = self.transport.create_pr_comment(
+                repository=preview["repository"], pull_number=preview["pull_number"], body=_append_marker(preview["body"], marker)
+            )
         comment_id = created.get("id")
         if not isinstance(comment_id, int) or comment_id <= 0: raise ValueError("GitHub did not return a valid comment id")
         data = {"comment_id": comment_id, "html_url": created.get("html_url")}
@@ -361,3 +415,16 @@ def _repository_parts(repository: str) -> tuple[str, str]:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("repository must be an explicit owner/repository name")
     return tuple(repository.split("/", maxsplit=1))  # type: ignore[return-value]
+
+
+def _issue_marker(approval_id: str) -> str:
+    """Return an invisible, exact body marker for issue recovery."""
+    return f"<!-- alfred-action:{approval_id} -->"
+
+
+def _append_marker(body: str | None, marker: str) -> str:
+    return f"{body}\n\n{marker}" if body else marker
+
+
+def _pr_comment_marker(approval_id: str) -> str:
+    return f"<!-- alfred-pr-comment:{approval_id} -->"

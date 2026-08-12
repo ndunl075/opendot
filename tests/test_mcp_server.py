@@ -8,6 +8,8 @@ from unittest import mock
 import pytest
 
 from alfred.db import Database
+from alfred.gmail import _draft_message_id
+from alfred.google_calendar import _calendar_event_id
 from alfred.mcp_server import create_server
 from alfred.policy import ApprovalService, PolicyStore
 
@@ -253,6 +255,7 @@ def test_calendar_event_is_never_created_without_action_commit(tmp_path: Path) -
     assert fake_client.calls == [
         {
             "calendar_id": "primary",
+            "event_id": _calendar_event_id(proposed["id"]),
             "summary": "Advisor meeting",
             "start": datetime(2026, 8, 15, 14, 0, tzinfo=UTC),
             "end": datetime(2026, 8, 15, 15, 0, tzinfo=UTC),
@@ -318,7 +321,14 @@ def test_message_draft_never_creates_a_draft_without_action_commit(tmp_path: Pat
 
     assert receipt["draft_id"] == "draft-1"
     assert receipt["replayed"] is False
-    assert fake_client.calls == [{"to": "advisor@school.example", "subject": "Question", "body": "Quick question."}]
+    assert fake_client.calls == [
+        {
+            "message_id": _draft_message_id(proposed["id"]),
+            "to": "advisor@school.example",
+            "subject": "Question",
+            "body": "Quick question.",
+        }
+    ]
 
 
 def test_action_commit_replays_a_gmail_draft_instead_of_creating_twice(tmp_path: Path) -> None:

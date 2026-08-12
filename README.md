@@ -64,7 +64,9 @@ Approve it with `alfred approval-approve --approval-id <ID> --actor nico`, which
 prints a one-time token, then `alfred calendar-event-execute --approval-id <ID>
 --actor nico --token <TOKEN>` consumes that token and creates the event. A retry
 with the same approval ID and token replays the stored receipt instead of
-creating a duplicate event.
+creating a duplicate event. If the PC fails after Google accepts the event but
+before Alfred records its receipt, retrying the exact command safely recovers
+that event through Alfred's stable Calendar event ID.
 
 Canvas is also read-only and opt-in. If your school permits a personal Canvas
 token, save it under service `alfred`, account `canvas-api-token`, then invoke
@@ -85,7 +87,10 @@ choose; save it as account `github-issue-token` under service `alfred`.
 `alfred github-issue-propose --actor nico --repository owner/repo --title "..."`
 creates a local preview; after `approval-approve`, `github-issue-execute`
 creates that exact issue once. It never creates issues during sync or without
-a fresh approval token.
+a fresh approval token. Each created issue includes an invisible Alfred recovery
+marker: if the PC fails after GitHub accepts it but before Alfred stores its
+receipt, retrying finds that exact issue; an absent or ambiguous result fails
+closed. PR comments use the same invisible-marker recovery process.
 
 Gmail reuses the same `google-auth` grant as Calendar (the default scopes cover
 both). `alfred gmail-sync` reads the unread inbox and copies only each message's
@@ -99,12 +104,15 @@ Gmail drafts and sending are separate preview-then-confirm writes.
 with `alfred approval-approve --approval-id <ID> --actor nico`, then `alfred
 gmail-draft-execute --approval-id <ID> --actor nico --token <TOKEN>` consumes
 that token and creates the draft in Gmail—retrying with the same approval ID
-and token replays the receipt instead of creating a duplicate. Alfred's code
-never calls a send endpoint; the draft sits in Gmail exactly as if you'd
+and token replays the receipt instead of creating a duplicate. If Alfred loses
+the provider response before recording its receipt, the same command searches
+for the draft's stable Message-ID; an ambiguous or absent result fails closed.
+Alfred's code never calls a send endpoint; the draft sits in Gmail exactly as if you'd
 started typing it yourself. To send, use `gmail-send-propose` with the same
 recipient, subject, and body shape, approve it separately, then run
 `gmail-send-execute`; Alfred never sends from a sync, scheduled job, or a
-proposal alone.
+proposal alone. Its recovery path uses a stable Message-ID and only accepts an
+exact matching sent message; an absent or ambiguous result fails closed.
 
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
@@ -279,9 +287,9 @@ caller yet for them to guard.
 - Keep the database as the source of truth; transports do not contain business logic.
 - Do not place credentials, raw personal data, or local databases in Git.
 - Every MCP tool is gated by `PolicyStore`; an unregistered or narrowly scoped
-  client gets nothing by default. Consequential external actions (calendar
-  writes, sending messages) are not on the MCP surface yet—only local, already
-  approval-gated writes like `remember`/`forget` are.
+  client gets nothing by default. Consequential actions on the MCP surface can
+  only create previews; a human must approve them outside that MCP client
+  before `action_commit` can execute the exact approved preview.
 
 ## License
 

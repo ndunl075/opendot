@@ -23,9 +23,13 @@ class GmailTransport(Protocol):
 
 
 class GmailWriteTransport(Protocol):
-    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]: ...
+    def create_draft(self, *, message_id: str, to: str, subject: str, body: str) -> dict[str, Any]: ...
 
-    def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]: ...
+    def find_draft_by_message_id(self, *, message_id: str) -> dict[str, Any] | None: ...
+
+    def send_message(self, *, message_id: str, to: str, subject: str, body: str) -> dict[str, Any]: ...
+
+    def find_sent_message_by_message_id(self, *, message_id: str) -> dict[str, Any] | None: ...
 
 
 class GmailClient:
@@ -82,25 +86,81 @@ class GmailClient:
         response.raise_for_status()
         return response.json()
 
-    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
-        """Create one Gmail draft; callers are responsible for approval and idempotency."""
+    def create_draft(self, *, message_id: str, to: str, subject: str, body: str) -> dict[str, Any]:
+        """Create one Gmail draft with a stable RFC 2822 Message-ID."""
         message = MIMEText(body)
         message["To"] = to
         message["Subject"] = subject
+        message["Message-ID"] = message_id
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
         response = self._client.post("/users/me/drafts", json={"message": {"raw": raw}})
         response.raise_for_status()
         return response.json()
 
-    def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+    def find_draft_by_message_id(self, *, message_id: str) -> dict[str, Any] | None:
+        """Find one draft by Message-ID without fetching its content."""
+        response = self._client.get("/users/me/messages", params={"q": f"rfc822msgid:{message_id}", "maxResults": 2})
+        response.raise_for_status()
+        messages = response.json().get("messages", [])
+        if not isinstance(messages, list) or len(messages) > 1:
+            raise ValueError("Gmail returned an ambiguous Message-ID search result")
+        if not messages:
+            return None
+        found_message_id = messages[0].get("id") if isinstance(messages[0], dict) else None
+        if not isinstance(found_message_id, str) or not found_message_id:
+            raise ValueError("Gmail returned an invalid Message-ID search result")
+        page_token: str | None = None
+        for _ in range(20):
+            params: dict[str, str | int] = {"maxResults": 500}
+            if page_token:
+                params["pageToken"] = page_token
+            drafts_response = self._client.get("/users/me/drafts", params=params)
+            drafts_response.raise_for_status()
+            payload = drafts_response.json()
+            drafts = payload.get("drafts", [])
+            if not isinstance(drafts, list):
+                raise ValueError("Gmail returned invalid drafts")
+            for draft in drafts:
+                nested_message = draft.get("message") if isinstance(draft, dict) else None
+                if isinstance(nested_message, dict) and nested_message.get("id") == found_message_id:
+                    draft_id = draft.get("id")
+                    if isinstance(draft_id, str) and draft_id:
+                        return {"id": draft_id}
+                    raise ValueError("Gmail returned a draft without an ID")
+            next_token = payload.get("nextPageToken")
+            if next_token is None:
+                return None
+            if not isinstance(next_token, str) or not next_token:
+                raise ValueError("Gmail returned an invalid drafts page token")
+            page_token = next_token
+        raise RuntimeError("Gmail draft recovery exceeded the pagination limit")
+
+    def send_message(self, *, message_id: str, to: str, subject: str, body: str) -> dict[str, Any]:
         """Send a message only when called by the separately approval-gated action."""
         message = MIMEText(body)
         message["To"] = to
         message["Subject"] = subject
+        message["Message-ID"] = message_id
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
         response = self._client.post("/users/me/messages/send", json={"raw": raw})
         response.raise_for_status()
         return response.json()
+
+    def find_sent_message_by_message_id(self, *, message_id: str) -> dict[str, Any] | None:
+        response = self._client.get(
+            "/users/me/messages", params={"q": f"rfc822msgid:{message_id} in:sent", "maxResults": 2}
+        )
+        response.raise_for_status()
+        messages = response.json().get("messages", [])
+        if not isinstance(messages, list) or len(messages) > 1:
+            raise ValueError("Gmail returned an ambiguous sent-message recovery result")
+        if not messages:
+            return None
+        found = messages[0]
+        message_id_from_search = found.get("id") if isinstance(found, dict) else None
+        if not isinstance(message_id_from_search, str) or not message_id_from_search:
+            raise ValueError("Gmail returned an invalid sent-message recovery result")
+        return {"id": message_id_from_search}
 
 
 class GmailSyncResult(BaseModel):
@@ -220,13 +280,12 @@ class GmailActions:
         return self.approvals.propose(actor=actor, action_type=self.action_type, preview=preview)
 
     def execute(self, approval_id: str, *, actor: str, token: str) -> GmailDraftReceipt:
-        """Consume a fresh approval exactly once, then create the draft idempotently.
-
-        See GoogleCalendarActions.execute() for the identical replay-before-
-        consume ordering and its documented crash-window trade-off.
-        """
+        """Create a draft once, recovering it by a stable Message-ID after a crash."""
         self.database.migrate()
         idempotency_key = f"{self.action_type}:{approval_id}"
+        approval = self.approvals.verify(approval_id, actor=actor, token=token)
+        if approval.action_type != self.action_type:
+            raise PolicyError("approval is not for a Gmail draft")
         with self.database.connect() as connection:
             existing = connection.execute(
                 "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?",
@@ -242,9 +301,16 @@ class GmailActions:
         transport = self.transport
         if transport is None:
             raise ValueError("execute() requires a transport to reach Gmail")
-        approval = self.approvals.consume(approval_id, actor=actor, token=token)
-        preview = approval.preview
-        created = transport.create_draft(to=preview["to"], subject=preview["subject"], body=preview["body"])
+        message_id = _draft_message_id(approval_id)
+        if approval.state == "consumed":
+            created = transport.find_draft_by_message_id(message_id=message_id)
+            if created is None:
+                raise RuntimeError(
+                    "Gmail draft outcome is unknown after a consumed approval; create a new preview instead of retrying"
+                )
+        else:
+            approval = self.approvals.consume(approval_id, actor=actor, token=token)
+            created = transport.create_draft(message_id=message_id, **approval.preview)
         draft_id = created.get("id")
         if not isinstance(draft_id, str) or not draft_id:
             raise ValueError("Gmail did not return a draft id")
@@ -297,6 +363,9 @@ class GmailSendActions:
     def execute(self, approval_id: str, *, actor: str, token: str) -> GmailSendReceipt:
         self.database.migrate()
         idempotency_key = f"{self.action_type}:{approval_id}"
+        approval = self.approvals.verify(approval_id, actor=actor, token=token)
+        if approval.action_type != self.action_type:
+            raise PolicyError("approval is not for Gmail send")
         with self.database.connect() as connection:
             existing = connection.execute("SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
         if existing is not None:
@@ -304,13 +373,18 @@ class GmailSendActions:
             if existing["actor"] != actor:
                 raise PolicyError("approval actor does not match the requested action")
             return GmailSendReceipt(message_id=json.loads(existing["payload_json"])["message_id"], idempotency_key=idempotency_key, replayed=True)
-        approval = self.approvals.get(approval_id)
-        if approval is None or approval.action_type != self.action_type:
-            raise PolicyError("approval is not for Gmail send")
         if self.transport is None:
             raise ValueError("execute() requires a transport to reach Gmail")
-        consumed = self.approvals.consume(approval_id, actor=actor, token=token)
-        created = self.transport.send_message(**consumed.preview)
+        message_id = _sent_message_id(approval_id)
+        if approval.state == "consumed":
+            created = self.transport.find_sent_message_by_message_id(message_id=message_id)
+            if created is None:
+                raise RuntimeError(
+                    "Gmail send outcome is unknown after a consumed approval; create a new preview instead of retrying"
+                )
+        else:
+            self.approvals.consume(approval_id, actor=actor, token=token)
+            created = self.transport.send_message(message_id=message_id, **approval.preview)
         message_id = created.get("id")
         if not isinstance(message_id, str) or not message_id:
             raise ValueError("Gmail did not return a message id")
@@ -361,3 +435,13 @@ def _headers(payload: object) -> dict[str, str]:
         if isinstance(header, dict) and isinstance(header.get("name"), str) and isinstance(header.get("value"), str):
             result[header["name"].lower()] = header["value"]
     return result
+
+
+def _draft_message_id(approval_id: str) -> str:
+    """Return an RFC 2822 Message-ID used only to recover one local draft action."""
+    return f"<alfred-{approval_id}@local.invalid>"
+
+
+def _sent_message_id(approval_id: str) -> str:
+    """Return an RFC 2822 Message-ID used only to recover one send action."""
+    return f"<alfred-send-{approval_id}@local.invalid>"
