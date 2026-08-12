@@ -1,9 +1,11 @@
 from pathlib import Path
 
 import httpx
+import pytest
 
 from alfred.db import Database
-from alfred.github import GitHubClient, GitHubNotificationsSync
+from alfred.github import GitHubActions, GitHubClient, GitHubNotificationsSync
+from alfred.policy import ApprovalService, PolicyError
 
 
 def _notification(thread_id: str, updated_at: str, *, title: str = "Fix flaky test") -> dict:
@@ -73,3 +75,64 @@ def test_github_client_uses_the_authenticated_notifications_endpoint() -> None:
         assert client.list_notifications() == []
     finally:
         client.close()
+
+
+def test_github_issue_creation_is_previewed_then_approval_gated_and_replayed(tmp_path: Path) -> None:
+    class FakeGitHubWrite:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str | None]] = []
+
+        def create_issue(self, *, repository: str, title: str, body: str | None) -> dict:
+            self.calls.append((repository, title, body))
+            return {"number": 42, "html_url": "https://github.com/example/alfred/issues/42"}
+
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    write = FakeGitHubWrite()
+    actions = GitHubActions(database, approvals, write)
+    proposal = actions.propose_issue(
+        actor="nico", repository="example/alfred", title="Add a safe action", body="Please add it."
+    )
+    assert proposal.preview == {"repository": "example/alfred", "title": "Add a safe action", "body": "Please add it."}
+    assert write.calls == []
+
+    issued = approvals.approve(proposal.id, actor="nico")
+    first = actions.execute(proposal.id, actor="nico", token=issued.token)
+    second = actions.execute(proposal.id, actor="nico", token=issued.token)
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert second.issue_number == 42
+    assert write.calls == [("example/alfred", "Add a safe action", "Please add it.")]
+
+
+def test_github_issue_proposal_rejects_unscoped_repository_and_wrong_approval(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    actions = GitHubActions(database, approvals)
+    with pytest.raises(ValueError, match="owner/repository"):
+        actions.propose_issue(actor="nico", repository="https://github.com/example/alfred", title="No")
+
+    unrelated = approvals.propose(actor="nico", action_type="send_message", preview={})
+    issued = approvals.approve(unrelated.id, actor="nico")
+    with pytest.raises(PolicyError, match="not for GitHub"):
+        actions.execute(unrelated.id, actor="nico", token=issued.token)
+    assert approvals.get(unrelated.id).state == "approved"
+
+
+def test_github_client_posts_only_title_and_optional_body_to_issue_endpoint() -> None:
+    seen: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.headers["Authorization"] == "Bearer TOKEN"
+        seen["path"] = request.url.path
+        seen["body"] = request.content.decode("utf-8")
+        return httpx.Response(201, json={"number": 3})
+
+    client = GitHubClient("TOKEN", transport=httpx.MockTransport(capture))
+    try:
+        assert client.create_issue(repository="example/alfred", title="Issue", body=None)["number"] == 3
+    finally:
+        client.close()
+    assert seen == {"path": "/repos/example/alfred/issues", "body": '{"title":"Issue"}'}

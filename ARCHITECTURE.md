@@ -1,6 +1,6 @@
 # Alfred architecture
 
-Status: proposed MVP architecture<br>
+Status: local implementation in progress; slices 1-5 are substantially built<br>
 Last verified: 2026-08-11<br>
 Goal: a cheap, local-first, open-source personal secretary that remembers, briefs, and acts across many clients and services.
 
@@ -309,7 +309,7 @@ Additional invariants:
 |---|---|
 | MVP | Telegram long polling; local tasks/reminders; Ollama; manual memory import |
 | Assistant | Google Calendar read; Canvas upcoming/missing assignments; morning brief |
-| Developer | GitHub notifications/issues/PRs; repo-scoped fine-grained PAT, then GitHub App for distribution |
+| Developer | GitHub notifications with a dedicated classic PAT (`notifications` scope); issue/PR writes with a separate repo-scoped fine-grained PAT, then GitHub App for distribution |
 | Communications | Gmail read/draft, then send approval; Slack Socket Mode; inbound Alfred email |
 | Wearable | Google Health API read-only: sleep/activity/heart metrics with strict sensitive-data policy |
 | Clients | Claude/Cursor stdio MCP; ChatGPT via Secure MCP Tunnel or hosted OAuth endpoint |
@@ -325,9 +325,9 @@ The morning brief gathers data without an LLM, ranks due/overdue items using rul
 2. **First useful loop:** Telegram message → event log → task/reminder → Telegram receipt.
 3. **Daily secretary:** Google Calendar + Canvas read sync → persistent morning brief → late/missed-run recovery.
 4. **Memory:** typed temporal graph, provenance/confidence, hybrid retrieval, corrections, export/forget, local embeddings, and evaluation fixtures.
-5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes.
-6. **More surfaces:** Claude/Cursor; private ChatGPT tunnel; Slack/email; Google Health.
-7. **Notebook and polish:** Obsidian/Markdown projection, optional free mobile sync adapter, admin UI, encrypted backup/restore, installer, public documentation, and release signing.
+5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes. **Substantially built:** Calendar creates events, Gmail creates drafts only, and GitHub creates issues only after approval; email sending, PR writes, and durable external-write recovery are still future work.
+6. **More surfaces:** Claude/Cursor stdio is compatible through the local MCP server; private ChatGPT tunnel, Slack/email delivery, and Google Health remain unbuilt.
+7. **Notebook and polish:** Obsidian/Markdown projection and import are built; optional free mobile sync adapter, admin UI, encrypted backup/restore, installer, public documentation, and release signing remain unbuilt.
 
 The first acceptance test is end-to-end: tell Alfred on Telegram “my paper is due Friday; remind me Thursday,” see the sourced memory and task, receive the reminder, and see it ranked correctly in the next morning brief after a restart.
 

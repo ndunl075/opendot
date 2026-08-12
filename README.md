@@ -64,12 +64,20 @@ token, save it under service `alfred`, account `canvas-api-token`, then invoke
 only upcoming/missing assignment title, deadline, course label, and source link;
 grades, submissions, files, and assignment body text stay out of Alfred.
 
-GitHub is also read-only and opt-in. Save a repo-scoped fine-grained personal
-access token (notifications: read) under service `alfred`, account
-`github-token`, then run `alfred github-sync`. It copies only the unread
+GitHub is also read-only and opt-in. GitHub's notifications endpoint requires a
+classic personal access token with the `notifications` scope; save it under
+service `alfred`, account `github-token`, then run `alfred github-sync`. It copies only the unread
 notification's title, repository, reason (mention, review requested, etc.),
 subject type, and a browser deep link—never issue/PR body text or comments.
 Resolved or read notifications drop out of the next sync automatically.
+
+Issue creation is a separate write scope and credential, not part of routine
+sync. A fine-grained token needs **Issues: write** on only the repository you
+choose; save it as account `github-issue-token` under service `alfred`.
+`alfred github-issue-propose --actor nico --repository owner/repo --title "..."`
+creates a local preview; after `approval-approve`, `github-issue-execute`
+creates that exact issue once. It never creates issues during sync or without
+a fresh approval token.
 
 Gmail reuses the same `google-auth` grant as Calendar (the default scopes cover
 both). `alfred gmail-sync` reads the unread inbox and copies only each message's

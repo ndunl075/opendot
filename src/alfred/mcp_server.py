@@ -15,6 +15,7 @@ from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
 from .gmail import GmailActions, GmailClient
+from .github import GitHubActions, GitHubClient
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
 from .google_oauth import current_access_token
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
@@ -130,6 +131,15 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
         return approval.model_dump(mode="json")
 
     @server.tool()
+    def github_issue_propose(repository: str, title: str, body: str | None = None) -> dict:
+        """Preview a GitHub issue creation; nothing reaches GitHub until action_commit confirms it."""
+        policy.require_write(client_id, "github_issue_propose")
+        approval = GitHubActions(database, approvals).propose_issue(
+            actor=f"mcp:{client_id}", repository=repository, title=title, body=body
+        )
+        return approval.model_dump(mode="json")
+
+    @server.tool()
     def action_commit(approval_id: str, token: str) -> dict:
         """Consume a fresh approval token and perform the action it previewed."""
         policy.require_write(client_id, "action_commit")
@@ -151,6 +161,13 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             client = GmailClient(current_access_token(SystemKeyringSecretStore()))
             try:
                 receipt = GmailActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
+            finally:
+                client.close()
+            return receipt.model_dump(mode="json")
+        if approval.action_type == "github_issue_create":
+            client = GitHubClient(SystemKeyringSecretStore().get_required("github-issue-token"))
+            try:
+                receipt = GitHubActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
             finally:
                 client.close()
             return receipt.model_dump(mode="json")

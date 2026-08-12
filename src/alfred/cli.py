@@ -25,7 +25,7 @@ from .secret_store import SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
-from .github import GitHubClient, GitHubNotificationsSync
+from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import GmailActions, GmailClient, GmailSync
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
@@ -183,6 +183,20 @@ def build_parser() -> argparse.ArgumentParser:
     canvas_sync.add_argument("--secret-name", default="canvas-api-token")
     github_sync = subcommands.add_parser("github-sync", help="read-sync unread GitHub notifications")
     github_sync.add_argument("--secret-name", default="github-token")
+    github_issue_propose = subcommands.add_parser(
+        "github-issue-propose", help="preview creating a GitHub issue; nothing is posted yet"
+    )
+    github_issue_propose.add_argument("--actor", required=True)
+    github_issue_propose.add_argument("--repository", required=True, help="explicit owner/repository target")
+    github_issue_propose.add_argument("--title", required=True)
+    github_issue_propose.add_argument("--body")
+    github_issue_execute = subcommands.add_parser(
+        "github-issue-execute", help="consume a fresh approval token and create the previewed GitHub issue"
+    )
+    github_issue_execute.add_argument("--approval-id", required=True)
+    github_issue_execute.add_argument("--actor", required=True)
+    github_issue_execute.add_argument("--token", required=True)
+    github_issue_execute.add_argument("--secret-name", default="github-issue-token")
     subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
     calendar_propose = subcommands.add_parser(
         "calendar-event-propose", help="preview a calendar event write; nothing is sent to Google yet"
@@ -549,6 +563,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             client.close()
         print(result.model_dump_json())
+        return 0
+    if args.command == "github-issue-propose":
+        approval = GitHubActions(database, approvals).propose_issue(
+            actor=args.actor, repository=args.repository, title=args.title, body=args.body
+        )
+        print(approval.model_dump_json())
+        return 0
+    if args.command == "github-issue-execute":
+        client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            receipt = GitHubActions(database, approvals, client).execute(args.approval_id, actor=args.actor, token=args.token)
+        finally:
+            client.close()
+        print(receipt.model_dump_json())
         return 0
     if args.command == "gmail-sync":
         client = GmailClient(_google_access_token())
