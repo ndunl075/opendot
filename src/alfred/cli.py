@@ -297,10 +297,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     admin_token.add_argument("--secret-name", default="admin-ui-bearer-token")
     admin_run = subcommands.add_parser(
-        "admin-ui-run", help="run Alfred's read-only admin dashboard, bound to 127.0.0.1 only"
+        "admin-ui-run", help="run Alfred's read-only admin dashboard, bound to 127.0.0.1 by default"
     )
     admin_run.add_argument("--port", type=int, default=8200)
     admin_run.add_argument("--secret-name", default="admin-ui-bearer-token")
+    admin_run.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="bind address; 127.0.0.1 is unreachable from another device even over a VPN -- "
+        "pass this host's own VPN/Tailscale IP to view the dashboard from a phone, never 0.0.0.0 "
+        "unless your own firewall already restricts who can reach this port",
+    )
     propose = subcommands.add_parser("approval-propose", help="create a local preview approval")
     propose.add_argument("--actor", required=True)
     propose.add_argument("--action-type", required=True)
@@ -686,7 +693,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("admin UI bearer token already exists; refusing to overwrite it")
     if args.command == "admin-ui-run":
         token = SystemKeyringSecretStore().get_required(args.secret_name)
-        run_admin_ui(database, port=args.port, bearer_token_value=token)
+        run_admin_ui(database, port=args.port, bearer_token_value=token, host=args.host)
         return 0
     approvals = ApprovalService(database)
     if args.command == "approval-propose":

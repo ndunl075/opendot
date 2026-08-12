@@ -27,7 +27,7 @@ away from being reachable if you ever expose the port publicly.
 - Not something Alfred is meant to expose to the public internet. Section 5
   calls for "a private encrypted network" — reach this from your phone
   through a VPN (Tailscale and WireGuard are both free, open-source, and
-  well suited to this), not a forwarded router port.
+  well suited to this), never a forwarded router port.
 
 ## 1. Start CouchDB
 
@@ -38,8 +38,14 @@ notepad .env   # set a real COUCHDB_USER and COUCHDB_PASSWORD
 docker compose up -d
 ```
 
-`docker-compose.yml` binds CouchDB to `127.0.0.1:5984` only, deliberately —
-see the comment in that file before changing it.
+`docker-compose.yml` binds CouchDB to `127.0.0.1:5984` by default. That's
+deliberately safe, but it also means it is **not** reachable from your
+phone yet even over a VPN — `127.0.0.1` only ever accepts connections that
+originate on this machine itself, no matter what network route got there.
+To actually reach it from a phone, set `ALFRED_VAULT_SYNC_HOST` in `.env`
+to this host's own VPN/Tailscale IP (`tailscale ip -4`) before running
+`docker compose up`, and restart the container (`docker compose up -d`
+again) if you change it later. Never set it to `0.0.0.0`.
 
 ## 2. Configure CouchDB for LiveSync
 

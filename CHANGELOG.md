@@ -9,28 +9,37 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
-- Read-only admin dashboard (`alfred admin-ui-run`, `admin_ui.py`): agenda,
-  pending approvals, connector health, and recent audit trail at
-  `127.0.0.1:8200`. No write actions — approving a pending action still
-  goes through the CLI. Same loopback-only, bearer-token-gated invariant as
+- Read-only, Notion-styled admin dashboard (`alfred admin-ui-run`,
+  `admin_ui.py`): agenda, pending approvals, connector health, and recent
+  audit trail, at `127.0.0.1:8200` by default. No write actions — approving
+  a pending action still goes through the CLI. Bearer-token-gated like
   `mcp-http-run`, delivered via a login page + `HttpOnly`/`SameSite=Strict`
   cookie (browsers can't attach a custom header to a plain navigation) as
-  well as a raw `Authorization` header for scripted access. The shared
-  bearer-auth middleware moved to a new `http_auth.py` so the MCP HTTP
-  transport and the admin UI use one implementation, not two.
+  well as a raw `Authorization` header for scripted access. Unlike every
+  other local HTTP surface in this codebase, `--host` is a real,
+  operator-set option (still defaulting to loopback-only) since this one is
+  meant for a person to look at, sometimes from a phone over a VPN — plain
+  `127.0.0.1` is unreachable from another device regardless of network
+  route. Responsive down to phone-width screens; renders identically in
+  Edge, Safari, Firefox, and Chrome. The shared bearer-auth middleware
+  moved to a new `http_auth.py` so the MCP HTTP transport and the admin UI
+  use one implementation, not two.
 - ChatGPT / OpenAI Secure MCP Tunnel support (`deploy/openai-tunnel/`):
   documents pointing OpenAI's own `tunnel-client` (not vendored here) at
   `alfred-mcp` over stdio. `alfred-mcp` gained a `--client-id` flag
   (default unchanged: `local-mcp`) so the tunnel gets its own separately
   scoped grant instead of sharing Claude/Cursor's default identity.
 - Optional mobile vault sync (`deploy/couchdb/`, `alfred vault-sync-status`):
-  a self-hosted CouchDB service (loopback-bound by default, VPN for remote
-  reach) for a vetted open-source Obsidian community plugin (Self-hosted
-  LiveSync) to replicate `alfred-vault/` against. OS-agnostic on Alfred's
-  side — the phone OS only determines which third-party client app an
-  operator installs, not what Alfred's server needs to expose. Alfred's own
-  code never becomes a sync client; `vault-sync-status` only confirms the
-  server is reachable.
+  a self-hosted CouchDB service, loopback-bound by default, for a vetted
+  open-source Obsidian community plugin (Self-hosted LiveSync) to replicate
+  `alfred-vault/` against. Set `ALFRED_VAULT_SYNC_HOST` to this host's own
+  VPN/Tailscale IP for actual phone reach — plain loopback binding accepts
+  no connection from another device regardless of network route, VPN
+  included, so it does nothing on its own for remote access. OS-agnostic on
+  Alfred's side — the phone OS only determines which third-party client app
+  an operator installs, not what Alfred's server needs to expose. Alfred's
+  own code never becomes a sync client; `vault-sync-status` only confirms
+  the server is reachable.
 - Google Health read-only sync (`google_health.py`, `alfred health-sync`,
   `--google-health` for `alfred run`): steps, sleep, and heart-rate data
   points as `sensitive`-tagged events, reusing the existing Google OAuth
