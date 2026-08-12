@@ -29,7 +29,9 @@ jobs:
 
       - name: Run the test suite against the built package
         run: |
-          python -m pip install "dist/*.whl"
+          # Unquoted so bash actually glob-expands it -- quoting this passes
+          # pip the literal string "dist/*.whl", which isn't a real filename.
+          python -m pip install dist/*.whl
           python -m pip install ".[dev]"
           python -m pytest -q
 
