@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -57,10 +58,16 @@ def test_configure_overwrites_a_previous_configuration(tmp_path: Path) -> None:
     assert load_configured_args(alfred_dir=alfred_dir) == ["run", "--pair", "3:4"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="pywin32 (win32event/win32service/servicemanager) is Windows-only")
 def test_service_class_can_be_built_without_actually_registering_a_service() -> None:
     """Confirms the pywin32 import and class definition succeed; SvcDoRun/
     SvcStop themselves need a real SCM context to exercise and are covered
-    by manual verification (documented in README), not unit tests."""
+    by manual verification (documented in README), not unit tests.
+
+    Everything else in this file is pure filesystem logic and runs on any
+    OS -- this is the one test that actually imports pywin32, which is why
+    it alone is skipped off Windows (e.g. the release workflow's
+    ubuntu-latest build/test step)."""
     from alfred.winservice import _build_service_class
 
     service_class = _build_service_class()
