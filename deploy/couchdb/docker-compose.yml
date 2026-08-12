@@ -1,0 +1,30 @@
+# Self-hosted CouchDB for optional mobile vault sync.
+#
+# See deploy/couchdb/README.md before running this -- it covers the
+# required post-startup configuration (CORS, single-node init), the
+# Obsidian-side plugin setup, and why the port below binds to 127.0.0.1
+# only rather than every interface.
+#
+#   cd deploy/couchdb
+#   copy .env.example .env   (Windows)  /  cp .env.example .env   (else)
+#   # edit .env with a real username/password first
+#   docker compose up -d
+
+services:
+  couchdb:
+    image: couchdb:3
+    container_name: alfred-vault-couchdb
+    user: "5984:5984"
+    environment:
+      - COUCHDB_USER=${COUCHDB_USER}
+      - COUCHDB_PASSWORD=${COUCHDB_PASSWORD}
+    volumes:
+      - ./data:/opt/couchdb/data
+      - ./config:/opt/couchdb/etc/local.d
+    ports:
+      # Loopback-only by design (matches ARCHITECTURE.md section 5: "over a
+      # private encrypted network," never a raw port-forward). Reach it from
+      # a phone through a VPN (Tailscale/WireGuard) into this host, not by
+      # changing this to "5984:5984" and forwarding it on your router.
+      - "127.0.0.1:5984:5984"
+    restart: unless-stopped

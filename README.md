@@ -302,6 +302,16 @@ its memory (the old version stays visible as history) and deleting a note from
 disk does not delete the memory it produced—only `forget` does that. Files
 Alfred itself generated (`managed: true`) are never re-imported as testimony.
 
+### Optional mobile sync
+
+Alfred does not use paid Obsidian Sync. `deploy/couchdb/` sets up the
+self-hosted CouchDB service section 5 describes—read `deploy/couchdb/README.md`
+before running it. Alfred's own code never syncs the vault to a phone
+itself; a vetted, open-source Obsidian community plugin (Self-hosted
+LiveSync) does that entirely client-side, replicating only `alfred-vault/`,
+never `alfred.db`, secrets, or logs. `alfred vault-sync-status --url
+http://127.0.0.1:5984` confirms the server side is reachable.
+
 ## MCP server
 
 `alfred-mcp` runs Alfred's stdio MCP server for Claude Desktop/Code, Cursor,

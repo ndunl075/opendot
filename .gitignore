@@ -9,3 +9,5 @@ dist/
 build/
 *.egg-info/
 .env
+deploy/couchdb/data/
+deploy/couchdb/config/
