@@ -17,6 +17,7 @@ dependencies = [
   "mcp>=1.10,<2",
   "pydantic>=2.8,<3",
   "sqlite-vec>=0.1.9,<1",
+  "slack-sdk>=3.36,<4",
   "tzdata>=2025.2,<2027",
 ]
 

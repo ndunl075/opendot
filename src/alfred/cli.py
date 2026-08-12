@@ -33,6 +33,8 @@ from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
 from .runner import AlfredRunner, ConnectorSync
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
+from .slack import SlackGateway, SlackPair
+from .slack_socket import SlackBotClient, SlackSocketReceiver
 
 
 def _database_from_args(args: argparse.Namespace) -> Database:
@@ -256,14 +258,16 @@ def build_parser() -> argparse.ArgumentParser:
     gmail_send_execute.add_argument("--approval-id", required=True)
     gmail_send_execute.add_argument("--actor", required=True)
     gmail_send_execute.add_argument("--token", required=True)
-    run = subcommands.add_parser(
-        "run", help="run Alfred continuously: Telegram intake/delivery, due jobs, and connector sync"
-    )
+    run = subcommands.add_parser("run", help="run Alfred continuously: paired message channels, due jobs, and connector sync")
     run.add_argument("--pair", action="append", default=[], help="locally paired CHAT_ID:USER_ID; enables Telegram intake")
     run.add_argument(
         "--chat-id", action="append", type=int, default=[], help="locally allowed delivery chat ID; enables Telegram delivery"
     )
     run.add_argument("--telegram-secret-name", default="telegram-bot-token")
+    run.add_argument("--slack-pair", action="append", default=[], help="locally paired Slack CHANNEL_ID:USER_ID; enables Slack intake")
+    run.add_argument("--slack-channel-id", action="append", default=[], help="locally allowed Slack delivery channel ID")
+    run.add_argument("--slack-app-secret-name", default="slack-app-token")
+    run.add_argument("--slack-bot-secret-name", default="slack-bot-token")
     run.add_argument("--calendar-id", default="primary")
     run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
     run.add_argument("--canvas-secret-name", default="canvas-api-token")
@@ -521,9 +525,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "run":
         pairs = frozenset(_parse_telegram_pair(value) for value in args.pair)
         chat_ids = frozenset(args.chat_id)
+        slack_pairs = frozenset(_parse_slack_pair(value) for value in args.slack_pair)
+        slack_channel_ids = frozenset(args.slack_channel_id)
         telegram_transport = (
             TelegramBotClient(SystemKeyringSecretStore().get_required(args.telegram_secret_name))
             if pairs or chat_ids
+            else None
+        )
+        slack_bot = (
+            SlackBotClient(SystemKeyringSecretStore().get_required(args.slack_bot_secret_name))
+            if slack_pairs or slack_channel_ids
+            else None
+        )
+        slack_receiver = (
+            SlackSocketReceiver(
+                app_token=SystemKeyringSecretStore().get_required(args.slack_app_secret_name),
+                bot_client=slack_bot,
+                gateway=SlackGateway(database, set(slack_pairs)),
+            )
+            if slack_pairs and slack_bot is not None
             else None
         )
         connectors: list[ConnectorSync] = [
@@ -560,17 +580,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             telegram_transport=telegram_transport,
             telegram_pairs=pairs,
             telegram_chat_ids=chat_ids,
+            slack_transport=slack_bot,
+            slack_pairs=slack_pairs,
+            slack_channel_ids=slack_channel_ids,
             connectors=tuple(connectors),
             poll_timeout_seconds=args.poll_timeout,
             idle_sleep_seconds=args.idle_sleep,
         )
         try:
+            if slack_receiver is not None:
+                slack_receiver.start()
             runner.run_forever(iterations=args.iterations)
         except KeyboardInterrupt:
             print("\n[alfred run] stopped")
         finally:
             if telegram_transport is not None:
                 telegram_transport.close()
+            if slack_receiver is not None:
+                slack_receiver.close()
         return 0
     if args.command == "google-auth":
         secret_store = SystemKeyringSecretStore()
@@ -779,6 +806,15 @@ def _parse_telegram_pair(value: str) -> TelegramPair:
         return TelegramPair(chat_id=int(chat_id), user_id=int(user_id))
     except ValueError as error:
         raise SystemExit("--pair must be CHAT_ID:USER_ID") from error
+
+
+def _parse_slack_pair(value: str) -> SlackPair:
+    channel_id, separator, user_id = value.partition(":")
+    if not separator or not channel_id or not user_id:
+        raise SystemExit("--slack-pair must be CHANNEL_ID:USER_ID")
+    if not channel_id.isalnum() or not user_id.isalnum():
+        raise SystemExit("--slack-pair IDs must be alphanumeric Slack IDs")
+    return SlackPair(channel_id=channel_id, user_id=user_id)
 
 
 if __name__ == "__main__":

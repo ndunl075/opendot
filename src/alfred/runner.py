@@ -22,6 +22,7 @@ from .db import Database
 from .jobs import JobRunner
 from .telegram import TelegramPair
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker, TelegramTransport
+from .slack import SlackOutboxWorker, SlackPair, SlackTransport
 
 
 T = TypeVar("T")
@@ -41,6 +42,7 @@ class RunOnceReport:
     telegram_polled: bool
     jobs_executed: int
     telegram_delivered: int
+    slack_delivered: int
     connectors_synced: list[str]
     errors: list[str] = field(default_factory=list)
 
@@ -53,6 +55,9 @@ class AlfredRunner:
         telegram_transport: TelegramTransport | None = None,
         telegram_pairs: frozenset[TelegramPair] = frozenset(),
         telegram_chat_ids: frozenset[int] = frozenset(),
+        slack_transport: SlackTransport | None = None,
+        slack_pairs: frozenset[SlackPair] = frozenset(),
+        slack_channel_ids: frozenset[str] = frozenset(),
         connectors: tuple[ConnectorSync, ...] = (),
         poll_timeout_seconds: int = 20,
         idle_sleep_seconds: float = 5.0,
@@ -63,6 +68,9 @@ class AlfredRunner:
         self.telegram_transport = telegram_transport
         self.telegram_pairs = telegram_pairs
         self.telegram_chat_ids = telegram_chat_ids
+        self.slack_transport = slack_transport
+        self.slack_pairs = slack_pairs
+        self.slack_channel_ids = slack_channel_ids
         self.connectors = connectors
         self.poll_timeout_seconds = poll_timeout_seconds
         self.idle_sleep_seconds = idle_sleep_seconds
@@ -108,6 +116,16 @@ class AlfredRunner:
             )
             telegram_delivered = len(delivered) if delivered_ok and delivered is not None else 0
 
+        slack_delivered = 0
+        if self.slack_transport is not None and self.slack_channel_ids:
+            channel_ids = set(self.slack_channel_ids)
+            delivered_ok, delivered = self._safe(
+                "slack_deliver",
+                lambda: SlackOutboxWorker(self.database, self.slack_transport, channel_ids).deliver_pending(),
+                errors,
+            )
+            slack_delivered = len(delivered) if delivered_ok and delivered is not None else 0
+
         synced: list[str] = []
         for connector in self.connectors:
             if not self._due(connector):
@@ -121,6 +139,7 @@ class AlfredRunner:
             telegram_polled=telegram_polled,
             jobs_executed=jobs_executed,
             telegram_delivered=telegram_delivered,
+            slack_delivered=slack_delivered,
             connectors_synced=synced,
             errors=errors,
         )
