@@ -136,3 +136,16 @@ def test_github_client_posts_only_title_and_optional_body_to_issue_endpoint() ->
     finally:
         client.close()
     assert seen == {"path": "/repos/example/alfred/issues", "body": '{"title":"Issue"}'}
+
+
+def test_pr_comment_is_approval_gated(tmp_path: Path) -> None:
+    class Fake:
+        def __init__(self): self.calls = []
+        def create_pr_comment(self, **kwargs): self.calls.append(kwargs); return {"id": 9, "html_url": "https://github.com/example/alfred/pull/2#issuecomment-9"}
+    database = Database(tmp_path / "alfred.db"); approvals = ApprovalService(database); fake = Fake()
+    actions = GitHubActions(database, approvals, fake)
+    proposal = actions.propose_pr_comment(actor="nico", repository="example/alfred", pull_number=2, body="Looks good.")
+    assert fake.calls == []
+    issued = approvals.approve(proposal.id, actor="nico")
+    assert actions.execute_pr_comment(proposal.id, actor="nico", token=issued.token).issue_number == 9
+    assert fake.calls == [{"repository": "example/alfred", "pull_number": 2, "body": "Looks good."}]

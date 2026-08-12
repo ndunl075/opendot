@@ -24,6 +24,8 @@ class GitHubTransport(Protocol):
 class GitHubIssueWriteTransport(Protocol):
     def create_issue(self, *, repository: str, title: str, body: str | None) -> dict[str, Any]: ...
 
+    def create_pr_comment(self, *, repository: str, pull_number: int, body: str) -> dict[str, Any]: ...
+
 
 class GitHubClient:
     """Client for the authenticated user's unread notifications feed.
@@ -72,6 +74,15 @@ class GitHubClient:
         result = response.json()
         if not isinstance(result, dict):
             raise ValueError("GitHub issue-create response must be an object")
+        return result
+
+    def create_pr_comment(self, *, repository: str, pull_number: int, body: str) -> dict[str, Any]:
+        owner, repo = _repository_parts(repository)
+        response = self._client.post(f"/repos/{owner}/{repo}/issues/{pull_number}/comments", json={"body": body})
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("GitHub PR comment response must be an object")
         return result
 
     def _get_paginated(self, path: str, params: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -188,6 +199,7 @@ class GitHubActions:
 
     connector_name = "github"
     action_type = "github_issue_create"
+    pr_comment_action_type = "github_pr_comment_create"
 
     def __init__(
         self, database: Database, approvals: ApprovalService, transport: GitHubIssueWriteTransport | None = None
@@ -269,6 +281,35 @@ class GitHubActions:
         return GitHubIssueReceipt(
             issue_number=issue_number, html_url=html_url, idempotency_key=idempotency_key, replayed=False
         )
+
+    def propose_pr_comment(self, *, actor: str, repository: str, pull_number: int, body: str) -> Approval:
+        _repository_parts(repository)
+        if pull_number <= 0 or not body.strip():
+            raise ValueError("pull number must be positive and comment body must not be empty")
+        return self.approvals.propose(actor=actor, action_type=self.pr_comment_action_type,
+            preview={"repository": repository, "pull_number": pull_number, "body": body})
+
+    def execute_pr_comment(self, approval_id: str, *, actor: str, token: str) -> GitHubIssueReceipt:
+        key = f"{self.pr_comment_action_type}:{approval_id}"
+        with self.database.connect() as connection:
+            existing = connection.execute("SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (key,)).fetchone()
+        if existing:
+            self.approvals.verify(approval_id, actor=actor, token=token)
+            if existing["actor"] != actor: raise PolicyError("approval actor does not match the requested action")
+            data = json.loads(existing["payload_json"])
+            return GitHubIssueReceipt(issue_number=data["comment_id"], html_url=data.get("html_url"), idempotency_key=key, replayed=True)
+        approval = self.approvals.get(approval_id)
+        if approval is None or approval.action_type != self.pr_comment_action_type: raise PolicyError("approval is not for GitHub PR comment")
+        if self.transport is None: raise ValueError("execute_pr_comment() requires a transport")
+        created = self.transport.create_pr_comment(**self.approvals.consume(approval_id, actor=actor, token=token).preview)
+        comment_id = created.get("id")
+        if not isinstance(comment_id, int) or comment_id <= 0: raise ValueError("GitHub did not return a valid comment id")
+        data = {"comment_id": comment_id, "html_url": created.get("html_url")}
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute("INSERT INTO action_receipts (idempotency_key, connector, action_type, approval_id, actor, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (key, self.connector_name, self.pr_comment_action_type, approval_id, actor, json.dumps(data, sort_keys=True), datetime.now(UTC).isoformat()))
+        return GitHubIssueReceipt(issue_number=comment_id, html_url=data["html_url"], idempotency_key=key, replayed=False)
 
 def _normalize_notification(item: dict[str, Any]) -> dict[str, Any]:
     thread_id = item.get("id")

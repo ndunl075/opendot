@@ -211,6 +211,10 @@ def build_parser() -> argparse.ArgumentParser:
     github_issue_execute.add_argument("--actor", required=True)
     github_issue_execute.add_argument("--token", required=True)
     github_issue_execute.add_argument("--secret-name", default="github-issue-token")
+    pr_propose = subcommands.add_parser("github-pr-comment-propose", help="preview a GitHub PR conversation comment")
+    pr_propose.add_argument("--actor", required=True); pr_propose.add_argument("--repository", required=True); pr_propose.add_argument("--pull-number", required=True, type=int); pr_propose.add_argument("body")
+    pr_execute = subcommands.add_parser("github-pr-comment-execute", help="post an approved GitHub PR comment")
+    pr_execute.add_argument("--approval-id", required=True); pr_execute.add_argument("--actor", required=True); pr_execute.add_argument("--token", required=True); pr_execute.add_argument("--secret-name", default="github-pr-token")
     subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
     calendar_propose = subcommands.add_parser(
         "calendar-event-propose", help="preview a calendar event write; nothing is sent to Google yet"
@@ -624,6 +628,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             receipt = GitHubActions(database, approvals, client).execute(args.approval_id, actor=args.actor, token=args.token)
         finally:
             client.close()
+        print(receipt.model_dump_json())
+        return 0
+    if args.command == "github-pr-comment-propose":
+        print(GitHubActions(database, approvals).propose_pr_comment(actor=args.actor, repository=args.repository, pull_number=args.pull_number, body=args.body).model_dump_json())
+        return 0
+    if args.command == "github-pr-comment-execute":
+        client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try: receipt = GitHubActions(database, approvals, client).execute_pr_comment(args.approval_id, actor=args.actor, token=args.token)
+        finally: client.close()
         print(receipt.model_dump_json())
         return 0
     if args.command == "gmail-sync":
