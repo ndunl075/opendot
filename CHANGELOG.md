@@ -9,6 +9,14 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Optional mobile vault sync (`deploy/couchdb/`, `alfred vault-sync-status`):
+  a self-hosted CouchDB service (loopback-bound by default, VPN for remote
+  reach) for a vetted open-source Obsidian community plugin (Self-hosted
+  LiveSync) to replicate `alfred-vault/` against. OS-agnostic on Alfred's
+  side — the phone OS only determines which third-party client app an
+  operator installs, not what Alfred's server needs to expose. Alfred's own
+  code never becomes a sync client; `vault-sync-status` only confirms the
+  server is reachable.
 - Google Health read-only sync (`google_health.py`, `alfred health-sync`,
   `--google-health` for `alfred run`): steps, sleep, and heart-rate data
   points as `sensitive`-tagged events, reusing the existing Google OAuth

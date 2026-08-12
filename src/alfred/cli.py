@@ -40,6 +40,7 @@ from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
 from .mcp_server import generate_http_token, run_streamable_http
 from .winservice import configure as configure_windows_service
+from .vault_sync import check_couchdb
 
 
 def database_from_args(args: argparse.Namespace) -> Database:
@@ -158,6 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
     subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
+    vault_sync_status = subcommands.add_parser(
+        "vault-sync-status", help="check whether the self-hosted CouchDB behind optional mobile vault sync is reachable"
+    )
+    vault_sync_status.add_argument("--url", default="http://127.0.0.1:5984", help="the CouchDB instance's base URL")
     backup_create = subcommands.add_parser("backup-create", help="create an encrypted local Alfred database backup")
     backup_create.add_argument("--output", type=Path, required=True)
     backup_create.add_argument("--secret-name", default="backup-encryption-key")
@@ -447,6 +452,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "connector-status":
         print(json.dumps([health.model_dump(mode="json") for health in connector_health(database)]))
+        return 0
+    if args.command == "vault-sync-status":
+        print(check_couchdb(args.url).model_dump_json())
         return 0
     if args.command == "backup-create":
         receipt = EncryptedBackupService(database, ApprovalService(database)).create(
