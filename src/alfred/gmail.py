@@ -18,8 +18,11 @@ from .events import EventStore
 from .policy import Approval, ApprovalService, PolicyError
 
 
+DEFAULT_UNREAD_LIMIT = 500
+
+
 class GmailTransport(Protocol):
-    def list_unread_inbox(self) -> list[dict[str, Any]]: ...
+    def list_unread_inbox(self, *, limit: int = DEFAULT_UNREAD_LIMIT) -> list[dict[str, Any]]: ...
 
 
 class GmailWriteTransport(Protocol):
@@ -57,16 +60,29 @@ class GmailClient:
     def close(self) -> None:
         self._client.close()
 
-    def list_unread_inbox(self) -> list[dict[str, Any]]:
-        return [self._get_message(message_id) for message_id in self._list_message_ids()]
+    def list_unread_inbox(self, *, limit: int = DEFAULT_UNREAD_LIMIT) -> list[dict[str, Any]]:
+        return [self._get_message(message_id) for message_id in self._list_message_ids(limit=limit)]
 
-    def _list_message_ids(self) -> list[str]:
-        # 100 pages of 100 matches the cap CanvasClient._get_paginated already
-        # uses in this codebase -- generous enough for a large real unread
-        # backlog (up to 10,000 messages) while still a real safety valve
-        # against a runaway loop, not an arbitrary number picked in isolation.
+    def _list_message_ids(self, *, limit: int) -> list[str]:
+        """Return up to `limit` unread message IDs.
+
+        Deliberately bounded, not "every unread message" -- a real inbox can
+        have an unread backlog in the tens of thousands, and syncing that
+        wholesale every cycle means thousands of individual per-message API
+        calls (list_unread_inbox fetches each one separately) for messages
+        that are mostly not actionable "right now" content anyway. Matches
+        the canonical rule at the top of ARCHITECTURE.md: "store broadly,
+        retrieve narrowly." Gmail's search results are newest-first by
+        default, so this naturally keeps the most recent unread mail, which
+        is what a morning brief actually needs.
+
+        Still hard-fails past 100 pages as a genuine safety valve (a runaway
+        loop should never go unbounded), but that no longer fires for a
+        large-but-ordinary backlog the way the old fixed 20-page cap did --
+        this stops as soon as `limit` is reached, well before that.
+        """
         ids: list[str] = []
-        params: dict[str, Any] = {"q": "is:unread in:inbox", "maxResults": 100}
+        params: dict[str, Any] = {"q": "is:unread in:inbox", "maxResults": min(100, limit)}
         for _ in range(100):
             response = self._client.get("/users/me/messages", params=params)
             response.raise_for_status()
@@ -76,10 +92,12 @@ class GmailClient:
                 for message in payload.get("messages", [])
                 if isinstance(message, dict) and isinstance(message.get("id"), str)
             )
+            if len(ids) >= limit:
+                return ids[:limit]
             page_token = payload.get("nextPageToken")
             if not page_token:
                 return ids
-            params = {"q": "is:unread in:inbox", "maxResults": 100, "pageToken": page_token}
+            params = {"q": "is:unread in:inbox", "maxResults": min(100, limit - len(ids)), "pageToken": page_token}
         raise ValueError("Gmail pagination exceeded 100 pages")
 
     def _get_message(self, message_id: str) -> dict[str, Any]:
@@ -173,19 +191,27 @@ class GmailSyncResult(BaseModel):
 
 
 class GmailSync:
-    """Snapshot the current unread inbox; a read or archived message drops out."""
+    """Snapshot the current unread inbox; a read or archived message drops out.
+
+    A message can also drop out of the snapshot simply for falling outside
+    the most-recent `limit` window on a later sync, not just for being read
+    or archived -- a known, deliberate trade-off of bounding the sync (see
+    `GmailClient._list_message_ids`'s docstring), called out here rather
+    than silently blurring the two cases together.
+    """
 
     connector_name = "gmail"
     account_name = "self"
 
-    def __init__(self, database: Database, transport: GmailTransport) -> None:
+    def __init__(self, database: Database, transport: GmailTransport, *, limit: int = DEFAULT_UNREAD_LIMIT) -> None:
         self.database = database
         self.transport = transport
+        self.limit = limit
 
     def sync(self) -> GmailSyncResult:
         self.database.migrate()
         try:
-            messages = self.transport.list_unread_inbox()
+            messages = self.transport.list_unread_inbox(limit=self.limit)
         except Exception as error:
             self._store_error(error.__class__.__name__)
             raise

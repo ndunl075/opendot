@@ -21,7 +21,7 @@ class FakeInbox:
     def __init__(self, messages: list[dict]) -> None:
         self.messages = messages
 
-    def list_unread_inbox(self):
+    def list_unread_inbox(self, *, limit=500):
         return self.messages
 
 

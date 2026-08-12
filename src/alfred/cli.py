@@ -29,7 +29,7 @@ from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_acces
 from .canvas import CanvasClient, CanvasSync
 from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
-from .gmail import GmailActions, GmailClient, GmailSendActions, GmailSync
+from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_inbound import GmailInboundGateway
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
@@ -365,7 +365,13 @@ def build_parser() -> argparse.ArgumentParser:
     pr_propose.add_argument("--actor", required=True); pr_propose.add_argument("--repository", required=True); pr_propose.add_argument("--pull-number", required=True, type=int); pr_propose.add_argument("body")
     pr_execute = subcommands.add_parser("github-pr-comment-execute", help="post an approved GitHub PR comment")
     pr_execute.add_argument("--approval-id", required=True); pr_execute.add_argument("--actor", required=True); pr_execute.add_argument("--token", required=True); pr_execute.add_argument("--secret-name", default="github-pr-token")
-    subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
+    gmail_sync = subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
+    gmail_sync.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_UNREAD_LIMIT,
+        help="max unread messages to sync, most recent first; bounded so a large backlog doesn't mean thousands of API calls every cycle",
+    )
     gmail_inbound_poll = subcommands.add_parser(
         "gmail-inbound-poll", help="turn 'Task:'/'Remind:' subject commands from allowed senders into local tasks"
     )
@@ -827,7 +833,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "gmail-sync":
         client = GmailClient(_google_access_token())
         try:
-            result = GmailSync(database, client).sync()
+            result = GmailSync(database, client, limit=args.limit).sync()
         finally:
             client.close()
         print(result.model_dump_json())
