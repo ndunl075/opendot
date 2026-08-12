@@ -152,3 +152,47 @@ def test_connector_status_reports_sync_health_without_credentials(tmp_path: Path
     assert status[0]["last_error"] is None
     # Pydantic's JSON mode renders UTC as "Z"; compare the parsed instant, not the string form.
     assert datetime.fromisoformat(status[0]["last_success_at"]) == datetime.fromisoformat(recent)
+
+
+def test_task_upsert_creates_then_updates_without_clearing_the_due_date(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"task_upsert"})
+    server = create_server(database_path)
+
+    created = _call(server, "task_upsert", {"title": "Submit paper", "due_at": "2026-08-20T09:00:00-04:00"})
+    assert (created["title"], created["state"]) == ("Submit paper", "open")
+
+    updated = _call(server, "task_upsert", {"title": "Submit final paper", "task_id": created["id"]})
+    assert updated["id"] == created["id"]
+    assert updated["title"] == "Submit final paper"
+    assert updated["due_at"] == created["due_at"]  # omitting due_at must not clear it
+
+
+def test_task_complete_is_idempotent_through_mcp(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"task_upsert", "task_complete"})
+    server = create_server(database_path)
+    created = _call(server, "task_upsert", {"title": "Submit paper"})
+
+    first = _call(server, "task_complete", {"task_id": created["id"]})
+    second = _call(server, "task_complete", {"task_id": created["id"]})
+
+    assert first["state"] == "completed"
+    assert second["state"] == "completed"
+
+
+def test_reminder_set_creates_its_own_task_when_none_is_given(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"reminder_set"})
+    server = create_server(database_path)
+
+    job = _call(
+        server,
+        "reminder_set",
+        {"text": "Call advisor", "run_at": "2026-08-15T09:00:00-04:00", "chat_id": 20},
+    )
+
+    assert job["run_at"] == "2026-08-15T13:00:00Z"
+    with Database(database_path).connect() as connection:
+        row = connection.execute("SELECT title, state FROM tasks WHERE id = ?", (job["task_id"],)).fetchone()
+    assert (row["title"], row["state"]) == ("Call advisor", "open")

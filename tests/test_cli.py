@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from alfred.cli import main
+from alfred.db import Database
 
 
 def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
@@ -221,3 +222,59 @@ def test_cli_proposes_a_calendar_event_without_any_google_credential(tmp_path: P
     assert proposed["action_type"] == "calendar_event_create"
     assert proposed["preview"]["summary"] == "Advisor meeting"
     assert proposed["state"] == "pending"
+
+
+def test_cli_creates_updates_and_completes_a_task(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert main(["--db", str(database_path), "task-upsert", "Submit paper", "--due-at", "2026-08-20T09:00:00-04:00"]) == 0
+    created = json.loads(capsys.readouterr().out)
+    assert (created["title"], created["state"], created["due_at"]) == ("Submit paper", "open", "2026-08-20T09:00:00-04:00")
+
+    assert (
+        main(
+            [
+                "--db",
+                str(database_path),
+                "task-upsert",
+                "Submit final paper",
+                "--task-id",
+                created["id"],
+                "--due-at",
+                "2026-08-21T09:00:00-04:00",
+            ]
+        )
+        == 0
+    )
+    updated = json.loads(capsys.readouterr().out)
+    assert updated["id"] == created["id"]
+    assert updated["title"] == "Submit final paper"
+
+    assert main(["--db", str(database_path), "task-complete", "--task-id", created["id"]]) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["state"] == "completed"
+
+
+def test_cli_sets_a_reminder_creating_its_own_task(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert (
+        main(
+            [
+                "--db",
+                str(database_path),
+                "reminder-set",
+                "Call advisor",
+                "--run-at",
+                "2026-08-15T09:00:00-04:00",
+                "--chat-id",
+                "20",
+            ]
+        )
+        == 0
+    )
+    job = json.loads(capsys.readouterr().out)
+    assert job["run_at"] == "2026-08-15T13:00:00Z"
+    with Database(database_path).connect() as connection:
+        row = connection.execute("SELECT title, state FROM tasks WHERE id = ?", (job["task_id"],)).fetchone()
+    assert (row["title"], row["state"]) == ("Call advisor", "open")

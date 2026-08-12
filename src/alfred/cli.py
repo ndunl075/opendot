@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from uuid import uuid4
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Sequence
@@ -13,8 +14,11 @@ from .config import Settings
 from .connector_health import connector_health
 from .db import Database
 from .briefing import BriefingService
+from .events import EventStore
 from .jobs import JobRunner
 from .memory_graph import MemoryActions, MemoryGraph
+from .reminders import ReminderStore
+from .tasks import UNSET, TaskStore
 from .vault import VaultImporter, VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SystemKeyringSecretStore
@@ -66,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_brief.add_argument("--chat-id", required=True, type=int)
     schedule_brief.add_argument("--at", required=True, help="local 24-hour HH:MM time")
     schedule_brief.add_argument("--timezone", required=True, help="IANA timezone, e.g. America/New_York")
+    task_upsert = subcommands.add_parser("task-upsert", help="create a task, or update one's title/due date by --task-id")
+    task_upsert.add_argument("title")
+    task_upsert.add_argument("--task-id", help="update this existing task instead of creating a new one")
+    task_upsert.add_argument("--due-at", help="ISO-8601 time with timezone")
+    task_complete = subcommands.add_parser("task-complete", help="mark an open task completed")
+    task_complete.add_argument("--task-id", required=True)
+    reminder_set = subcommands.add_parser("reminder-set", help="schedule a local Telegram reminder")
+    reminder_set.add_argument("text")
+    reminder_set.add_argument("--run-at", required=True, help="ISO-8601 time with timezone")
+    reminder_set.add_argument("--chat-id", required=True, type=int, help="the paired Telegram chat to deliver to")
+    reminder_set.add_argument("--task-id", help="link to an existing task instead of creating a new one")
     self_node = subcommands.add_parser("memory-self", help="create Alfred's one owner identity")
     self_node.add_argument("--label", required=True)
     entity = subcommands.add_parser("memory-entity", help="create a confirmed graph entity")
@@ -256,6 +271,60 @@ def main(argv: Sequence[str] | None = None) -> int:
             with database.transaction(connection):
                 job_id = create_daily(connection, chat_id=args.chat_id, local_time=local_time, timezone_name=args.timezone)
         print(json.dumps({"job_id": job_id}))
+        return 0
+    if args.command == "task-upsert":
+        due_at = _parse_timestamp(args.due_at) if args.due_at else UNSET
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                if args.task_id is None:
+                    event = EventStore.append(
+                        connection,
+                        source="cli",
+                        external_id=f"task:{uuid4()}",
+                        occurred_at=datetime.now(UTC),
+                        content=args.title,
+                        metadata={},
+                    )
+                    task = TaskStore.upsert(connection, title=args.title, due_at=due_at, source_event_id=event.id)
+                else:
+                    task = TaskStore.upsert(connection, task_id=args.task_id, title=args.title, due_at=due_at)
+        print(task.model_dump_json())
+        return 0
+    if args.command == "task-complete":
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                task = TaskStore.complete(connection, args.task_id)
+        print(task.model_dump_json())
+        return 0
+    if args.command == "reminder-set":
+        run_at = _parse_timestamp(args.run_at)
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                if args.task_id is None:
+                    event = EventStore.append(
+                        connection,
+                        source="cli",
+                        external_id=f"reminder:{uuid4()}",
+                        occurred_at=datetime.now(UTC),
+                        content=args.text,
+                        metadata={},
+                    )
+                    task = TaskStore.upsert(connection, title=args.text, due_at=run_at, source_event_id=event.id)
+                    task_id = task.id
+                else:
+                    task_id = args.task_id
+                job = ReminderStore.create(
+                    connection,
+                    run_at=run_at,
+                    task_id=task_id,
+                    chat_id=args.chat_id,
+                    text=args.text,
+                    idempotency_key=f"reminder:{task_id}:{run_at.isoformat()}",
+                )
+        print(job.model_dump_json())
         return 0
     graph = MemoryGraph(database)
     if args.command == "memory-self":

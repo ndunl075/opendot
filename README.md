@@ -84,6 +84,23 @@ connector's health without ever exposing a credential or synced content: `ok`,
 `stale` (no success in the last 24 hours), `error` (the most recent attempt
 failed), or `never_synced`.
 
+## Tasks and reminders
+
+Sending `/task <title>` or `/remind <ISO-8601> <text>` to the paired Telegram bot
+creates a task (and, for `/remind`, a scheduled delivery job) linked back to that
+message as evidence. The same capability is available directly: `alfred
+task-upsert "title" [--task-id ID] [--due-at ISO-8601]` creates a new task, or
+updates an existing one's title/due date when `--task-id` is given—omitting
+`--due-at` on an update leaves the existing due date alone rather than clearing
+it. `alfred task-complete --task-id ID` marks an open task completed and is
+idempotent (completing an already-completed task is a no-op, not an error).
+`alfred reminder-set "text" --run-at ISO-8601 --chat-id ID [--task-id ID]`
+schedules a Telegram reminder, creating its own task if `--task-id` isn't given.
+All three are also MCP tools (`task_upsert`, `task_complete`, `reminder_set`);
+`reminder_set` needs an explicit `chat_id` because Telegram is Alfred's only
+delivery channel today, so there's no channel-agnostic queue to defer that
+choice to.
+
 ## Running continuously
 
 Every command above is a one-shot CLI invocation; something still has to keep
@@ -157,7 +174,9 @@ until explicitly granted, e.g. `alfred client-grant --client-id local-mcp
 remember --tool forget --tool action_commit --tool brief_get --tool
 connector_status --allow-write`. Current tools: `system_status`, `agenda_get`,
 `memory_search`, `profile_get`, `remember`, `forget`, `action_commit`,
-`brief_get`, and `connector_status`. `remember`/`forget` additionally check the
+`brief_get`, `connector_status`, `task_upsert`, `task_complete`, and
+`reminder_set`—11 of section 7's 12 documented tools; only `message_draft`
+(sending a message) remains. `remember`/`forget` additionally check the
 requested memory's sensitivity against the client's own scope, so a client
 granted only `public`/`personal` cannot write or erase a `secret` memory even
 with `--allow-write`.

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
@@ -12,8 +13,11 @@ from .briefing import BriefingService
 from .config import Settings
 from .connector_health import connector_health
 from .db import Database
+from .events import EventStore
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .policy import ApprovalService, PolicyError, PolicyStore
+from .reminders import ReminderStore
+from .tasks import UNSET, TaskStore
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
 
@@ -118,6 +122,80 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
         """Report each connector's health; never its credentials or synced content."""
         policy.require_read(client_id, "connector_status")
         return [health.model_dump(mode="json") for health in connector_health(database)]
+
+    @server.tool()
+    def task_upsert(title: str, task_id: str | None = None, due_at: str | None = None) -> dict:
+        """Create a task, or update an existing one's title/due date when task_id is given.
+
+        Decision 8 classifies this as automatic and reversible, unlike
+        deletion, so it needs no approval step.
+        """
+        policy.require_write(client_id, "task_upsert")
+        # due_at omitted means "leave unchanged" on update ("no due date" on
+        # create); the tool has no separate way to explicitly clear one.
+        parsed_due = datetime.fromisoformat(due_at) if due_at else UNSET
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                if task_id is None:
+                    event = EventStore.append(
+                        connection,
+                        source="mcp",
+                        external_id=f"task:{client_id}:{uuid4()}",
+                        occurred_at=datetime.now(UTC),
+                        content=title,
+                        metadata={"client": client_id},
+                    )
+                    task = TaskStore.upsert(connection, title=title, due_at=parsed_due, source_event_id=event.id)
+                else:
+                    task = TaskStore.upsert(connection, task_id=task_id, title=title, due_at=parsed_due)
+        return task.model_dump(mode="json")
+
+    @server.tool()
+    def task_complete(task_id: str) -> dict:
+        """Mark an open task completed; completing an already-completed task is a no-op."""
+        policy.require_write(client_id, "task_complete")
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                task = TaskStore.complete(connection, task_id)
+        return task.model_dump(mode="json")
+
+    @server.tool()
+    def reminder_set(text: str, run_at: str, chat_id: int, task_id: str | None = None) -> dict:
+        """Schedule a Telegram reminder; chat_id must already be locally paired to receive it.
+
+        Alfred's only delivery channel today is Telegram, so the caller must
+        say which paired chat this goes to -- there is no channel-agnostic
+        queue to defer that choice to.
+        """
+        policy.require_write(client_id, "reminder_set")
+        parsed_run_at = datetime.fromisoformat(run_at)
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                if task_id is None:
+                    event = EventStore.append(
+                        connection,
+                        source="mcp",
+                        external_id=f"reminder:{client_id}:{uuid4()}",
+                        occurred_at=datetime.now(UTC),
+                        content=text,
+                        metadata={"client": client_id},
+                    )
+                    task = TaskStore.upsert(connection, title=text, due_at=parsed_run_at, source_event_id=event.id)
+                    resolved_task_id = task.id
+                else:
+                    resolved_task_id = task_id
+                job = ReminderStore.create(
+                    connection,
+                    run_at=parsed_run_at,
+                    task_id=resolved_task_id,
+                    chat_id=chat_id,
+                    text=text,
+                    idempotency_key=f"mcp-reminder:{client_id}:{resolved_task_id}:{parsed_run_at.isoformat()}",
+                )
+        return job.model_dump(mode="json")
 
     return server
 
