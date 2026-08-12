@@ -7,6 +7,18 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-12
+
+First tagged release. Alfred Core's local implementation covers build
+slices 1 through 7 of ARCHITECTURE.md — the walking skeleton, Telegram
+intake/delivery, the daily secretary (Calendar/Canvas read sync and morning
+brief), the typed temporal memory graph, approval-gated writes with
+crash-window recovery, every documented MCP transport (stdio, Streamable
+HTTP, the ChatGPT tunnel), and the polish pass below. Two connectors are
+built but not yet exercised against a live account: Slack Socket Mode
+(awaiting a real app credential) and Google Health (awaiting a real
+wearable-linked account).
+
 ### Added
 
 - Read-only, Notion-styled admin dashboard (`alfred admin-ui-run`,
@@ -76,6 +88,3 @@ only bumps the minor version — see RELEASING.md).
   between the provider accepting a write and Alfred recording its receipt
   now recovers the prior write instead of failing closed on "token already
   consumed."
-
-No release has been tagged yet; see `pyproject.toml` for the current
-in-development version.
