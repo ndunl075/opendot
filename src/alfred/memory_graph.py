@@ -450,6 +450,71 @@ class MemoryGraph:
             row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
         return self._memory_from_row(row) if row else None
 
+    def memories_by_source_event(self, source_event_id: str, *, include_deleted: bool = False) -> list[Memory]:
+        """Return memories derived directly from one immutable source event.
+
+        This is deliberately a provenance query rather than a text search. It is
+        used to make export and deletion scopes inspectable and deterministic.
+        """
+        self.database.migrate()
+        condition = "" if include_deleted else "AND status != 'deleted'"
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM memories WHERE source_event_id = ? {condition} ORDER BY created_at, id",
+                (source_event_id,),
+            ).fetchall()
+        return [self._memory_from_row(row) for row in rows]
+
+    def forget_memories_by_source_event(
+        self,
+        source_event_id: str,
+        memory_ids: list[str],
+        *,
+        reason: str,
+        actor: str,
+    ) -> list[Memory]:
+        """Tombstone an approval-frozen subset of one source event atomically."""
+        if not memory_ids:
+            raise GraphError("no memories were selected for deletion")
+        if len(memory_ids) != len(set(memory_ids)):
+            raise GraphError("memory deletion scope contains duplicate IDs")
+        self.database.migrate()
+        placeholders = ",".join("?" for _ in memory_ids)
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                rows = connection.execute(
+                    f"SELECT * FROM memories WHERE source_event_id = ? AND id IN ({placeholders}) ORDER BY created_at, id",
+                    [source_event_id, *memory_ids],
+                ).fetchall()
+                if len(rows) != len(memory_ids):
+                    raise GraphError("memory deletion scope no longer matches its source event")
+                if any(row["status"] == "deleted" for row in rows):
+                    raise GraphError("memory deletion scope includes an already deleted memory")
+                now = datetime.now(UTC).isoformat()
+                connection.execute(
+                    f"UPDATE memories SET status = 'deleted', valid_to = ?, updated_at = ? WHERE id IN ({placeholders})",
+                    [now, now, *memory_ids],
+                )
+                connection.execute(f"DELETE FROM memory_fts WHERE memory_id IN ({placeholders})", memory_ids)
+                for row in rows:
+                    connection.execute(
+                        "INSERT INTO memory_history (id, memory_id, previous_status, next_status, actor, reason, created_at) VALUES (?, ?, ?, 'deleted', ?, ?, ?)",
+                        (str(uuid4()), row["id"], row["status"], actor, reason, now),
+                    )
+                self._audit(
+                    connection,
+                    actor,
+                    "memory_forget_by_source_event",
+                    {"source_event_id": source_event_id, "memory_count": str(len(rows)), "reason": reason},
+                )
+                memories = [self._memory_from_row(row) for row in connection.execute(
+                    f"SELECT * FROM memories WHERE id IN ({placeholders}) ORDER BY created_at, id", memory_ids
+                ).fetchall()]
+        if self._embedding_index is not None:
+            for memory_id in memory_ids:
+                self._embedding_index.delete(subject_kind="memory", subject_id=memory_id)
+        return memories
+
     def profile(self, *, allowed_sensitivities: set[str] | None = None) -> tuple[Entity | None, list[Relationship]]:
         """Return the owner node and its current outgoing relationships."""
         self.database.migrate()
@@ -723,6 +788,13 @@ class MemoryForgetReceipt(BaseModel):
     replayed: bool
 
 
+class MemoryForgetSourceEventReceipt(BaseModel):
+    source_event_id: str
+    memory_ids: list[str]
+    idempotency_key: str
+    replayed: bool
+
+
 class MemoryActions:
     """Approval-gated deletion: decision 8 classifies deleting data as strong-confirm, never unattended.
 
@@ -735,6 +807,7 @@ class MemoryActions:
     """
 
     action_type = "memory_forget"
+    source_event_action_type = "memory_forget_by_source_event"
 
     def __init__(self, database: Database, approvals: ApprovalService) -> None:
         self.database = database
@@ -792,3 +865,84 @@ class MemoryActions:
                     ),
                 )
         return MemoryForgetReceipt(memory_id=memory.id, idempotency_key=idempotency_key, replayed=False)
+
+    def propose_forget_by_source_event(
+        self, source_event_id: str, *, actor: str, reason: str = "user requested deletion"
+    ) -> Approval:
+        """Preview all currently active memories derived from one source event."""
+        memories = self.graph.memories_by_source_event(source_event_id)
+        if not memories:
+            raise GraphError("source event has no active memories to delete")
+        memory_ids = [memory.id for memory in memories]
+        return self.approvals.propose(
+            actor=actor,
+            action_type=self.source_event_action_type,
+            preview={
+                "source_event_id": source_event_id,
+                "memory_ids": memory_ids,
+                "memory_count": len(memory_ids),
+                "reason": reason,
+            },
+        )
+
+    def execute_forget_by_source_event(
+        self, approval_id: str, *, actor: str, token: str
+    ) -> MemoryForgetSourceEventReceipt:
+        """Consume a source-scoped approval and tombstone its frozen target set."""
+        self.database.migrate()
+        idempotency_key = f"{self.source_event_action_type}:{approval_id}"
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (idempotency_key,)
+            ).fetchone()
+        if existing is not None:
+            self.approvals.verify(approval_id, actor=actor, token=token)
+            if existing["actor"] != actor:
+                raise PolicyError("approval actor does not match the requested action")
+            payload = json.loads(existing["payload_json"])
+            return MemoryForgetSourceEventReceipt(
+                source_event_id=payload["source_event_id"],
+                memory_ids=payload["memory_ids"],
+                idempotency_key=idempotency_key,
+                replayed=True,
+            )
+
+        pending_approval = self.approvals.get(approval_id)
+        if pending_approval is None or pending_approval.action_type != self.source_event_action_type:
+            raise PolicyError("approval is not for source-scoped memory deletion")
+        approval = self.approvals.consume(approval_id, actor=actor, token=token)
+        preview = approval.preview
+        source_event_id = preview.get("source_event_id")
+        memory_ids = preview.get("memory_ids")
+        if not isinstance(source_event_id, str) or not isinstance(memory_ids, list) or not all(
+            isinstance(memory_id, str) for memory_id in memory_ids
+        ):
+            raise PolicyError("approval preview is malformed")
+        deleted = self.graph.forget_memories_by_source_event(
+            source_event_id,
+            memory_ids,
+            reason=str(preview.get("reason", "user requested deletion")),
+            actor=actor,
+        )
+        payload = {"source_event_id": source_event_id, "memory_ids": [memory.id for memory in deleted]}
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """
+                    INSERT INTO action_receipts (idempotency_key, connector, action_type, approval_id, actor, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        idempotency_key,
+                        "memory",
+                        self.source_event_action_type,
+                        approval_id,
+                        actor,
+                        json.dumps(payload, sort_keys=True),
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+        return MemoryForgetSourceEventReceipt(
+            source_event_id=source_event_id, memory_ids=payload["memory_ids"], idempotency_key=idempotency_key, replayed=False
+        )

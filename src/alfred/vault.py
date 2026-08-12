@@ -28,6 +28,12 @@ class Projection(BaseModel):
     conflict_copy: bool
 
 
+class SourceEventProjection(BaseModel):
+    source_event_id: str
+    projections: list[Projection]
+    skipped_memory_ids: list[str]
+
+
 class VaultProjector:
     """Write selected graph records as safe, portable local Markdown files."""
 
@@ -59,6 +65,34 @@ class VaultProjector:
         projection = self._write_managed(path, self._render_memory(memory))
         self._audit(actor, "vault_project_memory", {"memory_id": memory.id, "path": str(projection.path)})
         return projection
+
+    def export_by_source_event(self, source_event_id: str, *, actor: str = "user:cli") -> SourceEventProjection:
+        """Project every confirmed, vault-safe memory from one source event.
+
+        Non-confirmed or non-exportable memories are explicitly reported as
+        skipped: a bulk export must never downgrade a secret's sensitivity or
+        turn a candidate into a confirmed memory.
+        """
+        projections: list[Projection] = []
+        skipped_memory_ids: list[str] = []
+        for memory in self.graph.memories_by_source_event(source_event_id):
+            if memory.status != "confirmed" or self._memory_sensitivity(memory.id) not in self.allowed_sensitivities:
+                skipped_memory_ids.append(memory.id)
+                continue
+            path = self._managed_path("Generated", "Memories", f"{memory.id}.md")
+            projections.append(self._write_managed(path, self._render_memory(memory)))
+        self._audit(
+            actor,
+            "vault_export_by_source_event",
+            {
+                "source_event_id": source_event_id,
+                "projected_count": str(len(projections)),
+                "skipped_count": str(len(skipped_memory_ids)),
+            },
+        )
+        return SourceEventProjection(
+            source_event_id=source_event_id, projections=projections, skipped_memory_ids=skipped_memory_ids
+        )
 
     def _memory_sensitivity(self, memory_id: str) -> str:
         self.database.migrate()

@@ -6,7 +6,8 @@ import pytest
 from alfred.audit import AuditLog
 from alfred.db import Database
 from alfred.events import EventStore
-from alfred.memory_graph import GraphError, MemoryGraph
+from alfred.memory_graph import GraphError, MemoryActions, MemoryGraph
+from alfred.policy import ApprovalService, PolicyError
 
 
 def test_self_identity_is_permanent_and_singleton(tmp_path: Path) -> None:
@@ -278,3 +279,51 @@ def test_multiple_aliases_are_all_searchable_and_re_adding_one_does_not_duplicat
     assert sorted(alias.alias for alias in graph.aliases_for(entity.id)) == ["Alex", "Xander"]
     assert [item.id for item in graph.search("Xander").entities] == [entity.id]
     assert [item.id for item in graph.search("Alex").entities] == [entity.id]
+
+
+def test_source_event_query_and_approval_frozen_bulk_forget(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            event = EventStore.append(
+                connection,
+                source="test",
+                external_id="source-one",
+                occurred_at=datetime(2026, 8, 11, tzinfo=UTC),
+                content="source one",
+                metadata={},
+            )
+    first = graph.remember("First derived fact.", source_event_id=event.id)
+    second = graph.remember("Second derived fact.", source_event_id=event.id)
+    unrelated = graph.remember("Independent fact.")
+
+    assert [memory.id for memory in graph.memories_by_source_event(event.id)] == [first.id, second.id]
+    actions = MemoryActions(database, ApprovalService(database))
+    proposal = actions.propose_forget_by_source_event(event.id, actor="nico", reason="remove imported source")
+    assert proposal.preview["memory_ids"] == [first.id, second.id]
+
+    # This arrives after the preview and therefore cannot be included in the approval's delete scope.
+    later = graph.remember("Later derived fact.", source_event_id=event.id)
+    issued = actions.approvals.approve(proposal.id, actor="nico")
+    receipt = actions.execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
+
+    assert receipt.memory_ids == [first.id, second.id]
+    assert [memory.id for memory in graph.memories_by_source_event(event.id)] == [later.id]
+    assert graph.get_memory(unrelated.id).status == "confirmed"
+    assert [memory.id for memory in graph.memories_by_source_event(event.id, include_deleted=True)] == [first.id, second.id, later.id]
+    replay = actions.execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
+    assert replay.replayed is True
+
+
+def test_source_scoped_forget_does_not_consume_an_unrelated_approval(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    proposal = approvals.propose(actor="nico", action_type="send_message", preview={})
+    issued = approvals.approve(proposal.id, actor="nico")
+
+    with pytest.raises(PolicyError, match="not for source-scoped"):
+        MemoryActions(database, approvals).execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
+
+    assert approvals.get(proposal.id).state == "approved"

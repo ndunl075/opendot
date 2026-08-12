@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from alfred.audit import AuditLog
 from alfred.db import Database
 from alfred.documents import DocumentStore
+from alfred.events import EventStore
 from alfred.memory_graph import MemoryGraph
 from alfred.vault import VaultError, VaultImporter, VaultProjector
 
@@ -61,6 +63,32 @@ def test_only_confirmed_memories_are_projected(tmp_path: Path) -> None:
     projection = projector.project_memory(confirmed.id)
 
     assert "Likes coffee." in projection.path.read_text(encoding="utf-8")
+
+
+def test_bulk_export_by_source_event_projects_only_confirmed_vault_safe_memories(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            event = EventStore.append(
+                connection,
+                source="test",
+                external_id="export-source",
+                occurred_at=datetime(2026, 8, 11, tzinfo=UTC),
+                content="source",
+                metadata={},
+            )
+    confirmed = graph.remember("Safe exported fact.", source_event_id=event.id)
+    candidate = graph.remember("Candidate fact.", source_event_id=event.id, status="candidate", confirmed=False)
+    sensitive = graph.remember("Sensitive fact.", source_event_id=event.id, sensitivity="sensitive")
+
+    result = VaultProjector(database, tmp_path / "vault").export_by_source_event(event.id)
+
+    assert [projection.path.name for projection in result.projections] == [f"{confirmed.id}.md"]
+    assert result.skipped_memory_ids == [candidate.id, sensitive.id]
+    assert "Safe exported fact." in result.projections[0].path.read_text(encoding="utf-8")
+    assert AuditLog(database).verify() is True
 
 
 def _write_note(vault: Path, relative_path: str, contents: str) -> Path:

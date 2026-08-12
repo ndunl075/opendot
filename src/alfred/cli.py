@@ -118,12 +118,27 @@ def build_parser() -> argparse.ArgumentParser:
     forget_execute.add_argument("--approval-id", required=True)
     forget_execute.add_argument("--actor", required=True)
     forget_execute.add_argument("--token", required=True)
+    forget_source_propose = subcommands.add_parser(
+        "memory-forget-source-propose", help="preview deleting all active memories from one source event"
+    )
+    forget_source_propose.add_argument("--source-event-id", required=True)
+    forget_source_propose.add_argument("--reason", default="user requested deletion")
+    forget_source_propose.add_argument("--actor", required=True)
+    forget_source_execute = subcommands.add_parser(
+        "memory-forget-source-execute", help="consume a fresh approval and delete the previewed source-event memories"
+    )
+    forget_source_execute.add_argument("--approval-id", required=True)
+    forget_source_execute.add_argument("--actor", required=True)
+    forget_source_execute.add_argument("--token", required=True)
     export_entity = subcommands.add_parser("vault-export-entity", help="project one entity into local Markdown")
     export_entity.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_entity.add_argument("--entity-id", required=True)
     export_memory = subcommands.add_parser("vault-export-memory", help="project one confirmed memory into local Markdown")
     export_memory.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_memory.add_argument("--memory-id", required=True)
+    export_source = subcommands.add_parser("vault-export-source-event", help="project confirmed vault-safe memories from one source event")
+    export_source.add_argument("--vault", type=Path, default=Path("alfred-vault"))
+    export_source.add_argument("--source-event-id", required=True)
     import_vault = subcommands.add_parser(
         "vault-import", help="import changed user-authored vault notes as confirmed memories"
     )
@@ -378,6 +393,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "vault-export-memory":
         print(VaultProjector(database, args.vault).project_memory(args.memory_id).model_dump_json())
         return 0
+    if args.command == "vault-export-source-event":
+        print(VaultProjector(database, args.vault).export_by_source_event(args.source_event_id).model_dump_json())
+        return 0
     if args.command == "vault-import":
         print(VaultImporter(database, args.vault).sync().model_dump_json())
         return 0
@@ -582,6 +600,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "memory-forget-execute":
         receipt = MemoryActions(database, approvals).execute_forget(args.approval_id, actor=args.actor, token=args.token)
+        print(receipt.model_dump_json())
+        return 0
+    if args.command == "memory-forget-source-propose":
+        proposal = MemoryActions(database, approvals).propose_forget_by_source_event(
+            args.source_event_id, actor=args.actor, reason=args.reason
+        )
+        print(proposal.model_dump_json())
+        return 0
+    if args.command == "memory-forget-source-execute":
+        receipt = MemoryActions(database, approvals).execute_forget_by_source_event(
+            args.approval_id, actor=args.actor, token=args.token
+        )
         print(receipt.model_dump_json())
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
