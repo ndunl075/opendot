@@ -82,6 +82,30 @@ token, save it under service `alfred`, account `canvas-api-token`, then invoke
 only upcoming/missing assignment title, deadline, course label, and source link;
 grades, submissions, files, and assignment body text stay out of Alfred.
 
+Google Health is also read-only and opt-in—and, unlike Calendar/Gmail/Canvas/
+GitHub above, it has not been exercised against a real wearable-linked account.
+It's built the same way every other connector is (same client/sync shape, same
+tests against synthetic fixtures) but its exact field names come from reading
+Google's v4 REST reference, not from a live response, so treat it as
+**unverified** until someone runs it against a real account; `_normalize_data_point`
+in `google_health.py` is deliberately defensive about that (it never drops a
+data point silently—the complete raw point is always kept in
+`metadata["raw"]`, even if its one-line summary guesses a field name wrong).
+It reuses the same Google OAuth grant as Calendar/Gmail, but needs additional
+scopes those don't request by default: run `alfred google-auth --scope
+https://www.googleapis.com/auth/calendar.events --scope
+https://www.googleapis.com/auth/gmail.readonly --scope
+https://www.googleapis.com/auth/gmail.compose --scope
+https://www.googleapis.com/auth/googlehealth.sleep.readonly --scope
+https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly --scope
+https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
+(the first three keep Calendar/Gmail working; all six come from one consent
+screen). Then `alfred health-sync` copies steps, sleep, and heart-rate data
+points from the last 14 days (`--lookback-days` to change that) as `sensitive`-
+tagged events—matching decision 8's data-tagging rule, since health metrics
+never inherit `personal`'s default retrieval scope. Health *writes* stay
+disabled, per section 8's permissions table; this connector only ever reads.
+
 GitHub is also read-only and opt-in. GitHub's notifications endpoint requires a
 classic personal access token with the `notifications` scope; save it under
 service `alfred`, account `github-token`, then run `alfred github-sync`. It copies only the unread
@@ -192,9 +216,9 @@ loop or any other connector.
 
 Calendar, GitHub, and Gmail sync are always attempted and simply skip
 themselves if their credential isn't configured yet; Canvas needs
-`--canvas-base-url` to be included at all, and inbound Gmail commands need at
-least one `--gmail-inbound-sender`. Omit `--pair`/`--chat-id` to run with
-Telegram disabled. Stop it with Ctrl+C.
+`--canvas-base-url` to be included at all, inbound Gmail commands need at
+least one `--gmail-inbound-sender`, and Google Health needs `--google-health`.
+Omit `--pair`/`--chat-id` to run with Telegram disabled. Stop it with Ctrl+C.
 
 `alfred run` also works as a foreground process kept alive by Windows Task
 Scheduler ("At log on", running `pythonw.exe` against this same command) or a

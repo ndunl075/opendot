@@ -9,6 +9,13 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Google Health read-only sync (`google_health.py`, `alfred health-sync`,
+  `--google-health` for `alfred run`): steps, sleep, and heart-rate data
+  points as `sensitive`-tagged events, reusing the existing Google OAuth
+  grant with additional scopes. Built but **unverified** — endpoint and
+  field names come from Google's v4 REST reference, not a live account;
+  normalization keeps every point's full raw JSON rather than trust its own
+  field-name guesses, so nothing is lost if a name turns out wrong.
 - Real Windows service packaging (`alfred-service`, `alfred.winservice`):
   `alfred run`'s loop now survives logoff/reboot with no logged-in session,
   as an alternative to the Task Scheduler workaround. A thin wrapper around

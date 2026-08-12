@@ -27,6 +27,7 @@ from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
+from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_inbound import GmailInboundGateway
@@ -108,6 +109,14 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 name="canvas",
                 interval_seconds=args.connector_interval,
                 run=lambda: _canvas_sync_once(database, args.canvas_base_url, args.canvas_secret_name),
+            )
+        )
+    if args.google_health:
+        connectors.append(
+            ConnectorSync(
+                name="google_health",
+                interval_seconds=args.connector_interval,
+                run=lambda: _health_sync_once(database, args.google_health_lookback_days),
             )
         )
     if args.vault:
@@ -310,6 +319,10 @@ def build_parser() -> argparse.ArgumentParser:
     canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync Canvas upcoming and missing assignments")
     canvas_sync.add_argument("--base-url", required=True, help="your school Canvas HTTPS URL")
     canvas_sync.add_argument("--secret-name", default="canvas-api-token")
+    health_sync = subcommands.add_parser(
+        "health-sync", help="read-sync Google Health steps/sleep/heart-rate; reuses the google-auth grant"
+    )
+    health_sync.add_argument("--lookback-days", type=int, default=14, help="how many days back to fetch each sync")
     github_sync = subcommands.add_parser("github-sync", help="read-sync unread GitHub notifications")
     github_sync.add_argument("--secret-name", default="github-token")
     github_issue_propose = subcommands.add_parser(
@@ -390,6 +403,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
     run.add_argument("--canvas-secret-name", default="canvas-api-token")
     run.add_argument("--github-secret-name", default="github-token")
+    run.add_argument(
+        "--google-health",
+        action="store_true",
+        help="enables Google Health steps/sleep/heart-rate sync (reuses the google-auth grant; needs its health scopes)",
+    )
+    run.add_argument("--google-health-lookback-days", type=int, default=14)
     run.add_argument(
         "--gmail-inbound-sender",
         action="append",
@@ -728,6 +747,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
+    if args.command == "health-sync":
+        client = GoogleHealthClient(_google_access_token())
+        try:
+            result = GoogleHealthSync(database, client, lookback_days=args.lookback_days).sync()
+        finally:
+            client.close()
+        print(result.model_dump_json())
+        return 0
     if args.command == "github-sync":
         client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
         try:
@@ -865,6 +892,14 @@ def _canvas_sync_once(database: Database, base_url: str, secret_name: str) -> No
     client = CanvasClient(base_url, SystemKeyringSecretStore().get_required(secret_name))
     try:
         CanvasSync(database, client).sync()
+    finally:
+        client.close()
+
+
+def _health_sync_once(database: Database, lookback_days: int) -> None:
+    client = GoogleHealthClient(_google_access_token())
+    try:
+        GoogleHealthSync(database, client, lookback_days=lookback_days).sync()
     finally:
         client.close()
 
