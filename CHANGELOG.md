@@ -9,6 +9,10 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Streamable HTTP MCP transport (`alfred mcp-http-run`), bound to `127.0.0.1`
+  only and authenticated with a bearer token (`alfred mcp-http-token-generate`)
+  checked outside FastMCP's own request handling. Serves the same tool
+  surface as the stdio server for remote/private MCP clients.
 - Windows installer script (`scripts/install.ps1`) covering venv creation,
   package install, database init, and an optional Task Scheduler entry.
 - Public documentation for outside contributors: `CONTRIBUTING.md`,

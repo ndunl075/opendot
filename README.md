@@ -279,6 +279,26 @@ the same way the corresponding CLI commands do; nothing is cached. Gmail sends
 remain explicit, one-time approval-gated actions and never run from sync or a
 scheduled job.
 
+### Streamable HTTP (remote/private clients)
+
+`alfred-mcp` is stdio-only. For a client that can't spawn a local process—or
+that should run as a separate, independently scoped identity from
+`local-mcp`—`alfred mcp-http-run --client-id <id>` serves the same tool
+surface over Streamable HTTP on `http://127.0.0.1:8000/mcp`. The host is not
+configurable: this binds loopback only, matching section 7's "Local server
+binds 127.0.0.1 only." `<id>` needs its own `client-grant` first, exactly like
+a stdio client.
+
+Every request must carry `Authorization: Bearer <token>`, checked outside
+FastMCP's own request handling so an unauthenticated caller can't even open a
+session. Generate that token once with `alfred mcp-http-token-generate`
+(refuses to overwrite an existing one, same as `backup-key-generate`); it's
+stored in the OS credential store, never in a config file. This is a single
+shared secret, not OAuth—section 7 reserves OAuth 2.1/RFC 9728 for *public*
+remote access, a separate, larger undertaking this does not attempt. FastMCP
+also auto-enables DNS-rebinding protection (Host/Origin header validation)
+whenever the host is loopback, which is always true here.
+
 ## Local vector search (optional)
 
 `MemoryGraph` accepts an optional `embedding_provider`. Without one, `memory-search`

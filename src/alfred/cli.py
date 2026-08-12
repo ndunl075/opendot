@@ -36,6 +36,7 @@ from .runner import AlfredRunner, ConnectorSync
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
+from .mcp_server import generate_http_token, run_streamable_http
 
 
 def _database_from_args(args: argparse.Namespace) -> Database:
@@ -169,6 +170,16 @@ def build_parser() -> argparse.ArgumentParser:
     grant.add_argument("--sensitivity", action="append", default=[])
     grant.add_argument("--tool", action="append", default=[])
     grant.add_argument("--allow-write", action="store_true")
+    http_token = subcommands.add_parser(
+        "mcp-http-token-generate", help="generate and store the Streamable HTTP MCP bearer token"
+    )
+    http_token.add_argument("--secret-name", default="mcp-http-bearer-token")
+    http_run = subcommands.add_parser(
+        "mcp-http-run", help="run Alfred's MCP surface over Streamable HTTP, bound to 127.0.0.1 only"
+    )
+    http_run.add_argument("--client-id", required=True, help="must already have a client-grant scope")
+    http_run.add_argument("--port", type=int, default=8000)
+    http_run.add_argument("--secret-name", default="mcp-http-bearer-token")
     propose = subcommands.add_parser("approval-propose", help="create a local preview approval")
     propose.add_argument("--actor", required=True)
     propose.add_argument("--action-type", required=True)
@@ -507,6 +518,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 allow_write=args.allow_write,
             ).model_dump_json()
         )
+        return 0
+    if args.command == "mcp-http-token-generate":
+        secrets_store = SystemKeyringSecretStore()
+        try:
+            secrets_store.get_required(args.secret_name)
+        except SecretStoreError:
+            secrets_store.store(args.secret_name, generate_http_token())
+            print(json.dumps({"secret_name": args.secret_name, "created": True}))
+            return 0
+        raise SystemExit("MCP HTTP bearer token already exists; refusing to overwrite it")
+    if args.command == "mcp-http-run":
+        token = SystemKeyringSecretStore().get_required(args.secret_name)
+        run_streamable_http(database.path, client_id=args.client_id, port=args.port, bearer_token=token)
         return 0
     approvals = ApprovalService(database)
     if args.command == "approval-propose":
