@@ -82,6 +82,9 @@ silently reopen a gap that was already closed once:
 - If the change completes or starts a build-slice item from
   `ARCHITECTURE.md` section 10, say which one in the PR description and
   update that section's line in the same PR.
+- User-facing changes get a line under `CHANGELOG.md`'s `## [Unreleased]`
+  section. See [RELEASING.md](RELEASING.md) for how a version actually gets
+  cut from there.
 - Security-relevant reports (a credential handling gap, an approval bypass, a
   way to make an action non-idempotent) go through
   [SECURITY.md](SECURITY.md), not a public issue.
