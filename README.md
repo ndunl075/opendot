@@ -320,6 +320,10 @@ until explicitly granted, e.g. `alfred client-grant --client-id local-mcp
 --sensitivity public --sensitivity personal --tool memory_search --tool
 remember --tool forget --tool calendar_event_propose --tool message_draft
 --tool action_commit --tool brief_get --tool connector_status --allow-write`.
+`alfred-mcp --client-id <id>` runs it under a different identity (default:
+`local-mcp`) so a second stdio client—for example OpenAI's Secure MCP
+Tunnel, see below—gets its own separately scoped grant instead of sharing
+Claude/Cursor's.
 Current tools: `system_status`, `agenda_get`, `memory_search`, `profile_get`,
 `remember`, `forget`, `calendar_event_propose`, `message_draft`,
 `action_commit`, `brief_get`, `connector_status`, `task_upsert`,
@@ -365,6 +369,21 @@ shared secret, not OAuth—section 7 reserves OAuth 2.1/RFC 9728 for *public*
 remote access, a separate, larger undertaking this does not attempt. FastMCP
 also auto-enables DNS-rebinding protection (Host/Origin header validation)
 whenever the host is loopback, which is always true here.
+
+### ChatGPT (Secure MCP Tunnel)
+
+ChatGPT can't connect directly to a local MCP server the way Claude
+Desktop/Cursor do over stdio, so section 7 names OpenAI's [Secure MCP
+Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) as
+the private-access path—an outbound-only relay via OpenAI's own
+`tunnel-client` daemon, run by you, which Alfred does not vendor or
+reimplement. See `deploy/openai-tunnel/README.md` for the full walkthrough:
+creating a tunnel and scoped client grant, then pointing `tunnel-client` at
+`alfred-mcp --client-id chatgpt-tunnel` over stdio (deliberately not the
+Streamable HTTP transport above, to avoid reconciling two separate
+authentication schemes). Whether your ChatGPT plan supports custom MCP
+connectors at all is between you and OpenAI, not something this repo
+controls.
 
 ## Local vector search (optional)
 

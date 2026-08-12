@@ -9,6 +9,11 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- ChatGPT / OpenAI Secure MCP Tunnel support (`deploy/openai-tunnel/`):
+  documents pointing OpenAI's own `tunnel-client` (not vendored here) at
+  `alfred-mcp` over stdio. `alfred-mcp` gained a `--client-id` flag
+  (default unchanged: `local-mcp`) so the tunnel gets its own separately
+  scoped grant instead of sharing Claude/Cursor's default identity.
 - Optional mobile vault sync (`deploy/couchdb/`, `alfred vault-sync-status`):
   a self-hosted CouchDB service (loopback-bound by default, VPN for remote
   reach) for a vetted open-source Obsidian community plugin (Self-hosted
