@@ -325,7 +325,7 @@ The morning brief gathers data without an LLM, ranks due/overdue items using rul
 2. **First useful loop:** Telegram message → event log → task/reminder → Telegram receipt.
 3. **Daily secretary:** Google Calendar + Canvas read sync → persistent morning brief → late/missed-run recovery.
 4. **Memory:** typed temporal graph, provenance/confidence, hybrid retrieval, corrections, export/forget, local embeddings, and evaluation fixtures.
-5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes. **Substantially built:** Calendar creates events, Gmail creates drafts only, and GitHub creates issues only after approval; email sending, PR writes, and durable external-write recovery are still future work.
+5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes. **Substantially built:** Calendar creates events, Gmail drafts and sends messages, and GitHub creates issues only after approval; PR writes and durable external-write recovery are still future work.
 6. **More surfaces:** Claude/Cursor stdio is compatible through the local MCP server; private ChatGPT tunnel, Slack/email delivery, and Google Health remain unbuilt.
 7. **Notebook and polish:** Obsidian/Markdown projection and import plus encrypted local backup/restore are built; optional free mobile sync adapter, admin UI, installer, public documentation, and release signing remain unbuilt.
 

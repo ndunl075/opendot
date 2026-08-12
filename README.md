@@ -85,7 +85,7 @@ subject, sender, and Gmail's own short snippet—never the message body or
 attachments. Reading or archiving a message drops it out of the next sync
 automatically.
 
-Gmail also has a narrow, preview-then-confirm write: drafting, not sending.
+Gmail drafts and sending are separate preview-then-confirm writes.
 `alfred gmail-draft-propose --actor nico --to recipient@example.com --subject
 "..." "body text"` creates a local preview and never touches Gmail. Approve it
 with `alfred approval-approve --approval-id <ID> --actor nico`, then `alfred
@@ -93,8 +93,10 @@ gmail-draft-execute --approval-id <ID> --actor nico --token <TOKEN>` consumes
 that token and creates the draft in Gmail—retrying with the same approval ID
 and token replays the receipt instead of creating a duplicate. Alfred's code
 never calls a send endpoint; the draft sits in Gmail exactly as if you'd
-started typing it yourself. Sending is connector order's next phase and isn't
-built anywhere in this codebase yet.
+started typing it yourself. To send, use `gmail-send-propose` with the same
+recipient, subject, and body shape, approve it separately, then run
+`gmail-send-execute`; Alfred never sends from a sync, scheduled job, or a
+proposal alone.
 
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.

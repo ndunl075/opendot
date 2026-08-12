@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from alfred.db import Database
-from alfred.gmail import GmailActions, GmailClient, GmailSync
+from alfred.gmail import GmailActions, GmailClient, GmailSendActions, GmailSync
 from alfred.policy import ApprovalService, PolicyError
 
 
@@ -104,6 +104,21 @@ def test_gmail_client_create_draft_sends_a_valid_rfc2822_message() -> None:
     assert created["id"] == "draft1"
 
 
+def test_gmail_client_send_uses_the_messages_send_endpoint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/gmail/v1/users/me/messages/send"
+        raw = base64.urlsafe_b64decode(json.loads(request.read())["raw"]).decode("utf-8")
+        assert "To: advisor@school.example" in raw
+        assert "Subject: Approved update" in raw
+        return httpx.Response(200, json={"id": "sent1"})
+
+    client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        assert client.send_message(to="advisor@school.example", subject="Approved update", body="Thanks.")["id"] == "sent1"
+    finally:
+        client.close()
+
+
 class FakeDraftTransport:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -111,6 +126,15 @@ class FakeDraftTransport:
     def create_draft(self, *, to, subject, body):
         self.calls.append({"to": to, "subject": subject, "body": body})
         return {"id": f"draft-{len(self.calls)}"}
+
+
+class FakeSendTransport:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def send_message(self, *, to, subject, body):
+        self.calls.append({"to": to, "subject": subject, "body": body})
+        return {"id": f"sent-{len(self.calls)}"}
 
 
 def test_gmail_draft_is_never_created_without_a_consumed_approval(tmp_path: Path) -> None:
@@ -155,3 +179,19 @@ def test_gmail_execute_replays_the_receipt_instead_of_creating_twice(tmp_path: P
         GmailActions(database, approvals, transport).execute(proposed.id, actor="someone-else", token=issued.token)
     with pytest.raises(PolicyError, match="invalid"):
         GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token="wrong-token")
+
+
+def test_gmail_send_is_approval_gated_and_replayed_once(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    transport = FakeSendTransport()
+    proposed = GmailSendActions(database, approvals).propose_send(
+        actor="nico", to="advisor@school.example", subject="Update", body="Approved body."
+    )
+    assert transport.calls == []
+    issued = approvals.approve(proposed.id, actor="nico")
+    first = GmailSendActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+    second = GmailSendActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+    assert first.message_id == "sent-1"
+    assert second.replayed is True
+    assert len(transport.calls) == 1

@@ -27,7 +27,7 @@ from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, Google
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
-from .gmail import GmailActions, GmailClient, GmailSync
+from .gmail import GmailActions, GmailClient, GmailSendActions, GmailSync
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
@@ -239,6 +239,15 @@ def build_parser() -> argparse.ArgumentParser:
     gmail_draft_execute.add_argument("--approval-id", required=True)
     gmail_draft_execute.add_argument("--actor", required=True)
     gmail_draft_execute.add_argument("--token", required=True)
+    gmail_send_propose = subcommands.add_parser("gmail-send-propose", help="preview sending Gmail; nothing is sent yet")
+    gmail_send_propose.add_argument("--actor", required=True)
+    gmail_send_propose.add_argument("--to", required=True)
+    gmail_send_propose.add_argument("--subject", required=True)
+    gmail_send_propose.add_argument("body")
+    gmail_send_execute = subcommands.add_parser("gmail-send-execute", help="send a Gmail message after explicit approval")
+    gmail_send_execute.add_argument("--approval-id", required=True)
+    gmail_send_execute.add_argument("--actor", required=True)
+    gmail_send_execute.add_argument("--token", required=True)
     run = subcommands.add_parser(
         "run", help="run Alfred continuously: Telegram intake/delivery, due jobs, and connector sync"
     )
@@ -657,6 +666,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         client = GmailClient(_google_access_token())
         try:
             receipt = GmailActions(database, approvals, client).execute(args.approval_id, actor=args.actor, token=args.token)
+        finally:
+            client.close()
+        print(receipt.model_dump_json())
+        return 0
+    if args.command == "gmail-send-propose":
+        print(GmailSendActions(database, approvals).propose_send(
+            actor=args.actor, to=args.to, subject=args.subject, body=args.body
+        ).model_dump_json())
+        return 0
+    if args.command == "gmail-send-execute":
+        client = GmailClient(_google_access_token())
+        try:
+            receipt = GmailSendActions(database, approvals, client).execute(args.approval_id, actor=args.actor, token=args.token)
         finally:
             client.close()
         print(receipt.model_dump_json())

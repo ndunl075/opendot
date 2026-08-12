@@ -25,6 +25,8 @@ class GmailTransport(Protocol):
 class GmailWriteTransport(Protocol):
     def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]: ...
 
+    def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]: ...
+
 
 class GmailClient:
     """Client for the unread-inbox message list, fetched at metadata scope only.
@@ -87,6 +89,16 @@ class GmailClient:
         message["Subject"] = subject
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
         response = self._client.post("/users/me/drafts", json={"message": {"raw": raw}})
+        response.raise_for_status()
+        return response.json()
+
+    def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+        """Send a message only when called by the separately approval-gated action."""
+        message = MIMEText(body)
+        message["To"] = to
+        message["Subject"] = subject
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        response = self._client.post("/users/me/messages/send", json={"raw": raw})
         response.raise_for_status()
         return response.json()
 
@@ -256,6 +268,61 @@ class GmailActions:
                     ),
                 )
         return GmailDraftReceipt(draft_id=draft_id, idempotency_key=idempotency_key, replayed=False)
+
+
+class GmailSendReceipt(BaseModel):
+    message_id: str
+    idempotency_key: str
+    replayed: bool
+
+
+class GmailSendActions:
+    """Always-human-approved Gmail send action; it is never scheduled or automatic."""
+
+    connector_name = "gmail"
+    action_type = "gmail_message_send"
+
+    def __init__(self, database: Database, approvals: ApprovalService, transport: GmailWriteTransport | None = None) -> None:
+        self.database = database
+        self.approvals = approvals
+        self.transport = transport
+
+    def propose_send(self, *, actor: str, to: str, subject: str, body: str) -> Approval:
+        if not to.strip() or not subject.strip() or not body.strip():
+            raise ValueError("recipient, subject, and body must not be empty")
+        return self.approvals.propose(
+            actor=actor, action_type=self.action_type, preview={"to": to.strip(), "subject": subject.strip(), "body": body}
+        )
+
+    def execute(self, approval_id: str, *, actor: str, token: str) -> GmailSendReceipt:
+        self.database.migrate()
+        idempotency_key = f"{self.action_type}:{approval_id}"
+        with self.database.connect() as connection:
+            existing = connection.execute("SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+        if existing is not None:
+            self.approvals.verify(approval_id, actor=actor, token=token)
+            if existing["actor"] != actor:
+                raise PolicyError("approval actor does not match the requested action")
+            return GmailSendReceipt(message_id=json.loads(existing["payload_json"])["message_id"], idempotency_key=idempotency_key, replayed=True)
+        approval = self.approvals.get(approval_id)
+        if approval is None or approval.action_type != self.action_type:
+            raise PolicyError("approval is not for Gmail send")
+        if self.transport is None:
+            raise ValueError("execute() requires a transport to reach Gmail")
+        consumed = self.approvals.consume(approval_id, actor=actor, token=token)
+        created = self.transport.send_message(**consumed.preview)
+        message_id = created.get("id")
+        if not isinstance(message_id, str) or not message_id:
+            raise ValueError("Gmail did not return a message id")
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """INSERT INTO action_receipts (idempotency_key, connector, action_type, approval_id, actor, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (idempotency_key, self.connector_name, self.action_type, approval_id, actor,
+                     json.dumps({"message_id": message_id}, sort_keys=True), datetime.now(UTC).isoformat()),
+                )
+        return GmailSendReceipt(message_id=message_id, idempotency_key=idempotency_key, replayed=False)
 
 
 def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
