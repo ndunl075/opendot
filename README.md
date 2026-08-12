@@ -104,6 +104,18 @@ connector's health without ever exposing a credential or synced content: `ok`,
 `stale` (no success in the last 24 hours), `error` (the most recent attempt
 failed), or `never_synced`.
 
+## Encrypted backup and restore
+
+Create the local AES-256 key once with `alfred backup-key-generate`; it is kept
+only in Windows Credential Manager as `backup-encryption-key`. Then run `alfred
+backup-create --output D:\Backups\alfred.backup` to create an encrypted SQLite
+snapshot. Restore is deliberately two-step: `backup-restore-propose --backup
+... --actor nico`, approve the preview, then `backup-restore-execute`. The
+backup's SHA-256 is frozen in the approval, so a changed file cannot be restored
+with a stale confirmation. Since a restore intentionally rolls the database
+back to an earlier point, it is non-replayable: any further restore requires a
+new preview and approval.
+
 ## Tasks and reminders
 
 Sending `/task <title>` or `/remind <ISO-8601> <text>` to the paired Telegram bot

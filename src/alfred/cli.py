@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .audit import AuditEvent, AuditLog
+from .backup import EncryptedBackupService
 from .config import Settings
 from .connector_health import connector_health
 from .db import Database
@@ -21,7 +22,7 @@ from .reminders import ReminderStore
 from .tasks import UNSET, TaskStore
 from .vault import VaultImporter, VaultProjector
 from .policy import ApprovalService, PolicyStore
-from .secret_store import SystemKeyringSecretStore
+from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
@@ -47,6 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
     subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
+    backup_create = subcommands.add_parser("backup-create", help="create an encrypted local Alfred database backup")
+    backup_create.add_argument("--output", type=Path, required=True)
+    backup_create.add_argument("--secret-name", default="backup-encryption-key")
+    backup_key = subcommands.add_parser("backup-key-generate", help="generate and store a new local backup encryption key")
+    backup_key.add_argument("--secret-name", default="backup-encryption-key")
+    backup_restore_propose = subcommands.add_parser("backup-restore-propose", help="preview restoring an encrypted backup")
+    backup_restore_propose.add_argument("--backup", type=Path, required=True)
+    backup_restore_propose.add_argument("--actor", required=True)
+    backup_restore_execute = subcommands.add_parser("backup-restore-execute", help="restore an approved encrypted backup")
+    backup_restore_execute.add_argument("--approval-id", required=True)
+    backup_restore_execute.add_argument("--actor", required=True)
+    backup_restore_execute.add_argument("--token", required=True)
+    backup_restore_execute.add_argument("--secret-name", default="backup-encryption-key")
     audit = subcommands.add_parser("audit", help="append a redacted audit record")
     audit.add_argument("--actor", required=True)
     audit.add_argument("--tool", required=True)
@@ -256,6 +270,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "connector-status":
         print(json.dumps([health.model_dump(mode="json") for health in connector_health(database)]))
+        return 0
+    if args.command == "backup-create":
+        receipt = EncryptedBackupService(database, ApprovalService(database)).create(
+            args.output, encoded_key=SystemKeyringSecretStore().get_required(args.secret_name)
+        )
+        print(receipt.model_dump_json())
+        return 0
+    if args.command == "backup-key-generate":
+        secrets = SystemKeyringSecretStore()
+        try:
+            secrets.get_required(args.secret_name)
+        except SecretStoreError:
+            secrets.store(args.secret_name, EncryptedBackupService.generate_key())
+            print(json.dumps({"secret_name": args.secret_name, "created": True}))
+            return 0
+        raise SystemExit("backup key already exists; refusing to overwrite it")
+    if args.command == "backup-restore-propose":
+        print(EncryptedBackupService(database, ApprovalService(database)).propose_restore(args.backup, actor=args.actor).model_dump_json())
+        return 0
+    if args.command == "backup-restore-execute":
+        receipt = EncryptedBackupService(database, ApprovalService(database)).execute_restore(
+            args.approval_id, actor=args.actor, token=args.token,
+            encoded_key=SystemKeyringSecretStore().get_required(args.secret_name),
+        )
+        print(receipt.model_dump_json())
         return 0
     audit_log = AuditLog(database)
     if args.command == "audit":
