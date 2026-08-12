@@ -7,6 +7,16 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+
+- Slack app setup (`deploy/slack-app/`): a ready-to-paste manifest
+  (`manifest.yml`) configuring OAuth scopes, event subscriptions, and
+  Socket Mode in one step, verified against Slack's own manifest schema
+  docs, plus a full walkthrough for the two tokens, inviting the bot, and
+  pairing. The connector itself (`slack.py`, `slack_socket.py`) was already
+  built and unit-tested; this removes the setup friction that was blocking
+  a real smoke test, without changing any Python code.
+
 ## [0.1.0] - 2026-08-12
 
 First tagged release. Alfred Core's local implementation covers build
