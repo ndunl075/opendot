@@ -11,10 +11,11 @@ request" without standing up an authorization server.
 
 from __future__ import annotations
 
+import argparse
 import secrets
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Sequence, cast
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
@@ -292,9 +293,33 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
     return server
 
 
-def main() -> None:
-    """Run Alfred's local-only stdio MCP server."""
-    create_server().run(transport="stdio")
+def parse_stdio_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse alfred-mcp's own tiny CLI surface.
+
+    Separate from ``main()`` so a caller (or a test) can get a parsed
+    namespace without also starting a blocking stdio server.
+    """
+    parser = argparse.ArgumentParser(prog="alfred-mcp", description="Alfred's stdio MCP server")
+    parser.add_argument(
+        "--client-id",
+        default="local-mcp",
+        help="local client identity; must already have its own 'alfred client-grant' scope (default: local-mcp)",
+    )
+    parser.add_argument("--db", help="SQLite database path; defaults to ALFRED_DB_PATH or .alfred/alfred.db")
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run Alfred's local-only stdio MCP server.
+
+    Running this with no arguments behaves exactly as before --
+    ``--client-id`` exists so a second stdio client (for example, OpenAI's
+    Secure MCP Tunnel `tunnel-client`, launched via its own `--mcp-command`)
+    can get its own separately scoped identity instead of sharing
+    Claude/Cursor's default ``local-mcp`` grant.
+    """
+    args = parse_stdio_args(argv)
+    create_server(args.db, client_id=args.client_id).run(transport="stdio")
 
 
 def generate_http_token() -> str:

@@ -10,7 +10,7 @@ import pytest
 from alfred.db import Database
 from alfred.gmail import _draft_message_id
 from alfred.google_calendar import _calendar_event_id
-from alfred.mcp_server import create_server
+from alfred.mcp_server import create_server, main, parse_stdio_args
 from alfred.policy import ApprovalService, PolicyStore
 
 
@@ -18,6 +18,34 @@ def test_mcp_server_can_be_constructed(tmp_path: Path) -> None:
     server = create_server(tmp_path / "alfred.db")
 
     assert server.name == "Alfred"
+
+
+def test_parse_stdio_args_defaults_match_prior_hardcoded_behavior() -> None:
+    """alfred-mcp with no arguments must behave exactly as it did before
+    --client-id existed: 'local-mcp', the default database path."""
+    args = parse_stdio_args([])
+
+    assert (args.client_id, args.db) == ("local-mcp", None)
+
+
+def test_parse_stdio_args_accepts_a_separate_client_id() -> None:
+    """A second stdio client -- e.g. OpenAI's tunnel-client launched via its
+    own --mcp-command -- gets its own identity instead of sharing
+    Claude/Cursor's default local-mcp grant."""
+    args = parse_stdio_args(["--client-id", "chatgpt-tunnel", "--db", "custom.db"])
+
+    assert (args.client_id, args.db) == ("chatgpt-tunnel", "custom.db")
+
+
+def test_main_builds_the_server_with_the_parsed_client_id_and_db() -> None:
+    with (
+        mock.patch("alfred.mcp_server.create_server") as create_server_mock,
+        mock.patch.object(create_server_mock.return_value, "run") as run_mock,
+    ):
+        main(["--client-id", "chatgpt-tunnel", "--db", "custom.db"])
+
+    create_server_mock.assert_called_once_with("custom.db", client_id="chatgpt-tunnel")
+    run_mock.assert_called_once_with(transport="stdio")
 
 
 def _call(server: Any, name: str, arguments: dict) -> Any:
