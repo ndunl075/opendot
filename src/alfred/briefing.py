@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel
 
+from .audit import AuditEvent, AuditLog
 from .db import Database
+from .models import TextGenerationProvider
 
 
 class BriefItem(BaseModel):
@@ -62,8 +64,10 @@ class MorningBrief(BaseModel):
 
 
 class BriefingService:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, llm_writer: TextGenerationProvider | None = None) -> None:
+        """``llm_writer`` is opt-in; without one, write_brief() is just render()."""
         self.database = database
+        self.llm_writer = llm_writer
 
     def morning_brief(self, now: datetime | None = None, *, scheduled_at: datetime | None = None) -> MorningBrief:
         """Rank locally owned open tasks by deadline without any LLM dependency.
@@ -163,6 +167,45 @@ class BriefingService:
         ):
             collection.sort(key=lambda item: (item.due_at is None, item.due_at or generated_at, item.title))
         return brief
+
+    def write_brief(self, brief: MorningBrief, *, actor: str = "system:briefing") -> str:
+        """Render the brief, optionally asking the local model to write it up.
+
+        Every fact still comes from the deterministic render passed to the
+        model, never from the model's own knowledge -- only the wording
+        changes. Falls back to the deterministic render on any model
+        failure (e.g. Ollama isn't running); a missing local model must
+        never cost the user their brief.
+        """
+        deterministic_text = brief.render()
+        if self.llm_writer is None:
+            return deterministic_text
+        prompt = (
+            "Rewrite the following task briefing in a short, warm, plain-text "
+            "message. Preserve every fact, date, and link exactly as given. Do "
+            "not add or invent anything not present below.\n\n" + deterministic_text
+        )
+        try:
+            result = self.llm_writer.generate(prompt)
+        except Exception as error:
+            self._audit_llm_pass(actor, outcome="error", result={"error": f"{error.__class__.__name__}: {error}"})
+            return deterministic_text
+        self._audit_llm_pass(
+            actor,
+            outcome="ok",
+            result={
+                "model": result.model,
+                "prompt_tokens": result.prompt_tokens,
+                "completion_tokens": result.completion_tokens,
+                "estimated_cost_usd": 0.0,
+            },
+        )
+        return result.text
+
+    def _audit_llm_pass(self, actor: str, *, outcome: str, result: dict) -> None:
+        AuditLog(self.database).append(
+            AuditEvent(actor=actor, client="briefing", tool="brief_llm_pass", outcome=outcome, result=result)
+        )
 
 
 def _parse_optional_timestamp(value: object) -> datetime | None:

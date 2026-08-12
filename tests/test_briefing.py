@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+from alfred.audit import AuditLog
 from alfred.briefing import BriefingService
 from alfred.db import Database
 from alfred.events import EventStore
+from alfred.models import GenerationResult
 from alfred.tasks import TaskStore
 
 
@@ -96,3 +98,63 @@ def test_morning_brief_includes_only_active_github_notifications(tmp_path: Path)
     brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
     assert [item.title for item in brief.github_notifications] == ["example/alfred: Fix flaky test"]
     assert "GitHub notifications:\n- example/alfred: Fix flaky test" in brief.render()
+
+
+class _FakeWriter:
+    model_name = "fake"
+
+    def __init__(self, *, text: str = "Good morning! Nothing due today.") -> None:
+        self._text = text
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str, *, system: str | None = None) -> GenerationResult:
+        self.prompts.append(prompt)
+        return GenerationResult(text=self._text, model=self.model_name, prompt_tokens=10, completion_tokens=5)
+
+
+class _BrokenWriter:
+    model_name = "broken"
+
+    def generate(self, prompt: str, *, system: str | None = None) -> GenerationResult:
+        raise RuntimeError("Ollama is not running")
+
+
+def test_write_brief_without_a_writer_is_the_deterministic_render(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    service = BriefingService(database)
+    brief = service.morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    assert service.write_brief(brief) == brief.render()
+
+
+def test_write_brief_asks_the_model_and_grounds_the_prompt_in_the_deterministic_text(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    writer = _FakeWriter()
+    service = BriefingService(database, llm_writer=writer)
+    brief = service.morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    text = service.write_brief(brief)
+
+    assert text == "Good morning! Nothing due today."
+    assert brief.render() in writer.prompts[0]  # the model only ever sees the deterministic facts
+    with database.connect() as connection:
+        row = connection.execute("SELECT tool, outcome, result_json FROM tool_runs").fetchone()
+    assert row["tool"] == "brief_llm_pass"
+    assert row["outcome"] == "ok"
+    assert '"prompt_tokens":10' in row["result_json"]
+    assert AuditLog(database).verify() is True
+
+
+def test_write_brief_falls_back_to_the_deterministic_render_on_a_model_failure(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    service = BriefingService(database, llm_writer=_BrokenWriter())
+    brief = service.morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    text = service.write_brief(brief)
+
+    assert text == brief.render()
+    with database.connect() as connection:
+        row = connection.execute("SELECT tool, outcome, result_json FROM tool_runs").fetchone()
+    assert row["tool"] == "brief_llm_pass"
+    assert row["outcome"] == "error"
+    assert "Ollama is not running" in row["result_json"]

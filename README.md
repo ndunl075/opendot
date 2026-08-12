@@ -209,6 +209,24 @@ model name, so trying a different embedding model never mixes incomparable space
 switching models means re-embedding, not migrating data. Nothing in the CLI or MCP
 server wires a live provider in yet—that's local configuration, not core behavior.
 
+## Local model inference (optional)
+
+`alfred.models.OllamaClient` is decision 6's local-first text generation: point it
+at a running Ollama and it calls the non-streaming `/api/generate` endpoint,
+returning the text plus Ollama's own prompt/completion token counts.
+`BriefingService` accepts an optional `llm_writer`; without one, `write_brief()` is
+just `render()`—the deterministic text, unchanged. With one, per section 9
+("gathers data without an LLM ... then asks the local model to write a short
+brief"), the model only ever rewrites the deterministic render's wording; every
+fact, date, and link it sees comes from that text, never from the model's own
+knowledge, and a failed or unreachable model falls back to the deterministic
+render rather than costing the user their brief. Every pass—success or
+failure—is audited with its token counts. Nothing in the CLI, MCP server, or job
+runner wires a live writer in by default, matching the rule that a model call is
+never on the default path; a cloud fallback, the monthly spend cap, and
+sensitive-data redaction before egress are still unbuilt, since there is no cloud
+caller yet for them to guard.
+
 ## Development rules
 
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior.
