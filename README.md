@@ -114,6 +114,21 @@ recipient, subject, and body shape, approve it separately, then run
 proposal alone. Its recovery path uses a stable Message-ID and only accepts an
 exact matching sent message; an absent or ambiguous result fails closed.
 
+Alfred can also take commands from your own inbox. `alfred gmail-inbound-poll
+--sender you@example.com` reads the same unread inbox and turns a subject line
+of `Task: <title>` into a local task, or `Remind: <ISO-8601 time> <title>` into
+a task with that due date. Only mail from an explicitly listed `--sender`
+address is ever acted on—everything else, including ordinary mail with no
+recognized subject, is left untouched. A recognized command from a sender who
+is *not* listed is rejected and audited rather than silently run, the same
+default-deny rule Telegram pairing uses. Add `--destination telegram:123` (or
+any other channel:recipient) to also deliver `Remind:` reminders there; without
+it, the task is still created, just without a scheduled delivery. Alfred never
+replies by email from this path—sending remains the separate, always
+approval-gated `gmail-send-propose`/`gmail-send-execute` flow. Pass one or more
+`--gmail-inbound-sender` (and optionally `--gmail-inbound-destination`) flags to
+`alfred run` to poll for this continuously.
+
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
 
@@ -169,8 +184,9 @@ loop or any other connector.
 
 Calendar, GitHub, and Gmail sync are always attempted and simply skip
 themselves if their credential isn't configured yet; Canvas needs
-`--canvas-base-url` to be included at all. Omit `--pair`/`--chat-id` to run
-with Telegram disabled. Stop it with Ctrl+C.
+`--canvas-base-url` to be included at all, and inbound Gmail commands need at
+least one `--gmail-inbound-sender`. Omit `--pair`/`--chat-id` to run with
+Telegram disabled. Stop it with Ctrl+C.
 
 `alfred run` is a foreground process, not a Windows service. To keep it running
 unattended, use Windows Task Scheduler with a trigger of "At log on", running

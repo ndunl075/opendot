@@ -1,7 +1,7 @@
 # Alfred architecture
 
 Status: local implementation in progress; slices 1-5 are substantially built<br>
-Last verified: 2026-08-11<br>
+Last verified: 2026-08-12<br>
 Goal: a cheap, local-first, open-source personal secretary that remembers, briefs, and acts across many clients and services.
 
 > Canonical rule: store broadly, retrieve narrowly, act cautiously. Never put the full archive in an LLM prompt.
@@ -326,7 +326,7 @@ The morning brief gathers data without an LLM, ranks due/overdue items using rul
 3. **Daily secretary:** Google Calendar + Canvas read sync → persistent morning brief → late/missed-run recovery.
 4. **Memory:** typed temporal graph, provenance/confidence, hybrid retrieval, corrections, export/forget, local embeddings, and evaluation fixtures.
 5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes. **Built:** Calendar creates recover across the provider/receipt crash window through a stable provider event ID; Gmail drafts and sends recover through stable RFC 2822 Message-ID lookups; and GitHub issues and PR comments recover through hidden, exact body markers. Every action remains preview-then-human-approval, with exact receipt replay after completion and fail-closed recovery when provider evidence is absent or ambiguous. Reminders and briefs carry an explicit channel destination instead of assuming Telegram.
-6. **More surfaces:** Claude/Cursor stdio is compatible through the local MCP server; paired Slack Socket Mode intake and explicit-channel outbox delivery are built but await a real app credential smoke test. Private ChatGPT tunnel, inbound email, and Google Health remain unbuilt.
+6. **More surfaces:** Claude/Cursor stdio is compatible through the local MCP server; paired Slack Socket Mode intake and explicit-channel outbox delivery are built but await a real app credential smoke test. Inbound Alfred email is built: an allowed sender's `Task:`/`Remind:` subject line becomes a local task, reusing the same idempotent, default-deny pattern as Telegram, with no new Gmail scope and no automatic reply (a reply is still a consequential, approval-gated send). Private ChatGPT tunnel and Google Health remain unbuilt.
 7. **Notebook and polish:** Obsidian/Markdown projection and import plus encrypted local backup/restore are built; optional free mobile sync adapter, admin UI, installer, public documentation, and release signing remain unbuilt.
 
 The first acceptance test is end-to-end: tell Alfred on Telegram “my paper is due Friday; remind me Thursday,” see the sourced memory and task, receive the reminder, and see it ranked correctly in the next morning brief after a restart.

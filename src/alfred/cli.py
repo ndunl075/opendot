@@ -28,6 +28,7 @@ from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_acces
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import GmailActions, GmailClient, GmailSendActions, GmailSync
+from .gmail_inbound import GmailInboundGateway
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
@@ -222,6 +223,15 @@ def build_parser() -> argparse.ArgumentParser:
     pr_execute = subcommands.add_parser("github-pr-comment-execute", help="post an approved GitHub PR comment")
     pr_execute.add_argument("--approval-id", required=True); pr_execute.add_argument("--actor", required=True); pr_execute.add_argument("--token", required=True); pr_execute.add_argument("--secret-name", default="github-pr-token")
     subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
+    gmail_inbound_poll = subcommands.add_parser(
+        "gmail-inbound-poll", help="turn 'Task:'/'Remind:' subject commands from allowed senders into local tasks"
+    )
+    gmail_inbound_poll.add_argument(
+        "--sender", action="append", required=True, help="locally allowed command sender email address"
+    )
+    gmail_inbound_poll.add_argument(
+        "--destination", help="channel:recipient to deliver 'Remind:' reminders to; omit to create the task without one"
+    )
     calendar_propose = subcommands.add_parser(
         "calendar-event-propose", help="preview a calendar event write; nothing is sent to Google yet"
     )
@@ -272,6 +282,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
     run.add_argument("--canvas-secret-name", default="canvas-api-token")
     run.add_argument("--github-secret-name", default="github-token")
+    run.add_argument(
+        "--gmail-inbound-sender",
+        action="append",
+        default=[],
+        help="locally allowed command sender email address; enables inbound email intake",
+    )
+    run.add_argument(
+        "--gmail-inbound-destination",
+        help="channel:recipient to deliver 'Remind:' email reminders to; omit to create the task without one",
+    )
     run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
     run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")
     run.add_argument("--idle-sleep", type=float, default=5.0, help="seconds to rest between cycles")
@@ -559,6 +579,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             ConnectorSync(name="gmail", interval_seconds=args.connector_interval, run=lambda: _gmail_sync_once(database)),
         ]
+        if args.gmail_inbound_sender:
+            gmail_inbound_senders = set(args.gmail_inbound_sender)
+            gmail_inbound_destination = args.gmail_inbound_destination
+            connectors.append(
+                ConnectorSync(
+                    name="gmail_inbound",
+                    interval_seconds=args.connector_interval,
+                    run=lambda: _gmail_inbound_poll_once(database, gmail_inbound_senders, gmail_inbound_destination),
+                )
+            )
         if args.canvas_base_url:
             connectors.append(
                 ConnectorSync(
@@ -683,6 +713,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
+    if args.command == "gmail-inbound-poll":
+        client = GmailClient(_google_access_token())
+        try:
+            result = GmailInboundGateway(
+                database, client, set(args.sender), default_reminder_destination=args.destination
+            ).poll()
+        finally:
+            client.close()
+        print(result.model_dump_json())
+        return 0
     if args.command == "calendar-event-propose":
         start = _parse_timestamp(args.start)
         end = _parse_timestamp(args.end)
@@ -787,6 +827,14 @@ def _gmail_sync_once(database: Database) -> None:
     client = GmailClient(_google_access_token())
     try:
         GmailSync(database, client).sync()
+    finally:
+        client.close()
+
+
+def _gmail_inbound_poll_once(database: Database, senders: set[str], destination: str | None) -> None:
+    client = GmailClient(_google_access_token())
+    try:
+        GmailInboundGateway(database, client, senders, default_reminder_destination=destination).poll()
     finally:
         client.close()
 

@@ -405,7 +405,7 @@ def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(message_id, str) or not message_id or not isinstance(internal_date, str):
         raise ValueError("Gmail message is missing id or internalDate")
     occurred_at = datetime.fromtimestamp(int(internal_date) / 1000, tz=UTC)
-    headers = _headers(item.get("payload"))
+    headers = parse_message_headers(item.get("payload"))
     subject = headers.get("subject") or "(no subject)"
     snippet = item.get("snippet")
     return {
@@ -424,7 +424,8 @@ def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _headers(payload: object) -> dict[str, str]:
+def parse_message_headers(payload: object) -> dict[str, str]:
+    """Lower-case header lookup shared with the inbound command gateway."""
     if not isinstance(payload, dict):
         return {}
     raw_headers = payload.get("headers")
