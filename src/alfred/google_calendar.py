@@ -29,7 +29,7 @@ class CalendarTransport(Protocol):
 
 class CalendarWriteTransport(Protocol):
     def create_event(
-        self, *, calendar_id: str, summary: str, start: datetime, end: datetime
+        self, *, calendar_id: str, event_id: str, summary: str, start: datetime, end: datetime
     ) -> dict[str, Any]: ...
 
 
@@ -103,17 +103,23 @@ class GoogleCalendarClient:
             params["pageToken"] = page_token
 
     def create_event(
-        self, *, calendar_id: str, summary: str, start: datetime, end: datetime
+        self, *, calendar_id: str, event_id: str, summary: str, start: datetime, end: datetime
     ) -> dict[str, Any]:
-        """Create one event; callers are responsible for approval and idempotency."""
+        """Create one event, recovering a duplicate custom ID after an uncertain retry."""
         response = self._client.post(
             f"/calendars/{calendar_id}/events",
             json={
+                "id": event_id,
                 "summary": summary,
                 "start": {"dateTime": _rfc3339(start)},
                 "end": {"dateTime": _rfc3339(end)},
             },
         )
+        if response.status_code == 409:
+            # A prior call may have reached Calendar just before Alfred crashed
+            # or lost its response.  The stable event ID makes this a safe
+            # recovery lookup rather than a second create.
+            response = self._client.get(f"/calendars/{calendar_id}/events/{event_id}")
         response.raise_for_status()
         return response.json()
 
@@ -303,18 +309,17 @@ class GoogleCalendarActions:
         return self.approvals.propose(actor=actor, action_type=self.action_type, preview=preview)
 
     def execute(self, approval_id: str, *, actor: str, token: str) -> CalendarEventReceipt:
-        """Consume a fresh approval exactly once, then create the event idempotently.
+        """Create once, including after a crash between Calendar and the receipt.
 
-        The idempotency key is checked *before* the token is consumed, so a
-        retry after a successful run replays the stored receipt instead of
-        re-consuming an already-spent token or double-creating the event. A
-        retry that lands in the narrow window after Google accepts the write
-        but before the local receipt commits will instead fail closed with a
-        "token already consumed" error rather than risk a duplicate event;
-        that gap is a known, deliberate trade-off for this first write action.
+        Calendar accepts a caller-provided event ID.  It is deterministically
+        derived from the approval ID, so replaying a consumed approval can
+        retrieve the already-created event instead of creating a duplicate.
         """
         self.database.migrate()
         idempotency_key = f"{self.action_type}:{approval_id}"
+        approval = self.approvals.verify(approval_id, actor=actor, token=token)
+        if approval.action_type != self.action_type:
+            raise PolicyError("approval is not for a Calendar event")
         with self.database.connect() as connection:
             existing = connection.execute(
                 "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?",
@@ -330,10 +335,13 @@ class GoogleCalendarActions:
         transport = self.transport
         if transport is None:
             raise ValueError("execute() requires a transport to reach Google")
-        approval = self.approvals.consume(approval_id, actor=actor, token=token)
+        if approval.state == "approved":
+            approval = self.approvals.consume(approval_id, actor=actor, token=token)
         preview = approval.preview
+        event_id = _calendar_event_id(approval_id)
         created = transport.create_event(
             calendar_id=preview["calendar_id"],
+            event_id=event_id,
             summary=preview["summary"],
             start=datetime.fromisoformat(preview["start"]),
             end=datetime.fromisoformat(preview["end"]),
@@ -417,6 +425,14 @@ def _event_time(value: Any) -> str | None:
 
 def _rfc3339(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _calendar_event_id(approval_id: str) -> str:
+    """Return a Calendar-valid stable ID for one approved create operation."""
+    # UUID hex is a subset of Calendar's lower-case base32hex alphabet (a-v,
+    # 0-9); the prefix also keeps the value safely above Calendar's 5-char
+    # minimum.  The approval ID has already been generated locally.
+    return f"alfred{approval_id.replace('-', '')}"
 
 
 def _event_status(items: list[dict[str, Any]], event_id: str) -> str | None:
