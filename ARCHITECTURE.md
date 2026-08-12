@@ -1,6 +1,6 @@
 # Alfred architecture
 
-Status: proposed MVP architecture<br>
+Status: local implementation in progress; slices 1-5 are substantially built<br>
 Last verified: 2026-08-11<br>
 Goal: a cheap, local-first, open-source personal secretary that remembers, briefs, and acts across many clients and services.
 
@@ -259,6 +259,8 @@ Rules:
 
 Local software can cost `$0/month`; electricity, existing subscriptions, a domain, or optional cloud inference are not free. The PC must be awake for live replies and scheduled work. Persistent jobs run missed executions once after restart and label the result late.
 
+The single Python service from decision 3 currently runs as a foreground CLI process (`alfred run`), not an installed OS service. It depends on an external keep-alive — a login-triggered Task Scheduler entry or a terminal left open — to actually stay up across reboots. Packaging it as a real background service is unbuilt future work, not yet a safe assumption.
+
 ## 7. MCP surface
 
 Expose semantic Alfred operations rather than every provider endpoint:
@@ -307,7 +309,7 @@ Additional invariants:
 |---|---|
 | MVP | Telegram long polling; local tasks/reminders; Ollama; manual memory import |
 | Assistant | Google Calendar read; Canvas upcoming/missing assignments; morning brief |
-| Developer | GitHub notifications/issues/PRs; repo-scoped fine-grained PAT, then GitHub App for distribution |
+| Developer | GitHub notifications with a dedicated classic PAT (`notifications` scope); issue/PR writes with a separate repo-scoped fine-grained PAT, then GitHub App for distribution |
 | Communications | Gmail read/draft, then send approval; Slack Socket Mode; inbound Alfred email |
 | Wearable | Google Health API read-only: sleep/activity/heart metrics with strict sensitive-data policy |
 | Clients | Claude/Cursor stdio MCP; ChatGPT via Secure MCP Tunnel or hosted OAuth endpoint |
@@ -323,9 +325,9 @@ The morning brief gathers data without an LLM, ranks due/overdue items using rul
 2. **First useful loop:** Telegram message → event log → task/reminder → Telegram receipt.
 3. **Daily secretary:** Google Calendar + Canvas read sync → persistent morning brief → late/missed-run recovery.
 4. **Memory:** typed temporal graph, provenance/confidence, hybrid retrieval, corrections, export/forget, local embeddings, and evaluation fixtures.
-5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes.
-6. **More surfaces:** Claude/Cursor; private ChatGPT tunnel; Slack/email; Google Health.
-7. **Notebook and polish:** Obsidian/Markdown projection, optional free mobile sync adapter, admin UI, encrypted backup/restore, installer, public documentation, and release signing.
+5. **Safe action:** drafts, approvals, idempotent outbox, then Gmail/GitHub/Calendar writes. **Substantially built:** Calendar creates events, Gmail drafts and sends messages, and GitHub creates issues and PR conversation comments only after approval; reminders and briefs now carry an explicit channel destination instead of assuming Telegram; durable external-write recovery remains future work.
+6. **More surfaces:** Claude/Cursor stdio is compatible through the local MCP server; paired Slack Socket Mode intake and explicit-channel outbox delivery are built but await a real app credential smoke test. Private ChatGPT tunnel, inbound email, and Google Health remain unbuilt.
+7. **Notebook and polish:** Obsidian/Markdown projection and import plus encrypted local backup/restore are built; optional free mobile sync adapter, admin UI, installer, public documentation, and release signing remain unbuilt.
 
 The first acceptance test is end-to-end: tell Alfred on Telegram “my paper is due Friday; remind me Thursday,” see the sourced memory and task, receive the reminder, and see it ranked correctly in the next morning brief after a restart.
 
@@ -347,7 +349,7 @@ These change configuration, not the architecture:
 - PC RAM, GPU/VRAM, available disk, and sleep behavior (determines local model size).
 - Exact wearable model/account and whether its data is present in Google Health API.
 - School Canvas base URL and whether personal tokens are permitted.
-- Google account type and which Calendar/Gmail scopes are acceptable.
+- Google account type (personal vs. Workspace changes what an org admin can restrict). Calendar/Gmail scopes default to `calendar.events` (read/write, matching the approval-gated event write), `gmail.readonly`, and `gmail.compose` (matching the approval-gated draft write); override with `alfred google-auth --scope` if a narrower or different grant is preferred.
 - Current ChatGPT/Claude plans; ChatGPT write-capable custom MCP access is plan-dependent.
 - Phone OS and whether offline Markdown editing is important beyond Telegram; this selects the optional free vault-sync adapter.
 - Desired morning-brief time, timezone, quiet hours, and cloud-spend ceiling.

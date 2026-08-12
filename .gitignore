@@ -1,4 +1,5 @@
 .alfred/
+alfred-vault/
 .venv/
 __pycache__/
 *.py[cod]

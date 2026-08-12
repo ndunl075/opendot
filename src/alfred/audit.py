@@ -35,48 +35,53 @@ class AuditLog:
     def append(self, event: AuditEvent) -> str:
         """Append a record atomically and return its immutable ID."""
         self.database.migrate()
-        record_id = str(uuid4())
-        occurred_at = datetime.now(UTC).isoformat()
         with self.database.connect() as connection:
             with self.database.transaction(connection):
-                previous = connection.execute(
-                    "SELECT record_hash FROM tool_runs ORDER BY sequence DESC LIMIT 1"
-                ).fetchone()
-                previous_hash = previous["record_hash"] if previous else None
-                payload = {
-                    "id": record_id,
-                    "occurred_at": occurred_at,
-                    "actor": event.actor,
-                    "client": event.client,
-                    "tool": event.tool,
-                    "outcome": event.outcome,
-                    "arguments": event.arguments,
-                    "result": event.result,
-                    "correlation_id": event.correlation_id,
-                    "previous_hash": previous_hash,
-                }
-                record_hash = self._hash(payload)
-                connection.execute(
-                    """
-                    INSERT INTO tool_runs (
-                        id, occurred_at, actor, client, tool, outcome, arguments_json,
-                        result_json, correlation_id, previous_hash, record_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        record_id,
-                        occurred_at,
-                        event.actor,
-                        event.client,
-                        event.tool,
-                        event.outcome,
-                        self._json(event.arguments),
-                        self._json(event.result),
-                        event.correlation_id,
-                        previous_hash,
-                        record_hash,
-                    ),
-                )
+                return self.append_in_transaction(connection, event)
+
+    @classmethod
+    def append_in_transaction(cls, connection: sqlite3.Connection, event: AuditEvent) -> str:
+        """Append while sharing the caller's transaction with the actual action."""
+        record_id = str(uuid4())
+        occurred_at = datetime.now(UTC).isoformat()
+        previous = connection.execute(
+            "SELECT record_hash FROM tool_runs ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+        previous_hash = previous["record_hash"] if previous else None
+        payload = {
+            "id": record_id,
+            "occurred_at": occurred_at,
+            "actor": event.actor,
+            "client": event.client,
+            "tool": event.tool,
+            "outcome": event.outcome,
+            "arguments": event.arguments,
+            "result": event.result,
+            "correlation_id": event.correlation_id,
+            "previous_hash": previous_hash,
+        }
+        record_hash = cls._hash(payload)
+        connection.execute(
+            """
+            INSERT INTO tool_runs (
+                id, occurred_at, actor, client, tool, outcome, arguments_json,
+                result_json, correlation_id, previous_hash, record_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id,
+                occurred_at,
+                event.actor,
+                event.client,
+                event.tool,
+                event.outcome,
+                cls._json(event.arguments),
+                cls._json(event.result),
+                event.correlation_id,
+                previous_hash,
+                record_hash,
+            ),
+        )
         return record_id
 
     def verify(self) -> bool:

@@ -11,8 +11,14 @@ requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Alfred contributors" }]
 dependencies = [
+  "cryptography>=44,<51",
+  "httpx>=0.27,<1",
+  "keyring>=25,<27",
   "mcp>=1.10,<2",
   "pydantic>=2.8,<3",
+  "sqlite-vec>=0.1.9,<1",
+  "slack-sdk>=3.36,<4",
+  "tzdata>=2025.2,<2027",
 ]
 
 [project.optional-dependencies]
