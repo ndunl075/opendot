@@ -338,15 +338,16 @@ table.audit-table tr:hover td { background: var(--bg-hover); }
 /* ---------- Login ---------- */
 
 .login-shell {
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-sidebar);
+  padding: 20px;
 }
 
 .login-card {
-  width: 340px;
+  width: min(340px, 100%);
   background: var(--bg-main);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -426,4 +427,69 @@ table.audit-table tr:hover td { background: var(--bg-hover); }
 
 @media (prefers-reduced-motion: reduce) {
   .topbar, .section, .login-card { animation: none; }
+}
+
+/* ---------- Small screens (phones) ----------
+   The sidebar becomes a horizontal, scrollable top bar instead of a fixed
+   240px column, which would otherwise leave almost no room for content on
+   an iPhone-width viewport. No JS anywhere in this page, so this is a pure
+   CSS reflow, not a collapsible drawer. */
+
+@media (max-width: 680px) {
+  .shell {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+
+  .brand { padding: 0 10px 0 2px; flex-shrink: 0; }
+  .brand-subtitle { display: none; }
+
+  .nav {
+    flex-direction: row;
+    gap: 2px;
+  }
+
+  .nav-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .sidebar-footer { display: none; }
+
+  .main { overflow-y: visible; }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    padding: 20px 16px 4px;
+  }
+
+  .page-title { font-size: 21px; }
+
+  .content { padding: 8px 16px 48px; }
+
+  .row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  table.audit-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
 }

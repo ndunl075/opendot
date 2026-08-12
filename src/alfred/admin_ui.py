@@ -10,13 +10,20 @@ goes through the CLI (``alfred approval-approve``), never this page. No
 external network calls -- no CDN fonts, no CDN icons -- consistent with
 Alfred's local-first rule that nothing calls out by default.
 
-Same loopback-only invariant as ``run_streamable_http``, but a different
-auth delivery: an MCP client can set an Authorization header on every
-request; a browser navigating between pages cannot. So this accepts either
-an Authorization header (for `curl`/scripting) or a same-origin session
-cookie set by a small login page -- the cookie's value *is* the bearer
-token (no separate session store), which is only as sensitive as the
-token itself and, like it, never leaves 127.0.0.1.
+Loopback-only by default, like every other local HTTP surface in this
+codebase, but ``run_admin_ui``'s ``host`` is a real parameter, not a hard
+invariant -- this one is meant for a human to look at, sometimes from a
+phone over a VPN, and ``127.0.0.1`` alone is unreachable from anywhere but
+the machine itself no matter what network route got there. See
+``run_admin_ui``'s docstring before binding it to anything else.
+
+Auth is delivered differently from the MCP transports too: an MCP client
+can set an Authorization header on every call; a browser navigating
+between pages cannot. So this accepts either an Authorization header (for
+`curl`/scripting) or a same-origin session cookie set by a small login
+page -- the cookie's value *is* the bearer token (no separate session
+store), which is only as sensitive as the token itself and travels no
+further than wherever the operator chose to bind this.
 """
 
 from __future__ import annotations
@@ -163,14 +170,23 @@ def create_admin_app(database: Database, *, bearer_token_value: str) -> Starlett
     return app
 
 
-def run_admin_ui(database: Database, *, port: int, bearer_token_value: str) -> None:
-    """Serve the admin UI, loopback-only, same invariant as run_streamable_http.
+def run_admin_ui(database: Database, *, port: int, bearer_token_value: str, host: str = "127.0.0.1") -> None:
+    """Serve the admin UI. Defaults to loopback-only, matching every other
+    local HTTP surface in this codebase -- but unlike the MCP transports,
+    this one is meant for a human to look at, sometimes from another
+    device, so ``host`` is a real parameter here rather than a hard
+    invariant. Binding to ``127.0.0.1`` alone is *not* reachable through a
+    VPN/Tailscale connection to this machine -- loopback only ever accepts
+    connections from the machine itself, regardless of what network route
+    got there. To view this from a phone, bind to this host's actual VPN
+    interface address (e.g. its Tailscale IP) instead, never ``0.0.0.0``
+    unless you have your own firewall rules already restricting who can
+    reach this port.
 
-    The host is deliberately not a parameter -- always ``127.0.0.1``. Takes
-    an already-resolved ``Database`` rather than a path, since the CLI
-    caller has already resolved one via ``database_from_args``.
+    Takes an already-resolved ``Database`` rather than a path, since the
+    CLI caller has already resolved one via ``database_from_args``.
     """
     import uvicorn
 
     app = create_admin_app(database, bearer_token_value=bearer_token_value)
-    uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")).run()
+    uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning")).run()

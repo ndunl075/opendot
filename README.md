@@ -401,14 +401,26 @@ every connector). No CDN fonts or icons; it works with the network off.
 .\.venv\Scripts\alfred admin-ui-run
 ```
 
-Same loopback-only invariant as `mcp-http-run`—the host isn't configurable.
-Auth is the same bearer token, but delivered differently: since a browser
-can't attach a custom header to a plain navigation, visiting any page
-without one redirects to a login screen; entering the token there sets an
-`HttpOnly`, `SameSite=Strict` cookie whose value *is* the token (no separate
-session store)—exactly as sensitive as the token itself, and it never
-leaves `127.0.0.1` either way. Scripted/API access can still send
-`Authorization: Bearer <token>` directly and skip the cookie entirely.
+Defaults to loopback-only like `mcp-http-run`, but unlike it, `--host` is a
+real option here—this is meant for a person to look at, sometimes from a
+phone. `127.0.0.1` is not reachable from another device even over a VPN
+(loopback only ever accepts connections that originate on the machine
+itself); to check it from your phone, run `alfred admin-ui-run --host
+<this-PC's-VPN-IP>` (a Tailscale IP, for example—`tailscale ip -4`), never
+`--host 0.0.0.0` unless you already have your own firewall rules
+restricting who can reach the port. Works the same in any modern browser:
+Edge, Safari, Firefox, Chrome. The layout reflows for a phone-width screen,
+and the system font stack renders as Segoe UI on Windows or San Francisco
+on Safari/iOS—no CDN fonts fetched either way.
+
+Auth is the same bearer token as `mcp-http-run`, delivered differently:
+since a browser can't attach a custom header to a plain navigation,
+visiting any page without one redirects to a login screen; entering the
+token there sets an `HttpOnly`, `SameSite=Strict` cookie whose value *is*
+the token (no separate session store)—exactly as sensitive as the token
+itself, and it goes no further than wherever you chose to bind the server.
+Scripted/API access can still send `Authorization: Bearer <token>` directly
+and skip the cookie entirely.
 
 ## Local vector search (optional)
 

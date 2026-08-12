@@ -1,9 +1,8 @@
 # Self-hosted CouchDB for optional mobile vault sync.
 #
 # See deploy/couchdb/README.md before running this -- it covers the
-# required post-startup configuration (CORS, single-node init), the
-# Obsidian-side plugin setup, and why the port below binds to 127.0.0.1
-# only rather than every interface.
+# required post-startup configuration (CORS, single-node init) and the
+# Obsidian-side plugin setup.
 #
 #   cd deploy/couchdb
 #   copy .env.example .env   (Windows)  /  cp .env.example .env   (else)
@@ -22,9 +21,15 @@ services:
       - ./data:/opt/couchdb/data
       - ./config:/opt/couchdb/etc/local.d
     ports:
-      # Loopback-only by design (matches ARCHITECTURE.md section 5: "over a
-      # private encrypted network," never a raw port-forward). Reach it from
-      # a phone through a VPN (Tailscale/WireGuard) into this host, not by
-      # changing this to "5984:5984" and forwarding it on your router.
-      - "127.0.0.1:5984:5984"
+      # Defaults to loopback-only -- reachable only from this machine
+      # itself, including from Docker Desktop's own host networking.
+      # Binding to 127.0.0.1 is NOT reachable through a VPN/Tailscale
+      # connection into this host: loopback only ever accepts connections
+      # that originate on the machine itself, regardless of what route got
+      # there. To actually view this from a phone (matches ARCHITECTURE.md
+      # section 5's "over a private encrypted network"), set
+      # ALFRED_VAULT_SYNC_HOST in .env to this host's own VPN/Tailscale IP
+      # (e.g. `tailscale ip -4`) -- never "0.0.0.0" and never a raw
+      # port-forward on your router.
+      - "${ALFRED_VAULT_SYNC_HOST:-127.0.0.1}:5984:5984"
     restart: unless-stopped

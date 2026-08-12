@@ -1,9 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from starlette.testclient import TestClient
 
-from alfred.admin_ui import _format_dt, _result_preview, create_admin_app
+from alfred.admin_ui import _format_dt, _result_preview, create_admin_app, run_admin_ui
 from alfred.audit import AuditEvent, AuditLog
 from alfred.db import Database
 from alfred.events import EventStore
@@ -199,3 +200,16 @@ def test_result_preview_truncates_long_results() -> None:
 
     assert len(preview) == 20
     assert preview.endswith("…")
+
+
+def test_run_admin_ui_defaults_to_loopback_but_accepts_another_host(tmp_path: Path) -> None:
+    """127.0.0.1 is the safe default; a VPN/Tailscale IP must still be
+    reachable for the documented phone-access path to actually work."""
+    database = Database(tmp_path / "alfred.db")
+    uvicorn_mock = mock.MagicMock()
+    with mock.patch.dict("sys.modules", {"uvicorn": uvicorn_mock}):
+        run_admin_ui(database, port=8200, bearer_token_value=TOKEN)
+        run_admin_ui(database, port=8200, bearer_token_value=TOKEN, host="100.64.1.2")
+
+    hosts = [call.kwargs.get("host") for call in uvicorn_mock.Config.call_args_list]
+    assert hosts == ["127.0.0.1", "100.64.1.2"]
