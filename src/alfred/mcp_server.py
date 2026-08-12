@@ -1,13 +1,26 @@
-"""Narrow stdio MCP surface, growing toward ARCHITECTURE.md section 7."""
+"""Alfred's MCP surface: stdio plus loopback-only Streamable HTTP.
+
+Section 7's transport policy: stdio for local Hermes/Claude/Cursor, and
+Streamable HTTP on ``/mcp`` for other local/private clients -- bound to
+``127.0.0.1`` only, with every remote request authenticated. Full OAuth
+2.1/RFC 9728 is reserved for public remote access, a separate, larger
+undertaking this module does not attempt; while loopback-only, a single
+shared bearer token is enough to satisfy "authenticate every remote
+request" without standing up an authorization server.
+"""
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
+from starlette.datastructures import Headers
+from starlette.responses import PlainTextResponse
+from starlette.types import Receive, Scope, Send
 
 from .briefing import BriefingService
 from .config import Settings
@@ -282,6 +295,70 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
 def main() -> None:
     """Run Alfred's local-only stdio MCP server."""
     create_server().run(transport="stdio")
+
+
+def generate_http_token() -> str:
+    """Return a fresh random bearer token for the Streamable HTTP transport."""
+    return secrets.token_urlsafe(32)
+
+
+def _bearer_token(header_value: str | None) -> str | None:
+    if not header_value or not header_value.lower().startswith("bearer "):
+        return None
+    token = header_value[len("bearer ") :].strip()
+    return token or None
+
+
+class _BearerAuthMiddleware:
+    """Reject every HTTP request that lacks the exact configured bearer token.
+
+    Applied outside FastMCP's own app, so a rejection never reaches the MCP
+    session/tool-call machinery at all -- an unauthenticated caller cannot
+    even open a session, let alone see which tools exist.
+    """
+
+    def __init__(self, app: Any, *, expected_token: str) -> None:
+        self._app = app
+        self._expected_token = expected_token
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        supplied = _bearer_token(Headers(scope=scope).get("authorization"))
+        if supplied is None or not secrets.compare_digest(supplied, self._expected_token):
+            await PlainTextResponse("Unauthorized", status_code=401)(scope, receive, send)
+            return
+        await self._app(scope, receive, send)
+
+
+def run_streamable_http(
+    database_path: Path | str | None = None,
+    *,
+    client_id: str,
+    port: int,
+    bearer_token: str,
+) -> None:
+    """Serve Alfred's MCP surface over Streamable HTTP, loopback-only.
+
+    The host is deliberately not a parameter: this always binds
+    ``127.0.0.1``, matching section 7's "Local server binds 127.0.0.1 only"
+    as a hard invariant rather than a default that could be overridden away
+    from it. FastMCP auto-enables DNS-rebinding protection (Host/Origin
+    header validation) whenever the host is a loopback address, so no extra
+    ``transport_security`` wiring is needed as long as this stays that way.
+    Every request additionally needs the exact configured bearer token --
+    see the module docstring for why that, not OAuth, is enough here.
+
+    ``client_id`` must already have a scope from ``PolicyStore.grant()``
+    (the CLI's ``client-grant``) before any tool call succeeds; this
+    function itself performs no default grant.
+    """
+    import uvicorn
+
+    server = create_server(database_path, client_id=client_id)
+    protected_app = _BearerAuthMiddleware(server.streamable_http_app(), expected_token=bearer_token)
+    uvicorn.Server(uvicorn.Config(protected_app, host="127.0.0.1", port=port, log_level="warning")).run()
 
 
 if __name__ == "__main__":

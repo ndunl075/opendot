@@ -18,7 +18,9 @@ dependencies = [
   "pydantic>=2.8,<3",
   "sqlite-vec>=0.1.9,<1",
   "slack-sdk>=3.36,<4",
+  "starlette>=0.40,<2",
   "tzdata>=2025.2,<2027",
+  "uvicorn>=0.32,<1",
 ]
 
 [project.optional-dependencies]
