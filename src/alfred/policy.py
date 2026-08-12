@@ -158,6 +158,15 @@ class ApprovalService:
             row = connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
         return self._approval_from_row(row) if row is not None else None
 
+    def list_pending(self) -> list[Approval]:
+        """List not-yet-decided approvals, for a read-only surface like the admin UI."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM approvals WHERE state = 'pending' ORDER BY requested_at DESC"
+            ).fetchall()
+        return [self._approval_from_row(row) for row in rows]
+
     def propose(
         self,
         *,

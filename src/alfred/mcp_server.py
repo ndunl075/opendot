@@ -12,16 +12,12 @@ request" without standing up an authorization server.
 from __future__ import annotations
 
 import argparse
-import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence, cast
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
-from starlette.datastructures import Headers
-from starlette.responses import PlainTextResponse
-from starlette.types import Receive, Scope, Send
 
 from .briefing import BriefingService
 from .config import Settings
@@ -32,6 +28,9 @@ from .gmail import GmailActions, GmailClient, GmailSendActions
 from .github import GitHubActions, GitHubClient
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
 from .google_oauth import current_access_token
+from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
+from .http_auth import bearer_token as _bearer_token
+from .http_auth import generate_token as generate_http_token
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .policy import ApprovalService, PolicyError, PolicyStore
 from .reminders import ReminderStore
@@ -320,41 +319,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     args = parse_stdio_args(argv)
     create_server(args.db, client_id=args.client_id).run(transport="stdio")
-
-
-def generate_http_token() -> str:
-    """Return a fresh random bearer token for the Streamable HTTP transport."""
-    return secrets.token_urlsafe(32)
-
-
-def _bearer_token(header_value: str | None) -> str | None:
-    if not header_value or not header_value.lower().startswith("bearer "):
-        return None
-    token = header_value[len("bearer ") :].strip()
-    return token or None
-
-
-class _BearerAuthMiddleware:
-    """Reject every HTTP request that lacks the exact configured bearer token.
-
-    Applied outside FastMCP's own app, so a rejection never reaches the MCP
-    session/tool-call machinery at all -- an unauthenticated caller cannot
-    even open a session, let alone see which tools exist.
-    """
-
-    def __init__(self, app: Any, *, expected_token: str) -> None:
-        self._app = app
-        self._expected_token = expected_token
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self._app(scope, receive, send)
-            return
-        supplied = _bearer_token(Headers(scope=scope).get("authorization"))
-        if supplied is None or not secrets.compare_digest(supplied, self._expected_token):
-            await PlainTextResponse("Unauthorized", status_code=401)(scope, receive, send)
-            return
-        await self._app(scope, receive, send)
 
 
 def run_streamable_http(

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Alfred</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="login-mark">A</div>
+      <p class="login-title">Alfred admin</p>
+      <p class="login-subtitle">Paste the token from <code class="mono">alfred admin-ui-token-generate</code>.</p>
+      {% if error %}<p class="login-error">{{ error }}</p>{% endif %}
+      <form method="post" action="/login">
+        <input type="hidden" name="next" value="{{ next }}">
+        <input class="login-input" type="password" name="token" placeholder="Bearer token" autofocus autocomplete="off">
+        <button class="login-button" type="submit">Continue</button>
+      </form>
+      <p class="login-hint">This stays on 127.0.0.1. The token is never sent anywhere but this page, and the session cookie it sets never leaves your browser.</p>
+    </div>
+  </div>
+</body>
+</html>

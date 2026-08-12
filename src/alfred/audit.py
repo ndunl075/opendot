@@ -26,6 +26,19 @@ class AuditEvent(BaseModel):
     correlation_id: str | None = None
 
 
+class AuditRecord(BaseModel):
+    """A stored record read back for a read-only surface (e.g. the admin UI)."""
+
+    id: str
+    occurred_at: datetime
+    actor: str
+    client: str
+    tool: str
+    outcome: str
+    result: dict[str, Any]
+    correlation_id: str | None
+
+
 class AuditLog:
     """Writes and verifies the hash chain stored in ``tool_runs``."""
 
@@ -83,6 +96,25 @@ class AuditLog:
             ),
         )
         return record_id
+
+    def recent(self, *, limit: int = 50) -> list[AuditRecord]:
+        """Return the most recent records, newest first, for a read-only surface like the admin UI."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            rows = connection.execute("SELECT * FROM tool_runs ORDER BY sequence DESC LIMIT ?", (limit,)).fetchall()
+        return [
+            AuditRecord(
+                id=row["id"],
+                occurred_at=datetime.fromisoformat(row["occurred_at"]),
+                actor=row["actor"],
+                client=row["client"],
+                tool=row["tool"],
+                outcome=row["outcome"],
+                result=json.loads(row["result_json"]),
+                correlation_id=row["correlation_id"],
+            )
+            for row in rows
+        ]
 
     def verify(self) -> bool:
         """Verify the complete local audit hash chain."""

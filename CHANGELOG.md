@@ -9,6 +9,15 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Read-only admin dashboard (`alfred admin-ui-run`, `admin_ui.py`): agenda,
+  pending approvals, connector health, and recent audit trail at
+  `127.0.0.1:8200`. No write actions — approving a pending action still
+  goes through the CLI. Same loopback-only, bearer-token-gated invariant as
+  `mcp-http-run`, delivered via a login page + `HttpOnly`/`SameSite=Strict`
+  cookie (browsers can't attach a custom header to a plain navigation) as
+  well as a raw `Authorization` header for scripted access. The shared
+  bearer-auth middleware moved to a new `http_auth.py` so the MCP HTTP
+  transport and the admin UI use one implementation, not two.
 - ChatGPT / OpenAI Secure MCP Tunnel support (`deploy/openai-tunnel/`):
   documents pointing OpenAI's own `tunnel-client` (not vendored here) at
   `alfred-mcp` over stdio. `alfred-mcp` gained a `--client-id` flag

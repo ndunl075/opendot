@@ -39,6 +39,7 @@ from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
 from .mcp_server import generate_http_token, run_streamable_http
+from .admin_ui import run_admin_ui
 from .winservice import configure as configure_windows_service
 from .vault_sync import check_couchdb
 
@@ -291,6 +292,15 @@ def build_parser() -> argparse.ArgumentParser:
     http_run.add_argument("--client-id", required=True, help="must already have a client-grant scope")
     http_run.add_argument("--port", type=int, default=8000)
     http_run.add_argument("--secret-name", default="mcp-http-bearer-token")
+    admin_token = subcommands.add_parser(
+        "admin-ui-token-generate", help="generate and store the admin dashboard's bearer token"
+    )
+    admin_token.add_argument("--secret-name", default="admin-ui-bearer-token")
+    admin_run = subcommands.add_parser(
+        "admin-ui-run", help="run Alfred's read-only admin dashboard, bound to 127.0.0.1 only"
+    )
+    admin_run.add_argument("--port", type=int, default=8200)
+    admin_run.add_argument("--secret-name", default="admin-ui-bearer-token")
     propose = subcommands.add_parser("approval-propose", help="create a local preview approval")
     propose.add_argument("--actor", required=True)
     propose.add_argument("--action-type", required=True)
@@ -664,6 +674,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "mcp-http-run":
         token = SystemKeyringSecretStore().get_required(args.secret_name)
         run_streamable_http(database.path, client_id=args.client_id, port=args.port, bearer_token=token)
+        return 0
+    if args.command == "admin-ui-token-generate":
+        secrets_store = SystemKeyringSecretStore()
+        try:
+            secrets_store.get_required(args.secret_name)
+        except SecretStoreError:
+            secrets_store.store(args.secret_name, generate_http_token())
+            print(json.dumps({"secret_name": args.secret_name, "created": True}))
+            return 0
+        raise SystemExit("admin UI bearer token already exists; refusing to overwrite it")
+    if args.command == "admin-ui-run":
+        token = SystemKeyringSecretStore().get_required(args.secret_name)
+        run_admin_ui(database, port=args.port, bearer_token_value=token)
         return 0
     approvals = ApprovalService(database)
     if args.command == "approval-propose":
