@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+from alfred.connector_records import ConnectorRecordStore
 from alfred.db import Database
 from alfred.gmail import _draft_message_id
 from alfred.google_calendar import _calendar_event_id
@@ -183,6 +184,98 @@ def test_connector_status_reports_sync_health_without_credentials(tmp_path: Path
     assert status[0]["last_error"] is None
     # Pydantic's JSON mode renders UTC as "Z"; compare the parsed instant, not the string form.
     assert datetime.fromisoformat(status[0]["last_success_at"]) == datetime.fromisoformat(recent)
+
+
+def test_connector_records_get_filters_by_connector_and_record_type(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            ConnectorRecordStore.upsert(
+                connection,
+                connector="gmail",
+                account="primary",
+                record_type="unread_message",
+                record_id="msg-1",
+                payload={"subject": "Re: paper draft", "from": "advisor@school.edu", "snippet": "Looks good, but..."},
+                active=True,
+            )
+            ConnectorRecordStore.upsert(
+                connection,
+                connector="gmail",
+                account="primary",
+                record_type="unread_message",
+                record_id="msg-2",
+                payload={"subject": "Newsletter", "from": "noreply@example.com", "snippet": "This week in..."},
+                active=True,
+            )
+            ConnectorRecordStore.upsert(
+                connection,
+                connector="github",
+                account="self",
+                record_type="notification",
+                record_id="notif-1",
+                payload={"repository": "alfred", "reason": "mention"},
+                active=True,
+            )
+    _grant(database_path, allowed_tools={"connector_records_get"})
+    server = create_server(database_path)
+
+    gmail_records = _call(server, "connector_records_get", {"connector": "gmail"})
+    assert {record["record_id"] for record in gmail_records} == {"msg-1", "msg-2"}
+    assert {record["payload"]["subject"] for record in gmail_records} == {"Re: paper draft", "Newsletter"}
+
+    github_records = _call(
+        server, "connector_records_get", {"connector": "github", "record_type": "notification"}
+    )
+    assert [record["record_id"] for record in github_records] == ["notif-1"]
+
+    missing_type = _call(server, "connector_records_get", {"connector": "gmail", "record_type": "sent_message"})
+    assert missing_type == []
+
+
+def test_connector_records_get_excludes_inactive_records_and_respects_limit(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            for index in range(3):
+                ConnectorRecordStore.upsert(
+                    connection,
+                    connector="gmail",
+                    account="primary",
+                    record_type="unread_message",
+                    record_id=f"msg-{index}",
+                    payload={"subject": f"Message {index}"},
+                    active=True,
+                )
+            ConnectorRecordStore.upsert(
+                connection,
+                connector="gmail",
+                account="primary",
+                record_type="unread_message",
+                record_id="msg-archived",
+                payload={"subject": "Already read"},
+                active=False,
+            )
+    _grant(database_path, allowed_tools={"connector_records_get"})
+    server = create_server(database_path)
+
+    limited = _call(server, "connector_records_get", {"connector": "gmail", "limit": 2})
+
+    assert len(limited) == 2
+    assert "msg-archived" not in {record["record_id"] for record in limited}
+
+
+def test_connector_records_get_rejects_a_client_without_the_tool_grant(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"memory_search"})  # no connector_records_get
+    server = create_server(database_path)
+
+    with pytest.raises(Exception, match="not allowed"):
+        asyncio.run(server.call_tool("connector_records_get", {"connector": "gmail"}))
 
 
 def test_task_upsert_creates_then_updates_without_clearing_the_due_date(tmp_path: Path) -> None:

@@ -12,6 +12,7 @@ request" without standing up an authorization server.
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence, cast
@@ -214,6 +215,40 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
         """Report each connector's health; never its credentials or synced content."""
         policy.require_read(client_id, "connector_status")
         return [health.model_dump(mode="json") for health in connector_health(database)]
+
+    @server.tool()
+    def connector_records_get(connector: str, record_type: str | None = None, limit: int = 20) -> list[dict]:
+        """Return one connector's currently-active synced records, most recently observed first.
+
+        brief_get/agenda_get already fold calendar events, GitHub
+        notifications, and Canvas missing assignments into one ranked digest,
+        but nothing else exposes a connector's raw synced content directly --
+        for example gmail-sync's unread-message records (subject/from/snippet)
+        never reach an MCP caller otherwise. This reads the same
+        connector_records table every sync already writes to
+        (ConnectorRecordStore), so it needs no new storage or sync logic.
+        """
+        policy.require_read(client_id, "connector_records_get")
+        database.migrate()
+        with database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT record_type, record_id, payload_json, observed_at FROM connector_records
+                WHERE connector = ? AND active = 1 AND (? IS NULL OR record_type = ?)
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (connector, record_type, record_type, limit),
+            ).fetchall()
+        return [
+            {
+                "record_type": row["record_type"],
+                "record_id": row["record_id"],
+                "payload": json.loads(row["payload_json"]),
+                "observed_at": row["observed_at"],
+            }
+            for row in rows
+        ]
 
     @server.tool()
     def task_upsert(title: str, task_id: str | None = None, due_at: str | None = None) -> dict:

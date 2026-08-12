@@ -1,0 +1,23 @@
+name: alfred
+version: 0.1.0
+description: >-
+  Alfred: a local-first personal assistant. This distribution is the
+  conversational front end -- it holds no data of its own and talks to a
+  separately-running alfred-core process over local stdio MCP for every
+  fact, task, reminder, and connector it touches.
+author: Alfred contributors
+license: Apache-2.0
+
+# hermes_requires intentionally omitted: this profile hasn't been installed
+# against a real Hermes build yet, so pinning a floor version here would be
+# a guess. Run `hermes --version` once installed and add a real constraint
+# if you want one -- see hermes-profile/README.md.
+
+env_requires:
+  - name: OPENROUTER_API_KEY
+    description: >-
+      Fallback cloud model provider, used only when the local Ollama
+      provider (config.yaml) is unavailable or insufficient. Get one at
+      https://openrouter.ai/keys.
+    required: false
+    default: ""

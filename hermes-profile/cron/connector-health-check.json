@@ -1,0 +1,8 @@
+{
+  "_comment": "Best-effort against https://hermes-agent.nousresearch.com/docs/user-guide/features/cron -- not verified against a real installed Hermes yet. Per the profile-distributions guide, cron/ files are distribution-owned but NOT auto-enabled on install; run `hermes -p alfred cron list` after installing to see this, and activate it explicitly if the schema below turns out right.",
+  "name": "alfred-connector-health-check",
+  "schedule": "every 6h",
+  "prompt": "Call the connector_status MCP tool. If any connector's state is not \"ok\", report which one(s) and their last_error -- otherwise say nothing (this is a health check, not a status report every 6 hours).",
+  "skills": [],
+  "deliver": null
+}

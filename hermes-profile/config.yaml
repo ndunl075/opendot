@@ -1,0 +1,38 @@
+# Model/provider defaults for this profile. Per README.md's install flow,
+# Hermes preserves this file across `hermes profile update` (pass
+# --force-config to override), so local edits here are safe to make and keep.
+#
+# NOT independently verified against a real Hermes install yet -- built from
+# https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models.
+# If any key name below doesn't match what your installed Hermes actually
+# reads, that's a real gap in this file; fix it here (or flag it back) rather
+# than working around it by hand each time.
+
+providers:
+  ollama-local:
+    api: http://localhost:11434/v1
+    api_key: ""
+  openrouter:
+    api: https://openrouter.ai/api/v1
+    # Uncertain: whether Hermes interpolates ${OPENROUTER_API_KEY} from the
+    # environment here, or expects the literal key value. distribution.yaml
+    # declares OPENROUTER_API_KEY as an env_requires entry either way, so
+    # `hermes profile install` will prompt for it; if this field needs the
+    # literal value instead of an env reference, that prompt is where it
+    # should end up, not a hardcoded secret committed to this file.
+    api_key: "${OPENROUTER_API_KEY}"
+
+model:
+  # Local by default, matching alfred-core's own "local inference by
+  # default, cloud as an optional fallback" rule (ARCHITECTURE.md decision
+  # 6) -- free, private, and good enough for most conversational turns.
+  provider: ollama-local
+  # Adjust to whatever model you've actually pulled (`ollama list`); this is
+  # a placeholder, not a verified-available default.
+  default: "llama3.2"
+  api_mode: chat_completions
+  # Falls back to OpenRouter for anything the local model can't handle well
+  # (long context, harder reasoning). Adjust the model name to whatever you
+  # want as the cloud fallback.
+  fallback_providers: ["openrouter"]
+  fallback_model: "anthropic/claude-opus-4.7"

@@ -1,0 +1,17 @@
+# Per Hermes's own documented distribution conventions -- these are hard-
+# excluded by `hermes profile install` regardless, but listed explicitly so
+# nothing here ever gets committed by accident.
+auth.json
+.env
+.env.local
+state.db*
+response_store.db*
+gateway.pid
+processes.json
+memories/
+sessions/
+logs/
+workspace/
+plans/
+home/
+*_cache/

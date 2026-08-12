@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "alfred": {
+      "command": "alfred-mcp",
+      "args": ["--client-id", "hermes"]
+    }
+  }
+}
