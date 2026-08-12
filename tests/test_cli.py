@@ -308,3 +308,21 @@ def test_cli_proposes_a_gmail_draft_without_any_google_credential(tmp_path: Path
         "body": "Quick question about the deadline.",
     }
     assert proposed["state"] == "pending"
+
+
+def test_cli_service_configure_stores_the_run_args_for_the_windows_service(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    # service-configure always writes to ./.alfred (matching scripts/install.ps1
+    # and README's fixed local-data convention), so redirect CWD rather than
+    # using --db, which only controls the database path.
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["service-configure", "run", "--pair", "123:456", "--chat-id", "123"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["args"] == ["run", "--pair", "123:456", "--chat-id", "123"]
+    assert Path(result["config_path"]).resolve() == (tmp_path / ".alfred" / "service.json").resolve()
+    from alfred.winservice import load_configured_args
+
+    assert load_configured_args(alfred_dir=tmp_path / ".alfred") == ["run", "--pair", "123:456", "--chat-id", "123"]

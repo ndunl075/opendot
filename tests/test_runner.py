@@ -131,6 +131,37 @@ def test_run_forever_stops_after_the_configured_iteration_count(tmp_path: Path) 
     assert sleeps == [7, 7]
 
 
+def test_run_forever_stops_when_stop_check_reports_true(tmp_path: Path) -> None:
+    """The Windows service (and anything else supervising the loop
+    externally) stops it this way instead of relying on iterations or
+    KeyboardInterrupt."""
+    database = Database(tmp_path / "alfred.db")
+    sleeps: list[float] = []
+    cycles = {"count": 0}
+
+    def stop_after_two_cycles() -> bool:
+        return cycles["count"] >= 2
+
+    connector = ConnectorSync(name="counter", interval_seconds=0, run=lambda: cycles.__setitem__("count", cycles["count"] + 1))
+    runner = AlfredRunner(database, connectors=(connector,), sleep=sleeps.append)
+
+    runner.run_forever(stop_check=stop_after_two_cycles)
+
+    assert cycles["count"] == 2
+    assert sleeps == [5.0]  # slept once, between the two cycles; the stop check then skipped a third
+
+
+def test_run_forever_never_stops_on_its_own_without_a_stop_check_or_iterations(tmp_path: Path) -> None:
+    """Confirms the default stop_check is a true no-op, not an accidental early exit."""
+    database = Database(tmp_path / "alfred.db")
+    sleeps: list[float] = []
+    runner = AlfredRunner(database, sleep=sleeps.append)
+
+    runner.run_forever(iterations=5, stop_check=lambda: False)
+
+    assert len(sleeps) == 4
+
+
 def test_pending_reminder_is_delivered_even_without_a_new_telegram_message(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     database.migrate()

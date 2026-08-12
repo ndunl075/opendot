@@ -78,13 +78,23 @@ class AlfredRunner:
         self.now = now
         self._last_synced: dict[str, float] = {}
 
-    def run_forever(self, *, iterations: int | None = None) -> None:
-        """Loop until interrupted, or for a fixed number of cycles when testing."""
+    def run_forever(
+        self, *, iterations: int | None = None, stop_check: Callable[[], bool] = lambda: False
+    ) -> None:
+        """Loop until interrupted, `iterations` cycles complete, or `stop_check()` returns True.
+
+        `stop_check` lets an external supervisor -- a Windows service's
+        SvcStop handler, for instance -- request a clean stop between
+        cycles without this module needing to import any platform-specific
+        signaling primitive itself. It defaults to never stopping, so every
+        existing caller (including `alfred run`'s own KeyboardInterrupt
+        handling) is unaffected.
+        """
         count = 0
-        while iterations is None or count < iterations:
+        while (iterations is None or count < iterations) and not stop_check():
             self.run_once()
             count += 1
-            if iterations is None or count < iterations:
+            if (iterations is None or count < iterations) and not stop_check():
                 self.sleep(self.idle_sleep_seconds)
 
     def run_once(self) -> RunOnceReport:
