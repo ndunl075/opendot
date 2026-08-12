@@ -43,13 +43,18 @@ credential manager under service `alfred`, account `telegram-bot-token`, then ru
 `alfred telegram-poll` with explicitly paired chat/user IDs. Alfred never writes
 the token to its database, audit log, Markdown vault, or Git.
 
-Slack is optional and stays local through Socket Mode—no public webhook or tunnel.
-Create an app-level token with `connections:write` and a bot token that can read
-the Slack events you subscribe to and post messages. Store them under service
-`alfred` as `slack-app-token` and `slack-bot-token`, then add
-`--slack-pair CHANNEL_ID:USER_ID --slack-channel-id CHANNEL_ID` to `alfred run`.
-Only messages from exactly paired user/channel combinations enter Alfred; replies,
-reminders, and morning briefs can only be delivered to explicitly allowed channels.
+Slack is optional and stays local through Socket Mode—no public webhook or
+tunnel. `deploy/slack-app/manifest.yml` configures a ready-to-paste Slack app
+(OAuth scopes, event subscriptions, Socket Mode); `deploy/slack-app/README.md`
+walks through the rest—generating the app-level and bot tokens, storing them
+under service `alfred` as `slack-app-token`/`slack-bot-token`, inviting the
+bot, and finding your channel/user IDs. Then add `--slack-pair
+CHANNEL_ID:USER_ID --slack-channel-id CHANNEL_ID` to `alfred run`. Only
+messages from exactly paired user/channel combinations enter Alfred; replies,
+reminders, and morning briefs can only be delivered to explicitly allowed
+channels. This connector is built the same way every other one in this repo
+is—unit-tested against synthetic fixtures—but has not yet been exercised
+against a real Slack app.
 
 Google Calendar and Gmail share one real OAuth 2.0 flow, not a hand-pasted
 access token. First, in Google Cloud Console, create an OAuth client of type

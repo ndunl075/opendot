@@ -1,0 +1,47 @@
+# Slack app manifest for Alfred's paired Socket Mode connector.
+#
+# Paste this at https://api.slack.com/apps -> "Create New App" -> "From an
+# app manifest" -- it configures OAuth scopes, event subscriptions, and
+# Socket Mode in one step. Slack's own manifest editor validates it against
+# their live schema before creating anything, which this repo cannot do, so
+# treat this as a verified starting point, not a guarantee it will never
+# need a small edit if Slack changes the schema after this was written.
+#
+# What it does NOT do -- these stay manual, deliberately, since they're
+# workspace-specific and not something a checked-in file should decide:
+#   - Installing the app to your workspace
+#   - Generating the app-level token (Basic Information -> App-Level
+#     Tokens -> Generate, scope: connections:write)
+#   - Inviting the bot to whichever channel(s) you pair it with
+#
+# See deploy/slack-app/README.md for the full walkthrough, including where
+# each of Alfred's two required tokens comes from and how they map to
+# --slack-pair/--slack-channel-id and alfred's keyring secret names.
+
+_metadata:
+  major_version: 1
+
+display_information:
+  name: Alfred
+  description: "Local-first personal secretary: paired task/reminder intake and delivery"
+  background_color: "#2F5D50"
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+
+settings:
+  socket_mode_enabled: true
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  org_deploy_enabled: false
+  token_rotation_enabled: false
