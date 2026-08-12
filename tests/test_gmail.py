@@ -1,9 +1,13 @@
+import base64
+import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from alfred.db import Database
-from alfred.gmail import GmailClient, GmailSync
+from alfred.gmail import GmailActions, GmailClient, GmailSync
+from alfred.policy import ApprovalService, PolicyError
 
 
 def _message(message_id: str, internal_date: str, *, subject: str = "Re: capstone review") -> dict:
@@ -80,3 +84,74 @@ def test_gmail_client_lists_then_fetches_metadata_only() -> None:
         client.close()
     assert [message["id"] for message in messages] == ["1"]
     assert calls == ["/gmail/v1/users/me/messages", "/gmail/v1/users/me/messages/1"]
+
+
+def test_gmail_client_create_draft_sends_a_valid_rfc2822_message() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/gmail/v1/users/me/drafts"
+        payload = json.loads(request.read())
+        raw = base64.urlsafe_b64decode(payload["message"]["raw"]).decode("utf-8")
+        assert "To: advisor@school.example" in raw
+        assert "Subject: Question" in raw
+        assert "Quick question about the deadline." in raw
+        return httpx.Response(200, json={"id": "draft1"})
+
+    client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        created = client.create_draft(to="advisor@school.example", subject="Question", body="Quick question about the deadline.")
+    finally:
+        client.close()
+    assert created["id"] == "draft1"
+
+
+class FakeDraftTransport:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def create_draft(self, *, to, subject, body):
+        self.calls.append({"to": to, "subject": subject, "body": body})
+        return {"id": f"draft-{len(self.calls)}"}
+
+
+def test_gmail_draft_is_never_created_without_a_consumed_approval(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    transport = FakeDraftTransport()
+    actions = GmailActions(database, approvals)
+
+    proposed = actions.propose_draft(actor="nico", to="advisor@school.example", subject="Question", body="Quick question.")
+    assert transport.calls == []  # proposing alone must never touch Gmail
+
+    with pytest.raises(PolicyError, match="not ready to consume"):
+        GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token="not-a-real-token")
+    assert transport.calls == []
+
+    issued = approvals.approve(proposed.id, actor="nico")
+    receipt = GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+
+    assert receipt.replayed is False
+    assert receipt.draft_id == "draft-1"
+    assert transport.calls == [{"to": "advisor@school.example", "subject": "Question", "body": "Quick question."}]
+
+
+def test_gmail_execute_replays_the_receipt_instead_of_creating_twice(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    approvals = ApprovalService(database)
+    transport = FakeDraftTransport()
+    proposed = GmailActions(database, approvals).propose_draft(
+        actor="nico", to="advisor@school.example", subject="Question", body="Quick question."
+    )
+    issued = approvals.approve(proposed.id, actor="nico")
+
+    first = GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+    second = GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert second.draft_id == first.draft_id
+    assert len(transport.calls) == 1  # Gmail was only ever asked to create the draft once
+
+    with pytest.raises(PolicyError, match="does not match"):
+        GmailActions(database, approvals, transport).execute(proposed.id, actor="someone-else", token=issued.token)
+    with pytest.raises(PolicyError, match="invalid"):
+        GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token="wrong-token")

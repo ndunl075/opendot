@@ -10,9 +10,10 @@ a CLI, a policy-gated stdio MCP server, a typed temporal memory graph with
 optional local vector search and evidence-backed provenance, a two-way
 Obsidian-compatible Markdown vault, local Telegram polling and delivery,
 durable jobs with missed-run recovery, read-only Calendar/Canvas/GitHub/Gmail
-sync feeding a deterministic morning brief, Alfred's first real write (an
-approval-gated Calendar event create), a real Google OAuth refresh flow, and
-`alfred run`, a persistent process that ties all of the above into one
+sync feeding a deterministic morning brief, approval-gated writes (a Calendar
+event create and a Gmail draft create—every documented MCP tool now exists),
+a real Google OAuth refresh flow, an opt-in local-model text-generation pass,
+and `alfred run`, a persistent process that ties all of the above into one
 always-on loop.
 
 ## Local setup
@@ -70,11 +71,22 @@ notification's title, repository, reason (mention, review requested, etc.),
 subject type, and a browser deep link—never issue/PR body text or comments.
 Resolved or read notifications drop out of the next sync automatically.
 
-Gmail is also read-only and opt-in, and reuses the same `google-auth` grant as
-Calendar (the default scopes cover both). `alfred gmail-sync` copies only the
-unread inbox message's subject, sender, and Gmail's own short snippet—never the
-message body or attachments. Reading or archiving a message drops it out of the
-next sync automatically.
+Gmail reuses the same `google-auth` grant as Calendar (the default scopes cover
+both). `alfred gmail-sync` reads the unread inbox and copies only each message's
+subject, sender, and Gmail's own short snippet—never the message body or
+attachments. Reading or archiving a message drops it out of the next sync
+automatically.
+
+Gmail also has a narrow, preview-then-confirm write: drafting, not sending.
+`alfred gmail-draft-propose --actor nico --to recipient@example.com --subject
+"..." "body text"` creates a local preview and never touches Gmail. Approve it
+with `alfred approval-approve --approval-id <ID> --actor nico`, then `alfred
+gmail-draft-execute --approval-id <ID> --actor nico --token <TOKEN>` consumes
+that token and creates the draft in Gmail—retrying with the same approval ID
+and token replays the receipt instead of creating a duplicate. Alfred's code
+never calls a send endpoint; the draft sits in Gmail exactly as if you'd
+started typing it yourself. Sending is connector order's next phase and isn't
+built anywhere in this codebase yet.
 
 To queue a daily local morning brief for a paired Telegram chat, use for example
 `alfred schedule-brief --chat-id 123 --at 07:30 --timezone America/New_York`.
@@ -171,31 +183,33 @@ Alfred itself generated (`managed: true`) are never re-imported as testimony.
 and other local MCP clients. Every tool is default-deny: a client gets nothing
 until explicitly granted, e.g. `alfred client-grant --client-id local-mcp
 --sensitivity public --sensitivity personal --tool memory_search --tool
-remember --tool forget --tool calendar_event_propose --tool action_commit
---tool brief_get --tool connector_status --allow-write`. Current tools:
-`system_status`, `agenda_get`, `memory_search`, `profile_get`, `remember`,
-`forget`, `calendar_event_propose`, `action_commit`, `brief_get`,
-`connector_status`, `task_upsert`, `task_complete`, and `reminder_set`—11 of
-section 7's 12 documented tools (only `message_draft`, sending a message, is
-still missing), plus two not in that list: `system_status` and
-`calendar_event_propose`, which the generic `action_commit` needs since
-section 7 never names a tool for previewing a calendar write specifically.
-`remember`/`forget` additionally check the requested
-memory's sensitivity against the client's own scope, so a client granted only
-`public`/`personal` cannot write or erase a `secret` memory even with
-`--allow-write`.
+remember --tool forget --tool calendar_event_propose --tool message_draft
+--tool action_commit --tool brief_get --tool connector_status --allow-write`.
+Current tools: `system_status`, `agenda_get`, `memory_search`, `profile_get`,
+`remember`, `forget`, `calendar_event_propose`, `message_draft`,
+`action_commit`, `brief_get`, `connector_status`, `task_upsert`,
+`task_complete`, and `reminder_set`—all 12 of section 7's documented tools are
+implemented (`message_draft` creates a Gmail draft only; nothing sends), plus
+two not in that list: `system_status` and `calendar_event_propose`, which the
+generic `action_commit` needs since section 7 never names a tool for
+previewing a calendar write specifically. `remember`/`forget` additionally
+check the requested memory's sensitivity against the client's own scope, so a
+client granted only `public`/`personal` cannot write or erase a `secret`
+memory even with `--allow-write`.
 
-Deleting and calendar writes are consequential, so `forget` and
-`calendar_event_propose` only preview—`action_commit` performs whatever a
-previous tool call previewed, once given a fresh approval token. There is
-deliberately no MCP tool to approve one: decision 8's "never unattended" (for
-deletes) and "preview + confirm" (for calendar writes) would be meaningless if
-the same automated client could both propose and approve its own action, so a
-human (or a trusted local channel outside the MCP client's own reach, e.g.
-`alfred approval-approve`) has to grant it. `action_commit` mints a fresh
-Google access token itself when finishing a calendar write, the same way the
-CLI's `calendar-event-execute` already does; nothing is cached. Only sending a
-message (`message_draft`) remains off the MCP surface entirely.
+Deleting, calendar writes, and drafting a message are all consequential, so
+`forget`, `calendar_event_propose`, and `message_draft` only preview—
+`action_commit` performs whatever a previous tool call previewed, once given a
+fresh approval token. There is deliberately no MCP tool to approve one:
+decision 8's "never unattended" (for deletes) and "preview + confirm" (for
+calendar writes and messages) would be meaningless if the same automated
+client could both propose and approve its own action, so a human (or a
+trusted local channel outside the MCP client's own reach, e.g. `alfred
+approval-approve`) has to grant it. `action_commit` mints a fresh Google
+access token itself when finishing a calendar write or a Gmail draft, the same
+way the CLI's `calendar-event-execute`/`gmail-draft-execute` already do;
+nothing is cached. Sending a message is connector order's next phase and
+isn't built anywhere in this codebase yet.
 
 ## Local vector search (optional)
 

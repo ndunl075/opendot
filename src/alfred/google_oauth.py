@@ -24,11 +24,16 @@ AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
 # calendar.events covers the read sync and the approval-gated event write;
-# gmail.readonly is enough for the unread-inbox sync. Both from one consent
+# gmail.readonly covers the unread-inbox sync; gmail.compose covers the
+# approval-gated draft write. gmail.compose's own grant may be broader than
+# what Alfred exercises -- the real boundary is that GmailClient's code
+# never calls a send endpoint, only drafts.create, regardless of what the
+# token could technically do. All three scopes come from one consent
 # screen, so Calendar and Gmail share a single refresh token.
 DEFAULT_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
 )
 
 

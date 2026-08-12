@@ -1,8 +1,11 @@
-"""Read-only Gmail sync: unread inbox headers and snippet only, never body text."""
+"""Gmail sync (read) plus one narrowly scoped, approval-gated draft write."""
 
 from __future__ import annotations
 
+import base64
+import json
 from datetime import UTC, datetime
+from email.mime.text import MIMEText
 from typing import Any, Protocol
 
 import httpx
@@ -12,10 +15,15 @@ from .audit import AuditEvent, AuditLog
 from .connector_records import ConnectorRecordStore
 from .db import Database
 from .events import EventStore
+from .policy import Approval, ApprovalService, PolicyError
 
 
 class GmailTransport(Protocol):
     def list_unread_inbox(self) -> list[dict[str, Any]]: ...
+
+
+class GmailWriteTransport(Protocol):
+    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]: ...
 
 
 class GmailClient:
@@ -69,6 +77,16 @@ class GmailClient:
             f"/users/me/messages/{message_id}",
             params={"format": "metadata", "metadataHeaders": ["Subject", "From"]},
         )
+        response.raise_for_status()
+        return response.json()
+
+    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+        """Create one Gmail draft; callers are responsible for approval and idempotency."""
+        message = MIMEText(body)
+        message["To"] = to
+        message["Subject"] = subject
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        response = self._client.post("/users/me/drafts", json={"message": {"raw": raw}})
         response.raise_for_status()
         return response.json()
 
@@ -154,6 +172,90 @@ class GmailSync:
                     """,
                     (self.connector_name, self.account_name, reason, now),
                 )
+
+
+class GmailDraftReceipt(BaseModel):
+    draft_id: str
+    idempotency_key: str
+    replayed: bool
+
+
+class GmailActions:
+    """A narrowly scoped, approval-gated write: create one Gmail draft.
+
+    Matches the connector contract's propose()/execute() shape and section
+    7's own language ("message_draft and other consequential operations
+    return a preview"): even a draft -- not a sent message -- is treated as
+    consequential, so nothing reaches Gmail until a proposal is approved and
+    its one-time token is presented to execute(). Only drafting is built
+    here; sending is connector order's next phase and stays unbuilt.
+    """
+
+    connector_name = "gmail"
+    action_type = "gmail_draft_create"
+
+    def __init__(
+        self, database: Database, approvals: ApprovalService, transport: GmailWriteTransport | None = None
+    ) -> None:
+        """``transport`` is only required for execute(); propose_draft() never touches Gmail."""
+        self.database = database
+        self.approvals = approvals
+        self.transport = transport
+
+    def propose_draft(self, *, actor: str, to: str, subject: str, body: str) -> Approval:
+        """Preview a Gmail draft without sending anything to Gmail yet."""
+        preview = {"to": to, "subject": subject, "body": body}
+        return self.approvals.propose(actor=actor, action_type=self.action_type, preview=preview)
+
+    def execute(self, approval_id: str, *, actor: str, token: str) -> GmailDraftReceipt:
+        """Consume a fresh approval exactly once, then create the draft idempotently.
+
+        See GoogleCalendarActions.execute() for the identical replay-before-
+        consume ordering and its documented crash-window trade-off.
+        """
+        self.database.migrate()
+        idempotency_key = f"{self.action_type}:{approval_id}"
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                "SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        if existing is not None:
+            self.approvals.verify(approval_id, actor=actor, token=token)
+            if existing["actor"] != actor:
+                raise PolicyError("approval actor does not match the requested action")
+            payload = json.loads(existing["payload_json"])
+            return GmailDraftReceipt(draft_id=payload["draft_id"], idempotency_key=idempotency_key, replayed=True)
+
+        transport = self.transport
+        if transport is None:
+            raise ValueError("execute() requires a transport to reach Gmail")
+        approval = self.approvals.consume(approval_id, actor=actor, token=token)
+        preview = approval.preview
+        created = transport.create_draft(to=preview["to"], subject=preview["subject"], body=preview["body"])
+        draft_id = created.get("id")
+        if not isinstance(draft_id, str) or not draft_id:
+            raise ValueError("Gmail did not return a draft id")
+        payload = {"draft_id": draft_id}
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """
+                    INSERT INTO action_receipts (idempotency_key, connector, action_type, approval_id, actor, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        idempotency_key,
+                        self.connector_name,
+                        self.action_type,
+                        approval_id,
+                        actor,
+                        json.dumps(payload, sort_keys=True),
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+        return GmailDraftReceipt(draft_id=draft_id, idempotency_key=idempotency_key, replayed=False)
 
 
 def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:

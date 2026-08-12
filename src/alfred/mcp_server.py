@@ -14,6 +14,7 @@ from .config import Settings
 from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
+from .gmail import GmailActions, GmailClient
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
 from .google_oauth import current_access_token
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
@@ -30,15 +31,17 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
 
     Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
     client gets nothing by default. Consequential actions are two calls, not
-    one: forget() and calendar_event_propose() only preview; action_commit()
-    performs whatever a prior call previewed, once a fresh approval token is
-    presented. Decision 8 requires this for deleting data and calendar
-    writes alike ("strong-confirm" / "preview + confirm"), and there is
-    deliberately no MCP tool to grant that approval -- letting the same
-    automated client both propose and approve its own action would defeat
-    the point, so a human has to grant it through a channel outside the MCP
-    client's own reach (e.g. CLI's approval-approve). message_draft (sending
-    a message) is the one section 7 tool still missing.
+    one: forget(), calendar_event_propose(), and message_draft() only
+    preview; action_commit() performs whatever a prior call previewed, once
+    a fresh approval token is presented. Decision 8 requires this for
+    deleting data, calendar writes, and sending a message alike
+    ("strong-confirm" / "preview + confirm"), and there is deliberately no
+    MCP tool to grant that approval -- letting the same automated client
+    both propose and approve its own action would defeat the point, so a
+    human has to grant it through a channel outside the MCP client's own
+    reach (e.g. CLI's approval-approve). message_draft only ever creates a
+    Gmail draft, never sends one; sending is connector order's next phase
+    and is not built anywhere in this codebase yet.
     """
     settings = Settings.from_environment(Path(database_path) if database_path else None)
     database = Database(settings.database_path)
@@ -115,6 +118,18 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
         return approval.model_dump(mode="json")
 
     @server.tool()
+    def message_draft(to: str, subject: str, body: str) -> dict:
+        """Preview a Gmail draft; nothing reaches Gmail until action_commit confirms it.
+
+        This creates a draft only -- Alfred's code never calls a send
+        endpoint. Sending is connector order's next phase and stays unbuilt.
+        """
+        policy.require_write(client_id, "message_draft")
+        actions = GmailActions(database, approvals)
+        approval = actions.propose_draft(actor=f"mcp:{client_id}", to=to, subject=subject, body=body)
+        return approval.model_dump(mode="json")
+
+    @server.tool()
     def action_commit(approval_id: str, token: str) -> dict:
         """Consume a fresh approval token and perform the action it previewed."""
         policy.require_write(client_id, "action_commit")
@@ -129,6 +144,13 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             client = GoogleCalendarClient(current_access_token(SystemKeyringSecretStore()))
             try:
                 receipt = GoogleCalendarActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
+            finally:
+                client.close()
+            return receipt.model_dump(mode="json")
+        if approval.action_type == "gmail_draft_create":
+            client = GmailClient(current_access_token(SystemKeyringSecretStore()))
+            try:
+                receipt = GmailActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
             finally:
                 client.close()
             return receipt.model_dump(mode="json")

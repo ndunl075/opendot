@@ -283,3 +283,62 @@ def test_action_commit_replays_a_calendar_event_instead_of_creating_twice(tmp_pa
     assert second["replayed"] is True
     assert second["calendar_event_id"] == first["calendar_event_id"]
     assert len(fake_client.calls) == 1
+
+
+class _FakeGmailClient:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def close(self) -> None:
+        pass
+
+    def create_draft(self, **kwargs: Any) -> dict:
+        self.calls.append(kwargs)
+        return {"id": f"draft-{len(self.calls)}"}
+
+
+def test_message_draft_never_creates_a_draft_without_action_commit(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"message_draft", "action_commit"})
+    server = create_server(database_path)
+
+    proposed = _call(
+        server, "message_draft", {"to": "advisor@school.example", "subject": "Question", "body": "Quick question."}
+    )
+    assert proposed["action_type"] == "gmail_draft_create"
+    assert proposed["state"] == "pending"
+
+    issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
+    fake_client = _FakeGmailClient()
+    with (
+        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.mcp_server.GmailClient", return_value=fake_client),
+    ):
+        receipt = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+
+    assert receipt["draft_id"] == "draft-1"
+    assert receipt["replayed"] is False
+    assert fake_client.calls == [{"to": "advisor@school.example", "subject": "Question", "body": "Quick question."}]
+
+
+def test_action_commit_replays_a_gmail_draft_instead_of_creating_twice(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"message_draft", "action_commit"})
+    server = create_server(database_path)
+    proposed = _call(
+        server, "message_draft", {"to": "advisor@school.example", "subject": "Question", "body": "Quick question."}
+    )
+    issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
+    fake_client = _FakeGmailClient()
+
+    with (
+        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.mcp_server.GmailClient", return_value=fake_client),
+    ):
+        first = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+        second = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
+
+    assert first["replayed"] is False
+    assert second["replayed"] is True
+    assert second["draft_id"] == first["draft_id"]
+    assert len(fake_client.calls) == 1

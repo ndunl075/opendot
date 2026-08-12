@@ -26,7 +26,7 @@ from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, Google
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
 from .github import GitHubClient, GitHubNotificationsSync
-from .gmail import GmailClient, GmailSync
+from .gmail import GmailActions, GmailClient, GmailSync
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
@@ -183,6 +183,19 @@ def build_parser() -> argparse.ArgumentParser:
     calendar_execute.add_argument("--approval-id", required=True)
     calendar_execute.add_argument("--actor", required=True)
     calendar_execute.add_argument("--token", required=True)
+    gmail_draft_propose = subcommands.add_parser(
+        "gmail-draft-propose", help="preview a Gmail draft; nothing is sent to Gmail yet"
+    )
+    gmail_draft_propose.add_argument("--actor", required=True)
+    gmail_draft_propose.add_argument("--to", required=True)
+    gmail_draft_propose.add_argument("--subject", required=True)
+    gmail_draft_propose.add_argument("body")
+    gmail_draft_execute = subcommands.add_parser(
+        "gmail-draft-execute", help="consume a fresh approval token and create the previewed draft"
+    )
+    gmail_draft_execute.add_argument("--approval-id", required=True)
+    gmail_draft_execute.add_argument("--actor", required=True)
+    gmail_draft_execute.add_argument("--token", required=True)
     run = subcommands.add_parser(
         "run", help="run Alfred continuously: Telegram intake/delivery, due jobs, and connector sync"
     )
@@ -544,6 +557,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             receipt = GoogleCalendarActions(database, approvals, client).execute(
                 args.approval_id, actor=args.actor, token=args.token
             )
+        finally:
+            client.close()
+        print(receipt.model_dump_json())
+        return 0
+    if args.command == "gmail-draft-propose":
+        # No Gmail credential is touched here; proposing is pure local bookkeeping.
+        actions = GmailActions(database, approvals)
+        print(
+            actions.propose_draft(actor=args.actor, to=args.to, subject=args.subject, body=args.body).model_dump_json()
+        )
+        return 0
+    if args.command == "gmail-draft-execute":
+        client = GmailClient(_google_access_token())
+        try:
+            receipt = GmailActions(database, approvals, client).execute(args.approval_id, actor=args.actor, token=args.token)
         finally:
             client.close()
         print(receipt.model_dump_json())

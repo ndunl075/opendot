@@ -278,3 +278,33 @@ def test_cli_sets_a_reminder_creating_its_own_task(tmp_path: Path, capsys) -> No
     with Database(database_path).connect() as connection:
         row = connection.execute("SELECT title, state FROM tasks WHERE id = ?", (job["task_id"],)).fetchone()
     assert (row["title"], row["state"]) == ("Call advisor", "open")
+
+
+def test_cli_proposes_a_gmail_draft_without_any_google_credential(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert (
+        main(
+            [
+                "--db",
+                str(database_path),
+                "gmail-draft-propose",
+                "--actor",
+                "nico",
+                "--to",
+                "advisor@school.example",
+                "--subject",
+                "Question",
+                "Quick question about the deadline.",
+            ]
+        )
+        == 0
+    )
+    proposed = json.loads(capsys.readouterr().out)
+    assert proposed["action_type"] == "gmail_draft_create"
+    assert proposed["preview"] == {
+        "to": "advisor@school.example",
+        "subject": "Question",
+        "body": "Quick question about the deadline.",
+    }
+    assert proposed["state"] == "pending"
