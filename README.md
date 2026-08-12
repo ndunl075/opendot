@@ -254,9 +254,31 @@ can never quietly diverge in what they actually run.
 .\.venv\Scripts\alfred service-configure run --pair 123:456 --chat-id 123
 
 # 2. Install and start the service (requires an Administrator prompt).
-.\.venv\Scripts\alfred-service install
+.\.venv\Scripts\alfred-service --username ".\<your-windows-username>" --password "<your-windows-password>" install
 .\.venv\Scripts\alfred-service start
 ```
+
+**The `--username`/`--password` are not optional.** Every connector credential
+Alfred reads (`google-oauth-client-secret`, `telegram-bot-token`, ...) lives in
+*your* Windows account's DPAPI-protected Credential Manager, which only your
+account's own logon session can decrypt. Installing without `--username` (or
+via the Services MMC snap-in's default) runs the service as `LocalSystem`,
+a completely different, secretless security context—the service will install
+and start "successfully," then die immediately with `missing local
+credential-store secret: ...`, because `LocalSystem` can never see credentials
+`keyring set` stored for you. Options must precede the verb, as shown above;
+`getopt` stops parsing at the first non-option argument, so `alfred-service
+install --username ...` silently ignores the flags instead of erroring. Note
+that the password is visible in your shell history once typed this way; clear
+it afterward (`Clear-History` and/or remove the relevant line from
+`(Get-PSReadLineOption).HistorySavePath`) if that matters to your setup, or
+use the Services MMC snap-in (`services.msc` → Alfred Personal Secretary →
+Log On tab) to set the account without it touching a shell at all.
+
+`alfred-service debug` runs the service logic in your current console instead
+of under the SCM, printing exceptions directly instead of routing them through
+`Get-WinEvent`—much faster than the install/start/inspect-the-event-log loop
+when something is still wrong.
 
 Check on it with `Get-Service Alfred`, stop it with `.\.venv\Scripts\alfred-service
 stop`, and remove it with `.\.venv\Scripts\alfred-service remove`. Changing the
