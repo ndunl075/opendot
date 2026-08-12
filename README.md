@@ -320,7 +320,9 @@ caller yet for them to guard.
   before `action_commit` can execute the exact approved preview.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full local setup, test, and PR
-workflow, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.
+workflow, [SECURITY.md](SECURITY.md) to report a vulnerability privately, and
+[RELEASING.md](RELEASING.md) plus [CHANGELOG.md](CHANGELOG.md) for how a
+version gets cut and verified.
 
 ## License
 
