@@ -29,6 +29,7 @@ dev = ["pytest>=8.3,<9"]
 [project.scripts]
 alfred = "alfred.cli:main"
 alfred-mcp = "alfred.mcp_server:main"
+alfred-service = "alfred.winservice:main"
 
 [tool.pytest.ini_options]
 addopts = "-q"

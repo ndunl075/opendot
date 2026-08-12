@@ -196,14 +196,47 @@ themselves if their credential isn't configured yet; Canvas needs
 least one `--gmail-inbound-sender`. Omit `--pair`/`--chat-id` to run with
 Telegram disabled. Stop it with Ctrl+C.
 
-`alfred run` is a foreground process, not a Windows service. To keep it running
-unattended, use Windows Task Scheduler with a trigger of "At log on", running
-`pythonw.exe` against this same command—or start it manually in a terminal you
-leave open. `.\scripts\install.ps1 -RegisterScheduledTask -RunArgs "--pair
-123:456 --chat-id 123"` registers that same Task Scheduler entry for you;
+`alfred run` also works as a foreground process kept alive by Windows Task
+Scheduler ("At log on", running `pythonw.exe` against this same command) or a
+terminal left open. `.\scripts\install.ps1 -RegisterScheduledTask -RunArgs
+"--pair 123:456 --chat-id 123"` registers that Task Scheduler entry for you;
 inspect it with `Get-ScheduledTask -TaskName Alfred` and remove it with
-`Unregister-ScheduledTask -TaskName Alfred`. Packaging it as an actual service
-is future work.
+`Unregister-ScheduledTask -TaskName Alfred`. Either way, Alfred only runs
+while someone is logged in.
+
+### As a real Windows service (survives logoff/reboot)
+
+`alfred-service` packages the exact same loop as an actual Windows service,
+independent of any logged-in session, using Windows' own recovery options for
+restart-on-crash instead of an ad-hoc supervisor. It's a thin wrapper, not a
+separate code path: it drives the identical construction/cleanup logic
+`alfred run` uses, built from arguments parsed by the same parser, so the two
+can never quietly diverge in what they actually run.
+
+```powershell
+# 1. Store the exact 'alfred run' arguments the service will launch.
+.\.venv\Scripts\alfred service-configure run --pair 123:456 --chat-id 123
+
+# 2. Install and start the service (requires an Administrator prompt).
+.\.venv\Scripts\alfred-service install
+.\.venv\Scripts\alfred-service start
+```
+
+Check on it with `Get-Service Alfred`, stop it with `.\.venv\Scripts\alfred-service
+stop`, and remove it with `.\.venv\Scripts\alfred-service remove`. Changing the
+configured arguments (re-run `service-configure`) needs a `restart` to take
+effect. Optionally configure automatic restart on an unexpected crash—Windows
+services don't retry by default—with:
+
+```powershell
+sc.exe failure Alfred reset= 86400 actions= restart/60000
+```
+
+`alfred-service` needs [pywin32](https://github.com/mhammond/pywin32), already
+pulled in transitively by the `mcp` package on Windows; if importing it fails,
+run `python .\.venv\Scripts\pywin32_postinstall.py -install` once. Installing,
+starting, stopping, and removing the service are Administrator actions you run
+yourself—Alfred never elevates or registers itself.
 
 ## Local memory graph
 

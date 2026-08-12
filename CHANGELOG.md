@@ -9,6 +9,12 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Real Windows service packaging (`alfred-service`, `alfred.winservice`):
+  `alfred run`'s loop now survives logoff/reboot with no logged-in session,
+  as an alternative to the Task Scheduler workaround. A thin wrapper around
+  the same runner construction/cleanup logic the CLI uses, not a second
+  implementation; stops via a new `AlfredRunner.run_forever(stop_check=...)`
+  hook.
 - Cloud model fallback (`OpenAICompatibleClient`, `AnthropicCompatibleClient`)
   guarded by `GuardedCloudProvider`: pattern-based secret/PII redaction before
   egress, a monthly spend cap that defaults to `$0` and fails closed, and

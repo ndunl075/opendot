@@ -259,7 +259,7 @@ Rules:
 
 Local software can cost `$0/month`; electricity, existing subscriptions, a domain, or optional cloud inference are not free. The PC must be awake for live replies and scheduled work. Persistent jobs run missed executions once after restart and label the result late.
 
-The single Python service from decision 3 currently runs as a foreground CLI process (`alfred run`), not an installed OS service. It depends on an external keep-alive — a login-triggered Task Scheduler entry or a terminal left open — to actually stay up across reboots. Packaging it as a real background service is unbuilt future work, not yet a safe assumption.
+The single Python service from decision 3 can run either as a foreground CLI process (`alfred run`, kept alive by a login-triggered Task Scheduler entry or a terminal left open) or, now, as a real installed Windows service (`alfred-service`, via `winservice.py`) that survives logoff and reboot with no logged-in session. The service is a thin wrapper around the same `AlfredRunner` construction/cleanup logic `alfred run` itself uses — not a second implementation — so the two paths cannot quietly diverge. It stops cleanly via `AlfredRunner.run_forever()`'s `stop_check` hook, which the service's `SvcStop` handler sets; restart-on-crash is Windows' own service recovery configuration (`sc.exe failure`), not code Alfred runs itself.
 
 ## 7. MCP surface
 

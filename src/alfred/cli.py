@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import contextmanager
 from uuid import uuid4
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
-from typing import Sequence
+from typing import Iterator, Sequence
 
 from .audit import AuditEvent, AuditLog
 from .backup import EncryptedBackupService
@@ -37,11 +38,107 @@ from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
 from .mcp_server import generate_http_token, run_streamable_http
+from .winservice import configure as configure_windows_service
 
 
-def _database_from_args(args: argparse.Namespace) -> Database:
+def database_from_args(args: argparse.Namespace) -> Database:
     settings = Settings.from_environment(Path(args.db) if args.db else None)
     return Database(settings.database_path)
+
+
+@contextmanager
+def running_alfred_runner(database: Database, args: argparse.Namespace) -> Iterator[AlfredRunner]:
+    """Build and tear down the exact ``AlfredRunner`` behind ``alfred run``.
+
+    ``args`` is a parsed ``run`` namespace (from ``build_parser()``).
+    Shared with ``alfred.winservice`` so a Windows service drives the
+    identical construction and cleanup path as the CLI -- only how the loop
+    is told to stop differs between the two callers (``KeyboardInterrupt``
+    here; a ``stop_check`` there).
+    """
+    pairs = frozenset(_parse_telegram_pair(value) for value in args.pair)
+    chat_ids = frozenset(args.chat_id)
+    slack_pairs = frozenset(_parse_slack_pair(value) for value in args.slack_pair)
+    slack_channel_ids = frozenset(args.slack_channel_id)
+    telegram_transport = (
+        TelegramBotClient(SystemKeyringSecretStore().get_required(args.telegram_secret_name))
+        if pairs or chat_ids
+        else None
+    )
+    slack_bot = (
+        SlackBotClient(SystemKeyringSecretStore().get_required(args.slack_bot_secret_name))
+        if slack_pairs or slack_channel_ids
+        else None
+    )
+    slack_receiver = (
+        SlackSocketReceiver(
+            app_token=SystemKeyringSecretStore().get_required(args.slack_app_secret_name),
+            bot_client=slack_bot,
+            gateway=SlackGateway(database, set(slack_pairs)),
+        )
+        if slack_pairs and slack_bot is not None
+        else None
+    )
+    connectors: list[ConnectorSync] = [
+        ConnectorSync(
+            name="google_calendar",
+            interval_seconds=args.connector_interval,
+            run=lambda: _calendar_sync_once(database, args.calendar_id),
+        ),
+        ConnectorSync(
+            name="github",
+            interval_seconds=args.connector_interval,
+            run=lambda: _github_sync_once(database, args.github_secret_name),
+        ),
+        ConnectorSync(name="gmail", interval_seconds=args.connector_interval, run=lambda: _gmail_sync_once(database)),
+    ]
+    if args.gmail_inbound_sender:
+        gmail_inbound_senders = set(args.gmail_inbound_sender)
+        gmail_inbound_destination = args.gmail_inbound_destination
+        connectors.append(
+            ConnectorSync(
+                name="gmail_inbound",
+                interval_seconds=args.connector_interval,
+                run=lambda: _gmail_inbound_poll_once(database, gmail_inbound_senders, gmail_inbound_destination),
+            )
+        )
+    if args.canvas_base_url:
+        connectors.append(
+            ConnectorSync(
+                name="canvas",
+                interval_seconds=args.connector_interval,
+                run=lambda: _canvas_sync_once(database, args.canvas_base_url, args.canvas_secret_name),
+            )
+        )
+    if args.vault:
+        connectors.append(
+            ConnectorSync(
+                name="obsidian_vault",
+                interval_seconds=args.connector_interval,
+                run=lambda: VaultImporter(database, args.vault).sync(),
+            )
+        )
+    runner = AlfredRunner(
+        database,
+        telegram_transport=telegram_transport,
+        telegram_pairs=pairs,
+        telegram_chat_ids=chat_ids,
+        slack_transport=slack_bot,
+        slack_pairs=slack_pairs,
+        slack_channel_ids=slack_channel_ids,
+        connectors=tuple(connectors),
+        poll_timeout_seconds=args.poll_timeout,
+        idle_sleep_seconds=args.idle_sleep,
+    )
+    try:
+        if slack_receiver is not None:
+            slack_receiver.start()
+        yield runner
+    finally:
+        if telegram_transport is not None:
+            telegram_transport.close()
+        if slack_receiver is not None:
+            slack_receiver.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -308,12 +405,21 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--idle-sleep", type=float, default=5.0, help="seconds to rest between cycles")
     run.add_argument("--connector-interval", type=float, default=900.0, help="minimum seconds between each connector sync")
     run.add_argument("--iterations", type=int, help="stop after N cycles instead of running forever (mainly for testing)")
+    service_configure = subcommands.add_parser(
+        "service-configure",
+        help="store the 'alfred run ...' arguments the Windows service (alfred.winservice) will launch",
+    )
+    service_configure.add_argument(
+        "run_args",
+        nargs=argparse.REMAINDER,
+        help="everything after this is passed through verbatim, e.g. run --pair 123:456 --chat-id 123",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    database = _database_from_args(args)
+    database = database_from_args(args)
     if args.command == "init":
         print(json.dumps({"schema_version": database.migrate(), "database_path": str(database.path)}))
         return 0
@@ -567,91 +673,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps([item.model_dump(mode="json") for item in result]))
         return 0
     if args.command == "run":
-        pairs = frozenset(_parse_telegram_pair(value) for value in args.pair)
-        chat_ids = frozenset(args.chat_id)
-        slack_pairs = frozenset(_parse_slack_pair(value) for value in args.slack_pair)
-        slack_channel_ids = frozenset(args.slack_channel_id)
-        telegram_transport = (
-            TelegramBotClient(SystemKeyringSecretStore().get_required(args.telegram_secret_name))
-            if pairs or chat_ids
-            else None
-        )
-        slack_bot = (
-            SlackBotClient(SystemKeyringSecretStore().get_required(args.slack_bot_secret_name))
-            if slack_pairs or slack_channel_ids
-            else None
-        )
-        slack_receiver = (
-            SlackSocketReceiver(
-                app_token=SystemKeyringSecretStore().get_required(args.slack_app_secret_name),
-                bot_client=slack_bot,
-                gateway=SlackGateway(database, set(slack_pairs)),
-            )
-            if slack_pairs and slack_bot is not None
-            else None
-        )
-        connectors: list[ConnectorSync] = [
-            ConnectorSync(
-                name="google_calendar",
-                interval_seconds=args.connector_interval,
-                run=lambda: _calendar_sync_once(database, args.calendar_id),
-            ),
-            ConnectorSync(
-                name="github",
-                interval_seconds=args.connector_interval,
-                run=lambda: _github_sync_once(database, args.github_secret_name),
-            ),
-            ConnectorSync(name="gmail", interval_seconds=args.connector_interval, run=lambda: _gmail_sync_once(database)),
-        ]
-        if args.gmail_inbound_sender:
-            gmail_inbound_senders = set(args.gmail_inbound_sender)
-            gmail_inbound_destination = args.gmail_inbound_destination
-            connectors.append(
-                ConnectorSync(
-                    name="gmail_inbound",
-                    interval_seconds=args.connector_interval,
-                    run=lambda: _gmail_inbound_poll_once(database, gmail_inbound_senders, gmail_inbound_destination),
-                )
-            )
-        if args.canvas_base_url:
-            connectors.append(
-                ConnectorSync(
-                    name="canvas",
-                    interval_seconds=args.connector_interval,
-                    run=lambda: _canvas_sync_once(database, args.canvas_base_url, args.canvas_secret_name),
-                )
-            )
-        if args.vault:
-            connectors.append(
-                ConnectorSync(
-                    name="obsidian_vault",
-                    interval_seconds=args.connector_interval,
-                    run=lambda: VaultImporter(database, args.vault).sync(),
-                )
-            )
-        runner = AlfredRunner(
-            database,
-            telegram_transport=telegram_transport,
-            telegram_pairs=pairs,
-            telegram_chat_ids=chat_ids,
-            slack_transport=slack_bot,
-            slack_pairs=slack_pairs,
-            slack_channel_ids=slack_channel_ids,
-            connectors=tuple(connectors),
-            poll_timeout_seconds=args.poll_timeout,
-            idle_sleep_seconds=args.idle_sleep,
-        )
-        try:
-            if slack_receiver is not None:
-                slack_receiver.start()
-            runner.run_forever(iterations=args.iterations)
-        except KeyboardInterrupt:
-            print("\n[alfred run] stopped")
-        finally:
-            if telegram_transport is not None:
-                telegram_transport.close()
-            if slack_receiver is not None:
-                slack_receiver.close()
+        with running_alfred_runner(database, args) as runner:
+            try:
+                runner.run_forever(iterations=args.iterations)
+            except KeyboardInterrupt:
+                print("\n[alfred run] stopped")
+        return 0
+    if args.command == "service-configure":
+        config_path = configure_windows_service(args.run_args)
+        print(json.dumps({"config_path": str(config_path), "args": args.run_args}))
         return 0
     if args.command == "google-auth":
         secret_store = SystemKeyringSecretStore()
