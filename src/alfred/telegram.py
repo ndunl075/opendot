@@ -56,9 +56,10 @@ class TelegramPair:
 class TelegramGateway:
     """Accept updates from locally paired identities and create durable intents."""
 
-    #: Receipt sent immediately when a message is handed to the agent. The
-    #: real answer arrives as a second message once `hermes_bridge` has run.
-    agent_ack_text = "Thinking…"
+    #: Receipt sent immediately when a message is handed to the agent, and
+    #: delivered before the agent runs so it lands while the answer is still
+    #: being written. Lowercase and terse to match the persona in SOUL.md.
+    agent_ack_text = "one sec"
 
     def __init__(
         self,

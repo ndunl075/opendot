@@ -62,6 +62,44 @@ def test_run_once_carries_a_reminder_from_intake_through_delivery(tmp_path: Path
     assert AuditLog(database).verify() is True
 
 
+def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> None:
+    """The agent step runs before delivery on purpose. As a connector it ran
+    after, which stranded every answer in the outbox for a whole extra cycle
+    (measured at 26s of pure latency against a real Telegram round trip)."""
+    from datetime import UTC, datetime
+
+    from alfred.hermes_bridge import AgentRunResult, HermesBridge
+
+    database = Database(tmp_path / "alfred.db")
+    free_form = {
+        "update_id": 2,
+        "message": {
+            "message_id": 2,
+            "date": int(datetime.now(UTC).timestamp()),
+            "chat": {"id": 20},
+            "from": {"id": 10},
+            "text": "what's on my agenda today?",
+        },
+    }
+    fake = FakeTelegram([free_form])
+    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="nothing due today.", ok=True))
+    runner = AlfredRunner(
+        database,
+        telegram_transport=fake,
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        telegram_chat_ids=frozenset({20}),
+        defer_unparsed_to_agent=True,
+        agent_bridge=bridge.run_once,
+    )
+
+    report = runner.run_once()
+
+    assert report.errors == []
+    assert report.agent_replies == 1
+    # Both the acknowledgement and the real answer leave in this same cycle.
+    assert fake.sent == [(20, "one sec"), (20, "nothing due today.")]
+
+
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     runner = AlfredRunner(database)

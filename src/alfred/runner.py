@@ -44,6 +44,7 @@ class RunOnceReport:
     telegram_delivered: int
     slack_delivered: int
     connectors_synced: list[str]
+    agent_replies: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -56,6 +57,7 @@ class AlfredRunner:
         telegram_pairs: frozenset[TelegramPair] = frozenset(),
         telegram_chat_ids: frozenset[int] = frozenset(),
         defer_unparsed_to_agent: bool = False,
+        agent_bridge: Callable[[], object] | None = None,
         slack_transport: SlackTransport | None = None,
         slack_pairs: frozenset[SlackPair] = frozenset(),
         slack_channel_ids: frozenset[str] = frozenset(),
@@ -70,6 +72,7 @@ class AlfredRunner:
         self.telegram_pairs = telegram_pairs
         self.telegram_chat_ids = telegram_chat_ids
         self.defer_unparsed_to_agent = defer_unparsed_to_agent
+        self.agent_bridge = agent_bridge
         self.slack_transport = slack_transport
         self.slack_pairs = slack_pairs
         self.slack_channel_ids = slack_channel_ids
@@ -121,15 +124,23 @@ class AlfredRunner:
         ran, due_jobs = self._safe("run_due", lambda: JobRunner(self.database).run_due(), errors)
         jobs_executed = len(due_jobs) if ran and due_jobs is not None else 0
 
-        telegram_delivered = 0
-        if transport is not None and self.telegram_chat_ids:
-            chat_ids = set(self.telegram_chat_ids)
-            delivered_ok, delivered = self._safe(
-                "telegram_deliver",
-                lambda: TelegramOutboxWorker(self.database, transport, chat_ids).deliver_pending(),
-                errors,
-            )
-            telegram_delivered = len(delivered) if delivered_ok and delivered is not None else 0
+        # Flushed here, before the agent runs, so the acknowledgement actually
+        # lands while the answer is still being written. Delivering once at
+        # the end of the cycle instead would push both out in the same
+        # instant, which makes the acknowledgement pointless and lets the
+        # answer overtake it (rows created in the same second have no
+        # guaranteed order).
+        telegram_delivered = self._deliver_telegram(transport, errors)
+
+        # Between intake and the final delivery, not in the connector list:
+        # someone is waiting on this reply, and connectors run after delivery,
+        # which stranded every answer in the outbox for an extra cycle.
+        agent_replies = 0
+        if self.agent_bridge is not None:
+            answered, result = self._safe("hermes_bridge", self.agent_bridge, errors)
+            if answered and result is not None:
+                agent_replies = int(getattr(result, "answered", 0))
+            telegram_delivered += self._deliver_telegram(transport, errors)
 
         slack_delivered = 0
         if self.slack_transport is not None and self.slack_channel_ids:
@@ -156,8 +167,21 @@ class AlfredRunner:
             telegram_delivered=telegram_delivered,
             slack_delivered=slack_delivered,
             connectors_synced=synced,
+            agent_replies=agent_replies,
             errors=errors,
         )
+
+    def _deliver_telegram(self, transport: TelegramTransport | None, errors: list[str]) -> int:
+        """Flush the Telegram outbox once; a no-op when Telegram isn't configured."""
+        if transport is None or not self.telegram_chat_ids:
+            return 0
+        chat_ids = set(self.telegram_chat_ids)
+        delivered_ok, delivered = self._safe(
+            "telegram_deliver",
+            lambda: TelegramOutboxWorker(self.database, transport, chat_ids).deliver_pending(),
+            errors,
+        )
+        return len(delivered) if delivered_ok and delivered is not None else 0
 
     def _due(self, connector: ConnectorSync) -> bool:
         last = self._last_synced.get(connector.name)

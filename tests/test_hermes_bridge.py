@@ -9,6 +9,7 @@ from alfred.hermes_bridge import (
     AgentRunResult,
     HermesBridge,
     SubprocessAgentRunner,
+    split_into_bubbles,
 )
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
@@ -68,7 +69,7 @@ def test_deferred_message_becomes_one_agent_reply_in_the_outbox(tmp_path: Path) 
 
     assert (result.pending, result.answered, result.failed) == (1, 1, 0)
     assert agent.prompts == ["what's on my agenda today?"]
-    assert _replies(database_path) == [("hermes-reply:1", "telegram:20", "Your agenda is clear today.")]
+    assert _replies(database_path) == [("hermes-reply:1:0", "telegram:20", "Your agenda is clear today.")]
 
 
 def test_running_twice_answers_once(tmp_path: Path) -> None:
@@ -124,7 +125,7 @@ def test_a_failed_agent_turn_still_replies_and_audits_an_error(tmp_path: Path) -
     result = bridge.run_once()
 
     assert (result.answered, result.failed) == (0, 1)
-    assert _replies(database_path) == [("hermes-reply:5", "telegram:20", bridge.failure_reply)]
+    assert _replies(database_path) == [("hermes-reply:5:0", "telegram:20", bridge.failure_reply)]
     with Database(database_path).connect() as connection:
         row = connection.execute(
             "SELECT outcome, result_json FROM tool_runs WHERE tool = 'hermes_bridge'"
@@ -159,6 +160,52 @@ def test_only_max_per_run_messages_are_answered_per_cycle(tmp_path: Path) -> Non
 
     assert result.answered == 2
     assert len(_replies(database_path)) == 2
+
+
+def test_an_answer_is_split_into_one_bubble_per_paragraph(tmp_path: Path) -> None:
+    """SOUL.md asks the agent for short paragraphs; each becomes its own
+    Telegram message so a reply reads like someone texting, not a wall."""
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(20, "what's up today"))
+    agent = FakeAgent(AgentRunResult(text="3 tasks due today.\n\nnone overdue.\n\nwant the list?", ok=True))
+
+    result = HermesBridge(Database(database_path), agent).run_once()
+
+    assert result.answered == 1
+    assert _replies(database_path) == [
+        ("hermes-reply:20:0", "telegram:20", "3 tasks due today."),
+        ("hermes-reply:20:1", "telegram:20", "none overdue."),
+        ("hermes-reply:20:2", "telegram:20", "want the list?"),
+    ]
+
+
+def test_split_keeps_a_single_paragraph_as_one_bubble() -> None:
+    assert split_into_bubbles("just the one thing.") == ["just the one thing."]
+
+
+def test_split_folds_extra_paragraphs_into_the_last_bubble() -> None:
+    """Nothing is dropped when the agent overruns the bubble budget."""
+    text = "\n\n".join(["one", "two", "three", "four", "five", "six"])
+
+    bubbles = split_into_bubbles(text, max_bubbles=3)
+
+    assert len(bubbles) == 3
+    assert bubbles[:2] == ["one", "two"]
+    assert bubbles[2] == "three\n\nfour\n\nfive\n\nsix"
+
+
+def test_split_never_returns_an_empty_list_for_blank_output() -> None:
+    assert split_into_bubbles("   \n\n  \n") == ["(no answer)"]
+
+
+def test_each_bubble_is_individually_truncated() -> None:
+    text = ("a" * (TELEGRAM_MAX_MESSAGE_CHARS * 2)) + "\n\n" + "short"
+
+    bubbles = split_into_bubbles(text)
+
+    assert len(bubbles) == 2
+    assert len(bubbles[0]) <= TELEGRAM_MAX_MESSAGE_CHARS
+    assert bubbles[1] == "short"
 
 
 class _FakeCompleted:

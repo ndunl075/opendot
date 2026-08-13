@@ -44,6 +44,11 @@ from .outbox import Outbox
 #: long agent answer is truncated rather than lost to a failed delivery.
 TELEGRAM_MAX_MESSAGE_CHARS = 4096
 
+#: An answer is sent as consecutive short messages rather than one block,
+#: the way a person texts. The agent writes paragraphs (see SOUL.md); each
+#: becomes its own bubble, capped so a long answer can't flood the chat.
+DEFAULT_MAX_BUBBLES = 4
+
 _TRUNCATION_NOTE = "\n\n[truncated]"
 
 
@@ -62,6 +67,7 @@ class AgentRunner(Protocol):
 class HermesBridgeReceipt(BaseModel):
     outcome: str  # "answered" | "failed"
     update_id: str
+    bubbles: int = 0
     reply_chars: int = 0
 
 
@@ -140,11 +146,13 @@ class HermesBridge:
         *,
         lookback_seconds: float = 900.0,
         max_per_run: int = 3,
+        max_bubbles: int = DEFAULT_MAX_BUBBLES,
     ) -> None:
         self.database = database
         self.agent = agent
         self.lookback_seconds = lookback_seconds
         self.max_per_run = max_per_run
+        self.max_bubbles = max_bubbles
 
     def run_once(self) -> HermesBridgeResult:
         """Answer up to ``max_per_run`` deferred messages; never raises for one bad turn."""
@@ -176,8 +184,11 @@ class HermesBridge:
                 WHERE e.source = 'telegram'
                   AND e.occurred_at >= ?
                   AND NOT EXISTS (
+                      -- Bubble 0 is always written, so its presence means the
+                      -- whole answer was already stored (all bubbles are
+                      -- enqueued in one transaction).
                       SELECT 1 FROM outbox o
-                      WHERE o.idempotency_key = 'hermes-reply:' || e.external_id
+                      WHERE o.idempotency_key = 'hermes-reply:' || e.external_id || ':0'
                   )
                 ORDER BY e.occurred_at
                 LIMIT ?
@@ -218,15 +229,18 @@ class HermesBridge:
     def _store(
         self, external_id: str, *, chat_id: int, text: str, ok: bool, detail: str
     ) -> HermesBridgeReceipt:
-        reply = _truncate(text)
+        bubbles = split_into_bubbles(text, max_bubbles=self.max_bubbles)
         with self.database.connect() as connection:
             with self.database.transaction(connection):
-                Outbox.enqueue(
-                    connection,
-                    destination=f"telegram:{chat_id}",
-                    payload={"text": reply},
-                    idempotency_key=f"hermes-reply:{external_id}",
-                )
+                for index, bubble in enumerate(bubbles):
+                    # Index 0 is what _pending()'s NOT EXISTS checks, so the
+                    # whole set is claimed atomically with the first bubble.
+                    Outbox.enqueue(
+                        connection,
+                        destination=f"telegram:{chat_id}",
+                        payload={"text": bubble},
+                        idempotency_key=f"hermes-reply:{external_id}:{index}",
+                    )
                 AuditLog.append_in_transaction(
                     connection,
                     AuditEvent(
@@ -234,12 +248,41 @@ class HermesBridge:
                         client="hermes",
                         tool="hermes_bridge",
                         outcome="ok" if ok else "error",
-                        result={"update_id": external_id, "reply_chars": str(len(reply)), "detail": detail},
+                        result={
+                            "update_id": external_id,
+                            "bubbles": str(len(bubbles)),
+                            "reply_chars": str(sum(len(bubble) for bubble in bubbles)),
+                            "detail": detail,
+                        },
                     ),
                 )
         return HermesBridgeReceipt(
-            outcome="answered" if ok else "failed", update_id=external_id, reply_chars=len(reply)
+            outcome="answered" if ok else "failed",
+            update_id=external_id,
+            bubbles=len(bubbles),
+            reply_chars=sum(len(bubble) for bubble in bubbles),
         )
+
+
+def split_into_bubbles(
+    text: str, *, max_bubbles: int = DEFAULT_MAX_BUBBLES, limit: int = TELEGRAM_MAX_MESSAGE_CHARS
+) -> list[str]:
+    """Split an answer into consecutive chat messages on its blank lines.
+
+    Paragraphs are the agent's own unit of thought (SOUL.md asks it to write
+    one idea per paragraph), so they map to bubbles directly rather than this
+    guessing at sentence boundaries. Anything past ``max_bubbles`` is folded
+    back into the last bubble so nothing is silently dropped, and every
+    bubble is individually truncated to Telegram's per-message limit.
+    """
+    paragraphs = [block.strip() for block in text.split("\n\n") if block.strip()]
+    if not paragraphs:
+        return [_truncate(text.strip() or "(no answer)", limit=limit)]
+    if len(paragraphs) > max_bubbles:
+        head = paragraphs[: max_bubbles - 1]
+        tail = "\n\n".join(paragraphs[max_bubbles - 1 :])
+        paragraphs = head + [tail]
+    return [_truncate(paragraph, limit=limit) for paragraph in paragraphs]
 
 
 def _truncate(text: str, *, limit: int = TELEGRAM_MAX_MESSAGE_CHARS) -> str:

@@ -130,29 +130,23 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 run=lambda: VaultImporter(database, args.vault).sync(),
             )
         )
+    agent_bridge = None
     if args.hermes_profile:
-        agent = SubprocessAgentRunner(
-            command=args.hermes_command,
-            profile=args.hermes_profile,
-            timeout_seconds=args.hermes_timeout,
-        )
-        bridge = HermesBridge(database, agent)
-        connectors.append(
-            ConnectorSync(
-                # interval 0: unlike a provider sync this is latency-sensitive
-                # -- someone is waiting on the reply -- and it costs one
-                # indexed SELECT when nothing is pending.
-                name=bridge.connector_name,
-                interval_seconds=0.0,
-                run=bridge.run_once,
-            )
-        )
+        agent_bridge = HermesBridge(
+            database,
+            SubprocessAgentRunner(
+                command=args.hermes_command,
+                profile=args.hermes_profile,
+                timeout_seconds=args.hermes_timeout,
+            ),
+        ).run_once
     runner = AlfredRunner(
         database,
         telegram_transport=telegram_transport,
         telegram_pairs=pairs,
         telegram_chat_ids=chat_ids,
         defer_unparsed_to_agent=bool(args.hermes_profile),
+        agent_bridge=agent_bridge,
         slack_transport=slack_bot,
         slack_pairs=slack_pairs,
         slack_channel_ids=slack_channel_ids,

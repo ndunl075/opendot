@@ -257,11 +257,21 @@ transport; Hermes is invoked as a one-shot subprocess (`hermes -p <profile>
 -z <message>`) and never touches Telegram itself — deliberately, since
 Hermes's own Telegram gateway does not currently work on this platform.
 
-You get two messages per question: an immediate `Thinking…`, then the real
-answer once the agent turn finishes. That's structural, not cosmetic —
-Telegram intake runs inside a write transaction, and an agent turn takes
-seconds and opens its own connection to this same database, so it has to
-happen after that transaction closes.
+You get a quick `one sec` first, then the answer. That's structural, not
+cosmetic: Telegram intake runs inside a write transaction, and an agent turn
+takes seconds and opens its own connection to this same database, so it has
+to happen after that transaction closes. The acknowledgement is flushed
+before the agent runs, so it lands while the answer is still being written
+rather than arriving alongside it.
+
+The answer itself arrives as two to four consecutive messages rather than one
+block — `SOUL.md` asks the agent for short paragraphs and the bridge sends
+each as its own message, so it reads like someone texting.
+
+The agent step runs between intake and delivery, not as a connector.
+Connectors sync on a 15-minute interval and run *after* delivery, which
+stranded every answer in the outbox for an extra cycle; measured against a
+real round trip that was 26s of pure latency on top of the model call.
 
 `--hermes-command` sets which executable to run (default `hermes`; use a
 full path when PATH differs, as it can under the Windows service) and
