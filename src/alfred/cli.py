@@ -107,7 +107,9 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             ConnectorSync(
                 name="gmail_inbound",
                 interval_seconds=args.connector_interval,
-                run=lambda: _gmail_inbound_poll_once(database, gmail_inbound_senders, gmail_inbound_destination),
+                run=lambda: _gmail_inbound_poll_once(
+                    database, gmail_inbound_senders, gmail_inbound_destination, args.gmail_unread_limit
+                ),
             )
         )
     if args.canvas_base_url:
@@ -1009,10 +1011,14 @@ def _gmail_sync_once(database: Database, limit: int = DEFAULT_UNREAD_LIMIT) -> N
         client.close()
 
 
-def _gmail_inbound_poll_once(database: Database, senders: set[str], destination: str | None) -> None:
+def _gmail_inbound_poll_once(
+    database: Database, senders: set[str], destination: str | None, limit: int = DEFAULT_UNREAD_LIMIT
+) -> None:
     client = GmailClient(_google_access_token())
     try:
-        GmailInboundGateway(database, client, senders, default_reminder_destination=destination).poll()
+        GmailInboundGateway(
+            database, client, senders, default_reminder_destination=destination, limit=limit
+        ).poll()
     finally:
         client.close()
 

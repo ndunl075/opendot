@@ -191,6 +191,23 @@ def test_em_dashes_become_sentence_breaks() -> None:
     assert enforce_style("3 tasks–2 overdue") == "3 tasks. 2 overdue"
 
 
+def test_markdown_emphasis_is_stripped() -> None:
+    """Telegram is sent plain text, so '**inbox**' arrived on the phone as
+    literal asterisks. SOUL.md forbids markdown; this is the backstop."""
+    assert enforce_style("**inbox**. 10 unread") == "inbox. 10 unread"
+    assert enforce_style("the *supabase* one matters") == "the supabase one matters"
+    assert enforce_style("__bold__ and ___both___") == "bold and both"
+
+
+def test_markdown_headings_are_stripped() -> None:
+    assert enforce_style("## inbox\n10 unread") == "inbox\n10 unread"
+
+
+def test_bare_asterisks_are_not_mistaken_for_emphasis() -> None:
+    """Only paired emphasis is stripped, so a stray asterisk survives."""
+    assert enforce_style("2 * 3 = 6") == "2 * 3 = 6"
+
+
 def test_plain_hyphens_are_left_alone() -> None:
     """Hyphens are real punctuation inside words and in the short "- item"
     lists SOUL.md allows; only clause-joining em/en dashes are rewritten."""

@@ -60,6 +60,14 @@ _TRUNCATION_NOTE = "\n\n[truncated]"
 #: re-run) and in the "- item" lines SOUL.md allows for short lists.
 _CLAUSE_DASH = re.compile(r"\s*[—–]\s*")
 
+#: Telegram is sent plain text, so markdown emphasis arrives as literal
+#: asterisks: "**inbox**. 10 unread" is what the operator actually saw.
+#: SOUL.md already forbids markdown; this is the mechanical backstop, same
+#: reasoning as the dashes above.
+_MARKDOWN_EMPHASIS = re.compile(r"(\*{1,3}|_{2,3})(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+#: Leading "### " / "## " headings, which the model also reaches for.
+_MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+
 
 class AgentRunResult(BaseModel):
     """One completed agent invocation, successful or not."""
@@ -286,6 +294,8 @@ def enforce_style(text: str) -> str:
     # A dash right after sentence-ending punctuation would otherwise leave
     # ".. " or "?. " behind.
     replaced = re.sub(r"([.!?])\.\s+", r"\1 ", replaced)
+    replaced = _MARKDOWN_HEADING.sub("", replaced)
+    replaced = _MARKDOWN_EMPHASIS.sub(r"\2", replaced)
     return replaced
 
 

@@ -112,3 +112,26 @@ def test_bot_client_uses_https_api_contract_without_exposing_token() -> None:
         assert client.send_message(chat_id=20, text="hello") == 7
     finally:
         client.close()
+
+
+def test_bubbles_enqueued_in_one_second_deliver_in_order(tmp_path: Path) -> None:
+    """Regression: the outbox tie-broke on `id`, a random uuid4, and
+    created_at only has second granularity. A four-part agent answer
+    therefore shipped scrambled, with its closing question arriving before
+    the details it was asking about."""
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            for index, text in enumerate(["first", "second", "third", "fourth"]):
+                Outbox.enqueue(
+                    connection,
+                    destination="telegram:20",
+                    payload={"text": text},
+                    idempotency_key=f"hermes-reply:99:{index}",
+                )
+    fake = FakeTelegram()
+
+    TelegramOutboxWorker(database, fake, {20}).deliver_pending()
+
+    assert [text for _, text in fake.sent] == ["first", "second", "third", "fourth"]
