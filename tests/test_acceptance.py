@@ -13,7 +13,7 @@ from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
 def test_natural_deadline_survives_restart_and_reaches_reminder_and_brief(tmp_path: Path) -> None:
     """Architecture section 10's first acceptance path, without wall-clock waiting."""
     database_path = tmp_path / "alfred.db"
-    received_at = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)  # Thursday morning in New York
+    received_at = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)  # Monday morning in New York
     update = TelegramUpdate.model_validate(
         {
             "update_id": 1,
