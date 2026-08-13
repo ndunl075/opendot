@@ -12,6 +12,13 @@ providers:
   ollama-local:
     api: http://localhost:11434/v1
     api_key: ""
+  # nous is intentionally NOT hand-defined here. Nous Portal is OAuth-based
+  # (`hermes setup --portal`, or picking "Quick Setup" during install), and
+  # that flow is expected to write its own provider registration -- unlike
+  # ollama-local/openrouter's static api/api_key pairs, there's no fixed key
+  # value to commit. Referenced below by the bare provider name `nous` on
+  # the assumption that's what an OAuth-completed setup registers it as; if
+  # your installed Hermes calls it something else, fix the name below.
   openrouter:
     api: https://openrouter.ai/api/v1
     # Uncertain: whether Hermes interpolates ${OPENROUTER_API_KEY} from the
@@ -31,8 +38,10 @@ model:
   # a placeholder, not a verified-available default.
   default: "llama3.2"
   api_mode: chat_completions
-  # Falls back to OpenRouter for anything the local model can't handle well
-  # (long context, harder reasoning). Adjust the model name to whatever you
-  # want as the cloud fallback.
-  fallback_providers: ["openrouter"]
+  # Two fallback tiers, cheapest first: Nous Portal's free tier (OAuth,
+  # zero cost, but capped at 50 RPM/500K TPM and limited to Hermes's
+  # free-model catalog per https://hermes-agent.nousresearch.com/docs/integrations/nous-portal)
+  # before ever falling through to OpenRouter, which is pay-as-you-go.
+  # Drop "nous" from this list if you skip Nous Portal setup entirely.
+  fallback_providers: ["nous", "openrouter"]
   fallback_model: "anthropic/claude-opus-4.7"

@@ -40,17 +40,31 @@ profile does for you:
 iex (irm https://hermes-agent.nousresearch.com/install.ps1)
 ```
 
+The installer asks how to set up Hermes -- **pick "Quick Setup (Nous
+Portal)."** That's a free OAuth login (Nous Portal has a real $0/mo tier: no
+credits needed, capped at 50 RPM/500K TPM, limited to Hermes's free-model
+catalog per [its docs](https://hermes-agent.nousresearch.com/docs/integrations/nous-portal)).
+Picking it here only bootstraps Hermes's own base setup with a working free
+model out of the box -- it does not lock out Ollama or OpenRouter below.
+Providers aren't exclusive in Hermes's config: `config.yaml` lists all three
+(`ollama-local`, `nous`, `openrouter`), one marked primary and the rest as a
+fallback chain, and you can switch which one's active for a session with
+`/model <name> --provider <provider>`.
+
 ## 2. Have a local model ready (and, optionally, an OpenRouter key)
 
 `config.yaml` defaults to a local [Ollama](https://ollama.com) model as the
 primary provider, matching Alfred Core's own "local first" rule
-(`ARCHITECTURE.md` decision 6), with [OpenRouter](https://openrouter.ai/keys)
-configured as a fallback for anything the local model can't handle well.
-Pull whatever model you want locally (`ollama pull llama3.2` or similar) and
-adjust `config.yaml`'s `model.default` to match if you use something else.
-The OpenRouter key is optional -- `distribution.yaml` declares it as a
-not-required `env_requires` entry, so `hermes profile install` will prompt
-for it without failing if you skip it.
+(`ARCHITECTURE.md` decision 6), with two fallback tiers if the local model
+isn't enough: Nous Portal's free tier first (from step 1 above), then
+[OpenRouter](https://openrouter.ai/keys) -- paid, but with a much wider model
+catalog -- only as a last resort. Pull whatever model you want locally
+(`ollama pull llama3.2` or similar) and adjust `config.yaml`'s `model.default`
+to match if you use something else. The OpenRouter key is optional --
+`distribution.yaml` declares it as a not-required `env_requires` entry, so
+`hermes profile install` will prompt for it without failing if you skip it;
+drop `"openrouter"`/`"nous"` from `config.yaml`'s `fallback_providers` list
+for either one you skip entirely.
 
 ## 3. Install this profile
 
