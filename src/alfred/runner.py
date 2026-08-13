@@ -55,6 +55,7 @@ class AlfredRunner:
         telegram_transport: TelegramTransport | None = None,
         telegram_pairs: frozenset[TelegramPair] = frozenset(),
         telegram_chat_ids: frozenset[int] = frozenset(),
+        defer_unparsed_to_agent: bool = False,
         slack_transport: SlackTransport | None = None,
         slack_pairs: frozenset[SlackPair] = frozenset(),
         slack_channel_ids: frozenset[str] = frozenset(),
@@ -68,6 +69,7 @@ class AlfredRunner:
         self.telegram_transport = telegram_transport
         self.telegram_pairs = telegram_pairs
         self.telegram_chat_ids = telegram_chat_ids
+        self.defer_unparsed_to_agent = defer_unparsed_to_agent
         self.slack_transport = slack_transport
         self.slack_pairs = slack_pairs
         self.slack_channel_ids = slack_channel_ids
@@ -106,9 +108,12 @@ class AlfredRunner:
             pairs = set(self.telegram_pairs)
             polled, _ = self._safe(
                 "telegram_poll",
-                lambda: TelegramLongPoller(self.database, transport, pairs).poll_once(
-                    timeout_seconds=self.poll_timeout_seconds
-                ),
+                lambda: TelegramLongPoller(
+                    self.database,
+                    transport,
+                    pairs,
+                    defer_unparsed_to_agent=self.defer_unparsed_to_agent,
+                ).poll_once(timeout_seconds=self.poll_timeout_seconds),
                 errors,
             )
             telegram_polled = polled

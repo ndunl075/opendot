@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -22,8 +23,12 @@ def _update(update_id: int, text: str, *, chat_id: int = 20, user_id: int = 10) 
     )
 
 
-def _gateway(path: Path) -> TelegramGateway:
-    return TelegramGateway(Database(path), {TelegramPair(chat_id=20, user_id=10)})
+def _gateway(path: Path, *, defer_unparsed_to_agent: bool = False) -> TelegramGateway:
+    return TelegramGateway(
+        Database(path),
+        {TelegramPair(chat_id=20, user_id=10)},
+        defer_unparsed_to_agent=defer_unparsed_to_agent,
+    )
 
 
 def test_task_update_creates_event_task_and_receipt_once(tmp_path: Path) -> None:
@@ -80,3 +85,46 @@ def test_bad_command_gets_a_help_receipt_without_a_task(tmp_path: Path) -> None:
     with Database(database_path).connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
+
+
+def test_unparsed_message_is_deferred_to_the_agent_when_enabled(tmp_path: Path) -> None:
+    """With the bridge on, a free-form message is acknowledged and marked for
+    `hermes_bridge` instead of getting the /task|/remind help text. The agent
+    turn itself must not happen here -- handle() holds a write transaction."""
+    database_path = tmp_path / "alfred.db"
+    gateway = _gateway(database_path, defer_unparsed_to_agent=True)
+
+    receipt = gateway.handle(_update(7, "what's on my agenda today?"))
+
+    assert receipt.agent_deferred is True
+    assert receipt.text == gateway.agent_ack_text
+    assert "Use /task" not in receipt.text
+    with Database(database_path).connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
+        metadata = json.loads(
+            connection.execute("SELECT metadata_json FROM events WHERE external_id = '7'").fetchone()["metadata_json"]
+        )
+        assert metadata["agent_deferred"] is True
+        assert metadata["chat_id"] == 20
+        # The acknowledgement is still enqueued under the receipt key the
+        # replay guard depends on.
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM outbox WHERE idempotency_key = 'telegram-receipt:7'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_a_recognized_command_is_never_deferred_even_with_the_agent_enabled(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    receipt = _gateway(database_path, defer_unparsed_to_agent=True).handle(_update(8, "/task file taxes"))
+
+    assert receipt.agent_deferred is False
+    assert receipt.text == "Saved task: file taxes"
+    with Database(database_path).connect() as connection:
+        metadata = json.loads(
+            connection.execute("SELECT metadata_json FROM events WHERE external_id = '8'").fetchone()["metadata_json"]
+        )
+        assert "agent_deferred" not in metadata

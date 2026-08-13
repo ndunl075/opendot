@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,7 @@ class TelegramReceipt(BaseModel):
     reminder_job_id: str | None = None
     duplicate: bool = False
     ignored: bool = False
+    agent_deferred: bool = False
 
 
 @dataclass(frozen=True)
@@ -54,25 +56,61 @@ class TelegramPair:
 class TelegramGateway:
     """Accept updates from locally paired identities and create durable intents."""
 
-    def __init__(self, database: Database, allowed_pairs: set[TelegramPair]) -> None:
+    #: Receipt sent immediately when a message is handed to the agent. The
+    #: real answer arrives as a second message once `hermes_bridge` has run.
+    agent_ack_text = "Thinking…"
+
+    def __init__(
+        self,
+        database: Database,
+        allowed_pairs: set[TelegramPair],
+        *,
+        defer_unparsed_to_agent: bool = False,
+    ) -> None:
         self.database = database
         self.allowed_pairs = allowed_pairs
+        self.defer_unparsed_to_agent = defer_unparsed_to_agent
 
     @classmethod
-    def from_path(cls, database_path: Path | str, allowed_pairs: set[TelegramPair]) -> "TelegramGateway":
-        return cls(Database(database_path), allowed_pairs)
+    def from_path(
+        cls,
+        database_path: Path | str,
+        allowed_pairs: set[TelegramPair],
+        *,
+        defer_unparsed_to_agent: bool = False,
+    ) -> "TelegramGateway":
+        return cls(Database(database_path), allowed_pairs, defer_unparsed_to_agent=defer_unparsed_to_agent)
 
     def handle(self, update: TelegramUpdate) -> TelegramReceipt:
         """Translate one update atomically; no network message is sent here."""
-        if update.message is None or not update.message.text:
-            return TelegramReceipt(text="Ignored non-text Telegram update.", ignored=True)
         message = update.message
+        if message is None or not message.text:
+            return TelegramReceipt(text="Ignored non-text Telegram update.", ignored=True)
+        text = message.text
         pair = TelegramPair(chat_id=message.chat.id, user_id=message.sender.id)
         if pair not in self.allowed_pairs:
             raise PermissionError("Telegram sender is not locally paired with Alfred")
 
+        # Parsed once here rather than inside the transaction: the metadata
+        # marker below has to be written by the same INSERT that stores the
+        # event, and `hermes_bridge` later reads that marker instead of
+        # re-deriving the decision with its own copy of this parser.
+        try:
+            parsed: tuple[str, str, datetime | None] | None = self._parse_command(text)
+            parse_error: str | None = None
+        except ValueError as error:
+            parsed, parse_error = None, str(error)
+        deferred = parsed is None and self.defer_unparsed_to_agent
+
         self.database.migrate()
         event_time = datetime.fromtimestamp(message.date, UTC)
+        metadata: dict[str, Any] = {
+            "chat_id": message.chat.id,
+            "message_id": message.message_id,
+            "user_id": message.sender.id,
+        }
+        if deferred:
+            metadata["agent_deferred"] = True
         with self.database.connect() as connection:
             with self.database.transaction(connection):
                 stored_event = EventStore.append(
@@ -80,13 +118,21 @@ class TelegramGateway:
                     source="telegram",
                     external_id=str(update.update_id),
                     occurred_at=event_time,
-                    content=message.text,
-                    metadata={"chat_id": message.chat.id, "message_id": message.message_id, "user_id": message.sender.id},
+                    content=text,
+                    metadata=metadata,
                 )
                 receipt_key = f"telegram-receipt:{update.update_id}"
                 if not stored_event.is_new:
                     return self._existing_receipt(connection, receipt_key)
-                receipt = self._handle_new_event(connection, stored_event.id, message.text, message.chat.id, update.update_id)
+                receipt = self._handle_new_event(
+                    connection,
+                    stored_event.id,
+                    parsed=parsed,
+                    parse_error=parse_error,
+                    deferred=deferred,
+                    chat_id=message.chat.id,
+                    update_id=update.update_id,
+                )
                 Outbox.enqueue(
                     connection,
                     destination=f"telegram:{message.chat.id}",
@@ -99,15 +145,22 @@ class TelegramGateway:
         self,
         connection: sqlite3.Connection,
         event_id: str,
-        text: str,
+        *,
+        parsed: tuple[str, str, datetime | None] | None,
+        parse_error: str | None,
+        deferred: bool,
         chat_id: int,
         update_id: int,
     ) -> TelegramReceipt:
-        try:
-            command, title, run_at = self._parse_command(text)
-        except ValueError as error:
-            return TelegramReceipt(text=f"{error} Use /task <title> or /remind <ISO-8601 time> <title>.")
+        if parsed is None:
+            if deferred:
+                # Deliberately only an acknowledgement: the agent turn takes
+                # seconds and must not run inside this write transaction, so
+                # `hermes_bridge` sends the real answer as a second message.
+                return TelegramReceipt(text=self.agent_ack_text, agent_deferred=True)
+            return TelegramReceipt(text=f"{parse_error} Use /task <title> or /remind <ISO-8601 time> <title>.")
 
+        command, title, run_at = parsed
         task = TaskStore.create(connection, title=title, source_event_id=event_id, due_at=run_at)
         if command == "task":
             return TelegramReceipt(text=f"Saved task: {task.title}", task_id=task.id)

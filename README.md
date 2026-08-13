@@ -240,6 +240,36 @@ inspect it with `Get-ScheduledTask -TaskName Alfred` and remove it with
 `Unregister-ScheduledTask -TaskName Alfred`. Either way, Alfred only runs
 while someone is logged in.
 
+### Conversational replies (`--hermes-profile`)
+
+By default a Telegram message that isn't `/task` or `/remind` gets a short
+help receipt. Add `--hermes-profile alfred` and it instead goes to the
+agent — Hermes understands it, calls whichever of Alfred's MCP tools it
+needs, and its answer comes back in the same chat:
+
+```powershell
+.\.venv\Scripts\alfred run --pair 123:456 --chat-id 123 --hermes-profile alfred
+```
+
+This needs `hermes-profile/` installed and its MCP connection registered
+first (see `hermes-profile/README.md`). Alfred keeps owning the Telegram
+transport; Hermes is invoked as a one-shot subprocess (`hermes -p <profile>
+-z <message>`) and never touches Telegram itself — deliberately, since
+Hermes's own Telegram gateway does not currently work on this platform.
+
+You get two messages per question: an immediate `Thinking…`, then the real
+answer once the agent turn finishes. That's structural, not cosmetic —
+Telegram intake runs inside a write transaction, and an agent turn takes
+seconds and opens its own connection to this same database, so it has to
+happen after that transaction closes.
+
+`--hermes-command` sets which executable to run (default `hermes`; use a
+full path when PATH differs, as it can under the Windows service) and
+`--hermes-timeout` bounds one turn (default 180s). A turn that times out,
+exits non-zero, or produces nothing still gets a reply saying so, and is not
+retried — an unanswered `Thinking…` and an endlessly re-run model call are
+both worse than one honest failure message.
+
 ### As a real Windows service (survives logoff/reboot)
 
 `alfred-service` packages the exact same loop as an actual Windows service,

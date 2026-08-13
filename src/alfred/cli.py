@@ -31,6 +31,7 @@ from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_inbound import GmailInboundGateway
+from .hermes_bridge import HermesBridge, SubprocessAgentRunner
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
@@ -129,11 +130,29 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 run=lambda: VaultImporter(database, args.vault).sync(),
             )
         )
+    if args.hermes_profile:
+        agent = SubprocessAgentRunner(
+            command=args.hermes_command,
+            profile=args.hermes_profile,
+            timeout_seconds=args.hermes_timeout,
+        )
+        bridge = HermesBridge(database, agent)
+        connectors.append(
+            ConnectorSync(
+                # interval 0: unlike a provider sync this is latency-sensitive
+                # -- someone is waiting on the reply -- and it costs one
+                # indexed SELECT when nothing is pending.
+                name=bridge.connector_name,
+                interval_seconds=0.0,
+                run=bridge.run_once,
+            )
+        )
     runner = AlfredRunner(
         database,
         telegram_transport=telegram_transport,
         telegram_pairs=pairs,
         telegram_chat_ids=chat_ids,
+        defer_unparsed_to_agent=bool(args.hermes_profile),
         slack_transport=slack_bot,
         slack_pairs=slack_pairs,
         slack_channel_ids=slack_channel_ids,
@@ -446,6 +465,24 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--gmail-inbound-destination",
         help="channel:recipient to deliver 'Remind:' email reminders to; omit to create the task without one",
+    )
+    run.add_argument(
+        "--hermes-profile",
+        help=(
+            "Hermes profile name; enables answering free-form Telegram messages with the agent "
+            "instead of replying with the /task|/remind help text"
+        ),
+    )
+    run.add_argument(
+        "--hermes-command",
+        default="hermes",
+        help="hermes executable to invoke; use a full path when PATH differs (e.g. under the Windows service)",
+    )
+    run.add_argument(
+        "--hermes-timeout",
+        type=float,
+        default=180.0,
+        help="seconds to allow one agent turn before giving up on it",
     )
     run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
     run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")

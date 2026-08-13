@@ -41,10 +41,17 @@ class TelegramLongPoller:
     connector_name = "telegram"
     account_name = "bot"
 
-    def __init__(self, database: Database, transport: TelegramTransport, allowed_pairs: set[TelegramPair]) -> None:
+    def __init__(
+        self,
+        database: Database,
+        transport: TelegramTransport,
+        allowed_pairs: set[TelegramPair],
+        *,
+        defer_unparsed_to_agent: bool = False,
+    ) -> None:
         self.database = database
         self.transport = transport
-        self.gateway = TelegramGateway(database, allowed_pairs)
+        self.gateway = TelegramGateway(database, allowed_pairs, defer_unparsed_to_agent=defer_unparsed_to_agent)
 
     def poll_once(self, *, timeout_seconds: int = 25) -> PollResult:
         self.database.migrate()
