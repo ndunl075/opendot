@@ -37,15 +37,18 @@ providers:
     api_key: "${OPENROUTER_API_KEY}"
 
 model:
-  # Nous Portal primary, not Ollama: real-world testing found that even a
-  # local model large enough to clear Hermes's 64K-context minimum
-  # (qwen3.5:9b, since qwen2.5:7b-instruct's 32K context fails that check
-  # outright) took several minutes per turn on ordinary consumer hardware --
-  # too slow for an interactive assistant. upstage/solar-pro4:free is
-  # explicitly built "agent-first" with native tool/function calling, is
-  # free on Nous Portal's $0/mo tier, and responded fast in practice.
+  # Nous Portal primary, not Ollama: a local model large enough to clear
+  # Hermes's 64K-context minimum (qwen3.5:9b, since qwen2.5:7b-instruct's
+  # 32K fails that check outright) took several minutes per turn on ordinary
+  # consumer hardware.
+  #
+  # step-3.7-flash over solar-pro4, measured on the same question through
+  # the same profile: 25s against 119s. solar-pro4 is marketed as
+  # agent-first and does call tools correctly, it is just far slower per
+  # turn, and a two-minute reply to "what's on my agenda" is not a
+  # conversation. Both are free on Nous Portal's $0/mo tier.
   provider: nous
-  default: "upstage/solar-pro4:free"
+  default: "stepfun/step-3.7-flash:free"
   api_mode: chat_completions
   # Local Ollama and OpenRouter both stay configured as fallbacks -- if
   # Nous Portal's free tier ever rate-limits (50 RPM/500K TPM cap) or has

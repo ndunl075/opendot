@@ -72,8 +72,12 @@ class TelegramGateway:
     #: "draft an email" doesn't read as an inbox lookup. Every write below is
     #: still preview-then-approve; the ack says work is starting, never that
     #: anything was sent.
-    agent_ack_topics: tuple[tuple[tuple[str, ...], str], ...] = (
-        # -- writes and actions, checked before the reads they overlap with --
+    #: Action phrasing, checked before the read topics it overlaps with so
+    #: "schedule a meeting" isn't answered like "what's my schedule". These
+    #: are single-intent and return on their own. Every write here is still
+    #: preview-then-approve, so the wording says work is starting and never
+    #: that anything was sent, created, or deleted.
+    agent_ack_actions: tuple[tuple[tuple[str, ...], str], ...] = (
         (("draft", "reply to", "respond to", "send an email", "send email", "email him", "email her", "email them"),
          "drafting that..."),
         (("schedule a", "schedule an", "book a", "book an", "put on my calendar", "add to my calendar",
@@ -81,35 +85,53 @@ class TelegramGateway:
         (("open an issue", "file an issue", "create an issue", "make an issue"), "writing that issue..."),
         (("forget", "delete that", "scrub", "wipe"), "on it..."),
         (("remind",), "on it..."),
-        (("add a task", "new task", "add task", "mark", "finish", "done with", "completed"), "checking your tasks..."),
-        # -- reads, most specific source first --
-        (("canvas", "assignment", "homework", "syllabus", "coursework", "class", "course", "exam", "quiz"),
-         "checking canvas..."),
-        (("github", "repo", "pull request", " pr ", " prs ", "ci ", "commit", "issue"), "checking github..."),
-        (("slack",), "checking slack..."),
-        (("steps", "sleep", "heart rate", "workout", "health", "fitness"), "checking your health data..."),
-        (("note", "notes", "obsidian", "vault"), "checking your notes..."),
-        (("inbox", "email", "e-mail", "gmail", "mail", "unread"), "checking your inbox..."),
-        (("task", "todo", "to-do", "to do"), "checking your tasks..."),
-        (("week", "review", "recap"), "pulling up your week..."),
-        (("agenda", "schedule", "calendar", "today", "tomorrow", "due", "meeting", "brief"),
-         "checking your agenda..."),
-        (("remember", "recall", "memory", "did i say", "did i tell", "about me", "who am i", "my profile"),
-         "checking what i know..."),
-        (("connector", "synced", "sync status", "connected", "working", "status", "everything ok", "everything okay"),
-         "checking connections..."),
+        (("add a task", "new task", "add task"), "adding that..."),
     )
+
+    #: Read topics as (keywords, noun). Unlike the actions above, *all*
+    #: matches are collected and named together: "inbox and github today"
+    #: used to answer "checking github..." alone, which read as if half the
+    #: question had been missed.
+    agent_ack_reads: tuple[tuple[tuple[str, ...], str], ...] = (
+        (("canvas", "assignment", "homework", "syllabus", "coursework", "class", "course", "exam", "quiz"), "canvas"),
+        (("github", "repo", "pull request", " pr ", " prs ", "ci ", "commit", "issue"), "github"),
+        (("slack",), "slack"),
+        (("steps", "sleep", "heart rate", "workout", "health", "fitness"), "your health data"),
+        (("note", "notes", "obsidian", "vault"), "your notes"),
+        (("inbox", "email", "e-mail", "gmail", "mail", "unread"), "your inbox"),
+        (("task", "todo", "to-do", "to do"), "your tasks"),
+        (("week", "review", "recap"), "your week"),
+        (("agenda", "schedule", "calendar", "today", "tomorrow", "due", "meeting", "brief"), "your agenda"),
+        (("remember", "recall", "memory", "did i say", "did i tell", "about me", "who am i", "my profile"),
+         "what i know"),
+        (("connector", "synced", "sync status", "connected", "working", "status", "everything ok", "everything okay"),
+         "your connections"),
+    )
+
+    #: Two is the cap. "checking a, b and c..." stops sounding like a person.
+    agent_ack_max_topics = 2
 
     @classmethod
     def acknowledgement_for(cls, text: str) -> str:
-        """Pick the acknowledgement that matches what was asked."""
+        """Name what's being looked at, in the order the message mentions it."""
         # Padded so " pr " and "ci " match whole words rather than firing on
         # "prepare" or "specific".
         haystack = f" {text.lower().strip()} "
-        for keywords, ack in cls.agent_ack_topics:
+        for keywords, ack in cls.agent_ack_actions:
             if any(keyword in haystack for keyword in keywords):
                 return ack
-        return cls.agent_ack_text
+
+        matched: list[tuple[int, str]] = []
+        for keywords, noun in cls.agent_ack_reads:
+            positions = [haystack.find(keyword) for keyword in keywords if keyword in haystack]
+            if positions:
+                matched.append((min(positions), noun))
+        if not matched:
+            return cls.agent_ack_text
+        # Ordered by where each topic appears, so the ack echoes the question
+        # back the way it was asked.
+        nouns = [noun for _, noun in sorted(matched)][: cls.agent_ack_max_topics]
+        return f"checking {' and '.join(nouns)}..."
 
     def __init__(
         self,
