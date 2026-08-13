@@ -146,9 +146,34 @@ def _status_label(state: str) -> str:
     return _STATUS_LABELS.get(state, state.replace("_", " ").title())
 
 
+# audit.py's AuditEvent.outcome is a plain str, not a closed enum -- every
+# caller across the codebase (jobs, gmail_inbound, models, slack, telegram_runtime,
+# ...) picks its own outcome string, so this list is every value actually
+# produced today, not a spec. A new caller's new outcome string still renders
+# correctly (falls back to title-cased text below) -- it just won't get a
+# curated label until added here.
+_OUTCOME_LABELS = {
+    "ok": "Success",
+    "sent": "Sent",
+    "handled": "Handled",
+    "outbox_enqueued": "Queued",
+    "duplicate": "Duplicate",
+    "ignored": "Ignored",
+    "error": "Error",
+    "failed": "Failed",
+    "rejected": "Rejected",
+    "refused": "Refused",
+}
+
+
+def _outcome_label(outcome: str) -> str:
+    return _OUTCOME_LABELS.get(outcome, outcome.replace("_", " ").title())
+
+
 _env.filters["dt"] = _format_dt
 _env.filters["connector_icon"] = _connector_icon
 _env.filters["status_label"] = _status_label
+_env.filters["outcome_label"] = _outcome_label
 
 
 class _SessionAuthMiddleware(BaseHTTPMiddleware):

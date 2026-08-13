@@ -205,6 +205,35 @@ def test_audit_page_shows_redacted_records_never_raw_content(tmp_path: Path) -> 
 
     assert "task_upsert" in response.text
     assert "abc" in response.text  # the redacted result IS shown -- audit records never hold raw secrets to begin with
+    assert ">Success<" in response.text  # outcome="ok" renders as the human label, not raw "ok"
+
+
+def test_outcome_label_covers_every_outcome_string_actually_used_in_the_codebase() -> None:
+    """AuditEvent.outcome is a plain str, not a closed enum -- every value any
+    caller across the codebase actually produces (jobs, gmail_inbound, models,
+    slack, telegram_runtime, ...) must get a real label, not silently fall
+    through to a raw, un-styled pill."""
+    from alfred.admin_ui import _outcome_label
+
+    for outcome, expected in {
+        "ok": "Success",
+        "sent": "Sent",
+        "handled": "Handled",
+        "outbox_enqueued": "Queued",
+        "duplicate": "Duplicate",
+        "ignored": "Ignored",
+        "error": "Error",
+        "failed": "Failed",
+        "rejected": "Rejected",
+        "refused": "Refused",
+    }.items():
+        assert _outcome_label(outcome) == expected
+
+
+def test_outcome_label_falls_back_to_title_case_for_an_unknown_outcome() -> None:
+    from alfred.admin_ui import _outcome_label
+
+    assert _outcome_label("some_new_outcome") == "Some New Outcome"
 
 
 def test_audit_page_shows_the_empty_state_with_no_records(tmp_path: Path) -> None:

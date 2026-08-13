@@ -303,9 +303,12 @@ a { color: inherit; text-decoration: none; }
 .pill.error .pill-dot { background: var(--status-error); }
 .pill.never_synced { background: var(--status-never-soft); color: var(--status-never); }
 .pill.never_synced .pill-dot { background: var(--status-never); }
-.pill.ok_outcome { background: var(--status-ok-soft); color: var(--status-ok); }
-.pill.error_outcome { background: var(--status-error-soft); color: var(--status-error); }
+.pill.ok_outcome, .pill.sent_outcome, .pill.handled_outcome, .pill.outbox_enqueued_outcome {
+  background: var(--status-ok-soft); color: var(--status-ok);
+}
+.pill.error_outcome, .pill.failed_outcome { background: var(--status-error-soft); color: var(--status-error); }
 .pill.rejected_outcome, .pill.refused_outcome { background: var(--status-stale-soft); color: var(--status-stale); }
+.pill.duplicate_outcome, .pill.ignored_outcome { background: var(--status-never-soft); color: var(--status-never); }
 
 .mono {
   font-family: var(--font-mono);

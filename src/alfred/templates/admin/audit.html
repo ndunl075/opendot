@@ -16,7 +16,7 @@
               <td class="mono">{{ entry.record.occurred_at|dt }}</td>
               <td>{{ entry.record.actor }}</td>
               <td class="mono">{{ entry.record.tool }}</td>
-              <td><span class="pill {{ entry.record.outcome }}_outcome"><span class="pill-dot"></span>{{ entry.record.outcome }}</span></td>
+              <td><span class="pill {{ entry.record.outcome }}_outcome"><span class="pill-dot"></span>{{ entry.record.outcome|outcome_label }}</span></td>
               <td class="mono">{{ entry.result_preview }}</td>
             </tr>
           {% else %}
