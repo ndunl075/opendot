@@ -8,9 +8,9 @@
     <div class="card">
       {% for connector in connectors %}
         <div class="row">
-          <div class="row-title">{{ connector.connector }} <span class="mono">· {{ connector.account }}</span></div>
+          <div class="row-title">{{ connector.connector|connector_icon }} {{ connector.connector }} <span class="mono">· {{ connector.account }}</span></div>
           <div class="row-meta">{% if connector.last_success_at %}last synced {{ connector.last_success_at|dt }}{% endif %}</div>
-          <span class="pill {{ connector.state }}"><span class="pill-dot"></span>{{ connector.state.replace('_', ' ') }}</span>
+          <span class="pill {{ connector.state }}"><span class="pill-dot"></span>{{ connector.state|status_label }}</span>
         </div>
       {% else %}
         <div class="empty-state">No connector has synced yet.</div>

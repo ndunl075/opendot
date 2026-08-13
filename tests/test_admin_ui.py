@@ -4,7 +4,15 @@ from unittest import mock
 
 from starlette.testclient import TestClient
 
-from alfred.admin_ui import _format_dt, _result_preview, create_admin_app, run_admin_ui
+from alfred.admin_ui import (
+    _CONNECTOR_ICON_PATHS,
+    _connector_icon,
+    _format_dt,
+    _result_preview,
+    _status_label,
+    create_admin_app,
+    run_admin_ui,
+)
 from alfred.audit import AuditEvent, AuditLog
 from alfred.db import Database
 from alfred.events import EventStore
@@ -152,7 +160,33 @@ def test_connectors_page_shows_health_state(tmp_path: Path) -> None:
     response = client.get("/connectors")
 
     assert "gmail" in response.text
-    assert ">ok<" in response.text
+    assert ">Connected<" in response.text
+    assert '<svg class="connector-icon"' in response.text  # gmail has a real icon, not the generic fallback
+
+
+def test_status_label_maps_health_states_to_human_readable_text() -> None:
+    assert _status_label("ok") == "Connected"
+    assert _status_label("error") == "Disconnected"
+    assert _status_label("stale") == "Stale"
+    assert _status_label("never_synced") == "Never connected"
+
+
+def test_status_label_falls_back_to_title_case_for_an_unknown_state() -> None:
+    assert _status_label("some_new_state") == "Some New State"
+
+
+def test_connector_icon_returns_a_real_svg_for_every_known_connector() -> None:
+    for connector in _CONNECTOR_ICON_PATHS:
+        icon = _connector_icon(connector)
+        assert icon.startswith('<svg class="connector-icon"')
+        assert "<path" in icon
+
+
+def test_connector_icon_falls_back_to_a_generic_glyph_for_an_unknown_connector() -> None:
+    icon = _connector_icon("some_future_connector")
+
+    assert "connector-icon-generic" in icon
+    assert "<path" in icon
 
 
 def test_audit_page_shows_redacted_records_never_raw_content(tmp_path: Path) -> None:
