@@ -34,9 +34,15 @@ model:
   # default, cloud as an optional fallback" rule (ARCHITECTURE.md decision
   # 6) -- free, private, and good enough for most conversational turns.
   provider: ollama-local
-  # Adjust to whatever model you've actually pulled (`ollama list`); this is
-  # a placeholder, not a verified-available default.
-  default: "llama3.2"
+  # qwen2.5:7b-instruct: confirmed available via `ollama list` during actual
+  # setup, and Qwen2.5's instruct-tuned line has well-established Ollama
+  # tool-calling support, which matters since Hermes needs reliable function
+  # calls to actually use Alfred Core's MCP tools, not just chat. The
+  # earlier placeholder here (llama3.2) wasn't pulled on the machine this
+  # was first installed on and failed with an HTTP 404 the moment Hermes
+  # tried to use it -- adjust this to whatever you've actually pulled
+  # (`ollama list`) if it differs from this repo's own setup.
+  default: "qwen2.5:7b-instruct"
   api_mode: chat_completions
   # Two fallback tiers, cheapest first: Nous Portal's free tier (OAuth,
   # zero cost, but capped at 50 RPM/500K TPM and limited to Hermes's

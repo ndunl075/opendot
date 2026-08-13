@@ -58,9 +58,11 @@ primary provider, matching Alfred Core's own "local first" rule
 (`ARCHITECTURE.md` decision 6), with two fallback tiers if the local model
 isn't enough: Nous Portal's free tier first (from step 1 above), then
 [OpenRouter](https://openrouter.ai/keys) -- paid, but with a much wider model
-catalog -- only as a last resort. Pull whatever model you want locally
-(`ollama pull llama3.2` or similar) and adjust `config.yaml`'s `model.default`
-to match if you use something else. The OpenRouter key is optional --
+catalog -- only as a last resort. `config.yaml` defaults to `qwen2.5:7b-instruct`
+(instruct-tuned, well-established Ollama tool-calling support, which matters
+for reliable MCP tool use). Run `ollama list` first -- if you don't already
+have it pulled, `ollama pull qwen2.5:7b-instruct`, or adjust `config.yaml`'s
+`model.default` to whatever you do have. The OpenRouter key is optional --
 `distribution.yaml` declares it as a not-required `env_requires` entry, so
 `hermes profile install` will prompt for it without failing if you skip it;
 drop `"openrouter"`/`"nous"` from `config.yaml`'s `fallback_providers` list
