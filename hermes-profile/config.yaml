@@ -2,11 +2,21 @@
 # Hermes preserves this file across `hermes profile update` (pass
 # --force-config to override), so local edits here are safe to make and keep.
 #
-# NOT independently verified against a real Hermes install yet -- built from
-# https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models.
-# If any key name below doesn't match what your installed Hermes actually
-# reads, that's a real gap in this file; fix it here (or flag it back) rather
-# than working around it by hand each time.
+# Verified against a real Hermes install (v0.20.0). Two things worth knowing
+# about how that install actually behaves, differently from what upstream's
+# own docs suggested going in:
+#
+# 1. This distribution's mcp.json is NOT automatically applied by
+#    `hermes profile install` -- the real live mechanism is this file's own
+#    `mcp_servers:` key, populated by running `hermes -p alfred mcp add
+#    alfred --command alfred-mcp --args --client-id hermes` once after
+#    install (see README.md step 4). That command answers an interactive
+#    "Enable all 17 tools?" prompt it can't be scripted past, which is why
+#    it isn't pre-populated here -- do it once, by hand, per install.
+# 2. A locally-run model good enough to pass Hermes's own 64K-context
+#    minimum was, in practice on real consumer hardware, too slow for
+#    interactive use (multi-minute single turns) -- see fallback_providers
+#    below for why Nous Portal ended up primary instead of Ollama.
 
 providers:
   ollama-local:
@@ -14,11 +24,8 @@ providers:
     api_key: ""
   # nous is intentionally NOT hand-defined here. Nous Portal is OAuth-based
   # (`hermes setup --portal`, or picking "Quick Setup" during install), and
-  # that flow is expected to write its own provider registration -- unlike
-  # ollama-local/openrouter's static api/api_key pairs, there's no fixed key
-  # value to commit. Referenced below by the bare provider name `nous` on
-  # the assumption that's what an OAuth-completed setup registers it as; if
-  # your installed Hermes calls it something else, fix the name below.
+  # that flow writes its own provider registration -- confirmed working as
+  # the bare provider name `nous` with no api/api_key block of its own.
   openrouter:
     api: https://openrouter.ai/api/v1
     # Uncertain: whether Hermes interpolates ${OPENROUTER_API_KEY} from the
@@ -30,24 +37,23 @@ providers:
     api_key: "${OPENROUTER_API_KEY}"
 
 model:
-  # Local by default, matching alfred-core's own "local inference by
-  # default, cloud as an optional fallback" rule (ARCHITECTURE.md decision
-  # 6) -- free, private, and good enough for most conversational turns.
-  provider: ollama-local
-  # qwen2.5:7b-instruct: confirmed available via `ollama list` during actual
-  # setup, and Qwen2.5's instruct-tuned line has well-established Ollama
-  # tool-calling support, which matters since Hermes needs reliable function
-  # calls to actually use Alfred Core's MCP tools, not just chat. The
-  # earlier placeholder here (llama3.2) wasn't pulled on the machine this
-  # was first installed on and failed with an HTTP 404 the moment Hermes
-  # tried to use it -- adjust this to whatever you've actually pulled
-  # (`ollama list`) if it differs from this repo's own setup.
-  default: "qwen2.5:7b-instruct"
+  # Nous Portal primary, not Ollama: real-world testing found that even a
+  # local model large enough to clear Hermes's 64K-context minimum
+  # (qwen3.5:9b, since qwen2.5:7b-instruct's 32K context fails that check
+  # outright) took several minutes per turn on ordinary consumer hardware --
+  # too slow for an interactive assistant. upstage/solar-pro4:free is
+  # explicitly built "agent-first" with native tool/function calling, is
+  # free on Nous Portal's $0/mo tier, and responded fast in practice.
+  provider: nous
+  default: "upstage/solar-pro4:free"
   api_mode: chat_completions
-  # Two fallback tiers, cheapest first: Nous Portal's free tier (OAuth,
-  # zero cost, but capped at 50 RPM/500K TPM and limited to Hermes's
-  # free-model catalog per https://hermes-agent.nousresearch.com/docs/integrations/nous-portal)
-  # before ever falling through to OpenRouter, which is pay-as-you-go.
-  # Drop "nous" from this list if you skip Nous Portal setup entirely.
-  fallback_providers: ["nous", "openrouter"]
+  # Local Ollama and OpenRouter both stay configured as fallbacks -- if
+  # Nous Portal's free tier ever rate-limits (50 RPM/500K TPM cap) or has
+  # downtime, slow-but-working beats not working at all.
+  fallback_providers: ["ollama-local", "openrouter"]
   fallback_model: "anthropic/claude-opus-4.7"
+  # NOTE, not yet resolved: this single fallback_model string is an
+  # OpenRouter-style model ID. If the fallback chain ever actually reaches
+  # ollama-local before openrouter, Ollama won't recognize
+  # "anthropic/claude-opus-4.7" as a local model name -- untested, since
+  # nous hasn't yet failed over in practice. Fix forward if you hit it.

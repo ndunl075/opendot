@@ -6,19 +6,28 @@ an existing open-source agent runtime, and publish Alfred as a Hermes
 *profile distribution* that talks to `alfred-core` over local stdio MCP. This
 directory is that distribution.
 
-**Verification status, stated honestly:** this has not been installed
-against a real Hermes build yet. Every file here is built from Hermes's own
-published docs, but two of those docs actually disagree with each other on
-where MCP servers are configured (a distribution's own `mcp.json`, per the
-profile-distributions guide, vs. `config.yaml`'s `mcp_servers` key, per the
-separate MCP feature guide) -- both are provided here on the theory that
-`hermes profile install` reconciles a distribution's `mcp.json` into the
-live `config.yaml` it manages, but that's inference, not something we've
-watched happen. Treat this the same way `deploy/slack-app/` treats its own
-unverified connector: correct by construction against the documented schema,
-not yet run for real. If something doesn't match once you actually install
-Hermes, that's a real gap in this profile -- report it back rather than
-hand-patching around it each time.
+**Verification status:** installed and confirmed working end-to-end against
+a real Hermes build (v0.20.0) -- `hermes -p alfred chat` successfully calls
+Alfred Core's MCP tools. Three things turned out different from what
+upstream's own docs suggested going in, now fixed in these files and worth
+knowing about:
+
+1. **A distribution's `mcp.json` is not automatically applied.** The
+   profile-distributions guide implies `hermes profile install` wires it up;
+   in practice, on this Hermes version, `mcp.json` is inert and the real
+   mechanism is `config.yaml`'s `mcp_servers` key, populated by running
+   `hermes mcp add` once after install (step 5 below) -- see that step for
+   why this can't be pre-baked into the installed config automatically.
+2. **`hermes profile install`'s `--alias` flag takes no value** -- it's a
+   bare flag that creates an optional shell-wrapper shortcut, not a way to
+   set the profile name (that comes from `distribution.yaml`'s `name` field,
+   or `--name`). `hermes profile install .\hermes-profile --alias alfred`
+   fails with "unrecognized arguments: alfred"; step 3 below reflects the
+   correct, plain form.
+3. **A local model large enough to pass Hermes's 64K-context minimum was too
+   slow for interactive use** on ordinary consumer hardware -- multi-minute
+   single turns. `config.yaml` now defaults to Nous Portal's free tier
+   instead of Ollama; see step 2.
 
 ## What Alfred Core already exposes to this profile
 
@@ -51,22 +60,29 @@ Providers aren't exclusive in Hermes's config: `config.yaml` lists all three
 fallback chain, and you can switch which one's active for a session with
 `/model <name> --provider <provider>`.
 
-## 2. Have a local model ready (and, optionally, an OpenRouter key)
+## 2. Model setup: Nous Portal primary, Ollama and OpenRouter as fallback
 
-`config.yaml` defaults to a local [Ollama](https://ollama.com) model as the
-primary provider, matching Alfred Core's own "local first" rule
-(`ARCHITECTURE.md` decision 6), with two fallback tiers if the local model
-isn't enough: Nous Portal's free tier first (from step 1 above), then
-[OpenRouter](https://openrouter.ai/keys) -- paid, but with a much wider model
-catalog -- only as a last resort. `config.yaml` defaults to `qwen2.5:7b-instruct`
-(instruct-tuned, well-established Ollama tool-calling support, which matters
-for reliable MCP tool use). Run `ollama list` first -- if you don't already
-have it pulled, `ollama pull qwen2.5:7b-instruct`, or adjust `config.yaml`'s
-`model.default` to whatever you do have. The OpenRouter key is optional --
+`config.yaml` defaults to **Nous Portal** (`upstage/solar-pro4:free`) as the
+primary provider, not local Ollama. That's a deliberate change from Alfred
+Core's own "local first" rule (`ARCHITECTURE.md` decision 6): a local model
+large enough to clear Hermes's own 64K-context minimum (`qwen2.5:7b-instruct`
+only reports 32K and fails that check outright; `qwen3.5:9b` passes but took
+several minutes per turn on ordinary consumer hardware) was too slow for an
+actually-interactive assistant in practice. Nous Portal's free tier ($0/mo,
+50 RPM/500K TPM cap, [its docs](https://hermes-agent.nousresearch.com/docs/integrations/nous-portal))
+responded fast and is already authenticated from step 1's "Quick Setup."
+`upstage/solar-pro4:free` specifically because it's built "agent-first" with
+native tool/function calling -- important since Hermes needs reliable
+function calls to actually use Alfred Core's MCP tools, not just chat.
+
+Ollama and OpenRouter both stay configured as fallbacks (`fallback_providers`
+in `config.yaml`), so a Nous Portal outage or rate limit degrades to
+slow-but-working rather than nothing. If you'd rather run local-first anyway
+(privacy, no rate limit, willing to accept the latency) run `ollama list`,
+pick a model that reports at least 64K context, and swap `model.provider`/
+`model.default` back to `ollama-local`. The OpenRouter key is optional --
 `distribution.yaml` declares it as a not-required `env_requires` entry, so
-`hermes profile install` will prompt for it without failing if you skip it;
-drop `"openrouter"`/`"nous"` from `config.yaml`'s `fallback_providers` list
-for either one you skip entirely.
+`hermes profile install` will prompt for it without failing if you skip it.
 
 ## 3. Install this profile
 
@@ -74,8 +90,11 @@ From this repo's root, install straight from the local directory (Hermes
 supports this for development; no separate git repo needed yet):
 
 ```powershell
-hermes profile install .\hermes-profile --alias alfred
+hermes profile install .\hermes-profile
 ```
+
+(Not `--alias alfred` -- see point 2 in the verification-status note above.
+The profile name comes from `distribution.yaml`'s `name: alfred` automatically.)
 
 ## 4. Give Hermes its own Alfred Core scope
 
@@ -96,19 +115,37 @@ alfred client-grant --client-id hermes --sensitivity public --sensitivity person
 This starts at `public`+`personal` sensitivity. Widen to `--sensitivity
 sensitive` later only if a specific skill actually needs it.
 
-## 5. Test it without touching Telegram yet
+## 5. Register the MCP connection (required, not automatic)
+
+`mcp.json` in this distribution is not applied by `hermes profile install` --
+run this once, from any directory, to actually wire up the connection:
+
+```powershell
+hermes -p alfred mcp add alfred --command alfred-mcp --args --client-id hermes
+```
+
+It connects, lists all 17 discovered tools, then asks **"Enable all 17
+tools? [Y/n/select]"** -- type `Y`. This has to be run interactively (the
+prompt can't be scripted past); confirm it saved with `hermes -p alfred mcp
+list`, which should show `alfred` with status `✓ enabled`, not "No MCP
+servers configured."
+
+## 6. Test it without touching Telegram yet
 
 ```powershell
 hermes -p alfred chat
 ```
 
 Ask it something that requires a real Alfred Core call -- "what's on my
-agenda today" should come back via `brief_get`, not a guess. This confirms
-the stdio MCP connection (`mcp.json`'s `alfred-mcp --client-id hermes`) and
-the client-grant above both work, with zero risk to the Telegram setup this
-session already verified end-to-end.
+agenda today" should come back via `brief_get`, not a guess, and not a
+clarifying question about which calendar app you use (there's only one
+system connected; if it asks that, the MCP connection from step 5 likely
+isn't actually registered -- re-check with `hermes -p alfred mcp list`).
+This confirms the stdio MCP connection and the client-grant above both work,
+with zero risk to the Telegram setup this session already verified
+end-to-end.
 
-## 6. Telegram: read this before running `hermes gateway`
+## 7. Telegram: read this before running `hermes gateway`
 
 **Do not run `hermes gateway` against the same Telegram bot while the
 Windows service is also running.** Telegram allows exactly one active
