@@ -94,7 +94,11 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             interval_seconds=args.connector_interval,
             run=lambda: _github_sync_once(database, args.github_secret_name),
         ),
-        ConnectorSync(name="gmail", interval_seconds=args.connector_interval, run=lambda: _gmail_sync_once(database)),
+        ConnectorSync(
+            name="gmail",
+            interval_seconds=args.connector_interval,
+            run=lambda: _gmail_sync_once(database, args.gmail_unread_limit),
+        ),
     ]
     if args.gmail_inbound_sender:
         gmail_inbound_senders = set(args.gmail_inbound_sender)
@@ -459,6 +463,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--gmail-inbound-destination",
         help="channel:recipient to deliver 'Remind:' email reminders to; omit to create the task without one",
+    )
+    run.add_argument(
+        "--gmail-unread-limit",
+        type=int,
+        default=50,
+        help=(
+            "max unread Gmail messages per sync in the run loop (default 50, lower than the "
+            "one-shot gmail-sync command's 500): each sync blocks this single-threaded loop, "
+            "and 500 measured at 45s against 7s for 50"
+        ),
     )
     run.add_argument(
         "--hermes-profile",
@@ -987,10 +1001,10 @@ def _github_sync_once(database: Database, secret_name: str) -> None:
         client.close()
 
 
-def _gmail_sync_once(database: Database) -> None:
+def _gmail_sync_once(database: Database, limit: int = DEFAULT_UNREAD_LIMIT) -> None:
     client = GmailClient(_google_access_token())
     try:
-        GmailSync(database, client).sync()
+        GmailSync(database, client, limit=limit).sync()
     finally:
         client.close()
 

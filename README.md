@@ -226,6 +226,13 @@ loop or any other connector.
 .\.venv\Scripts\alfred run --pair 123:456 --chat-id 123 --canvas-base-url https://your-school.instructure.com
 ```
 
+`alfred run` bounds Gmail to the 50 most recent unread messages
+(`--gmail-unread-limit`), lower than the one-shot `gmail-sync` command's 500.
+Each sync blocks this single-threaded loop, and against a real account 500
+measured at 45 seconds versus 7 for 50, which is dead time where an incoming
+Telegram message isn't even polled for. Raise it if you'd rather have the
+wider window than the responsiveness.
+
 Calendar, GitHub, and Gmail sync are always attempted and simply skip
 themselves if their credential isn't configured yet; Canvas needs
 `--canvas-base-url` to be included at all, inbound Gmail commands need at
