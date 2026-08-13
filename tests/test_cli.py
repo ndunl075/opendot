@@ -10,7 +10,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
 
     assert main(["--db", str(database_path), "init"]) == 0
     initialized = json.loads(capsys.readouterr().out)
-    assert initialized["schema_version"] == 9
+    assert initialized["schema_version"] == 12
 
     assert (
         main(
@@ -191,10 +191,11 @@ def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None
     assert corrected["id"] not in remaining_ids
 
     assert main(["--db", str(database_path), "memory-search", "brief time"]) == 0
-    # The forgotten (corrected) statement is gone; the superseded original stays visible as history.
+    # The forgotten correction and superseded original remain inspectable in
+    # history, but neither is active recall.
     remaining_ids = [item["id"] for item in json.loads(capsys.readouterr().out)["memories"]]
     assert corrected["id"] not in remaining_ids
-    assert remaining_ids == [memory_id]
+    assert remaining_ids == []
 
 
 def test_cli_proposes_a_calendar_event_without_any_google_credential(tmp_path: Path, capsys) -> None:

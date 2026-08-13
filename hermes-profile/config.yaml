@@ -26,16 +26,6 @@ providers:
   # (`hermes setup --portal`, or picking "Quick Setup" during install), and
   # that flow writes its own provider registration -- confirmed working as
   # the bare provider name `nous` with no api/api_key block of its own.
-  openrouter:
-    api: https://openrouter.ai/api/v1
-    # Uncertain: whether Hermes interpolates ${OPENROUTER_API_KEY} from the
-    # environment here, or expects the literal key value. distribution.yaml
-    # declares OPENROUTER_API_KEY as an env_requires entry either way, so
-    # `hermes profile install` will prompt for it; if this field needs the
-    # literal value instead of an env reference, that prompt is where it
-    # should end up, not a hardcoded secret committed to this file.
-    api_key: "${OPENROUTER_API_KEY}"
-
 model:
   # Nous Portal primary, not Ollama: a local model large enough to clear
   # Hermes's 64K-context minimum (qwen3.5:9b, since qwen2.5:7b-instruct's
@@ -50,13 +40,8 @@ model:
   provider: nous
   default: "stepfun/step-3.7-flash:free"
   api_mode: chat_completions
-  # Local Ollama and OpenRouter both stay configured as fallbacks -- if
-  # Nous Portal's free tier ever rate-limits (50 RPM/500K TPM cap) or has
-  # downtime, slow-but-working beats not working at all.
-  fallback_providers: ["ollama-local", "openrouter"]
-  fallback_model: "anthropic/claude-opus-4.7"
-  # NOTE, not yet resolved: this single fallback_model string is an
-  # OpenRouter-style model ID. If the fallback chain ever actually reaches
-  # ollama-local before openrouter, Ollama won't recognize
-  # "anthropic/claude-opus-4.7" as a local model name -- untested, since
-  # nous hasn't yet failed over in practice. Fix forward if you hit it.
+  # The only fallback is local. Keeping OpenRouter out of this chain makes
+  # Alfred's operational cloud-spend ceiling exactly $0 while preserving a
+  # private degraded mode when Nous is unavailable.
+  fallback_providers: ["ollama-local"]
+  fallback_model: "qwen3.5:9b"

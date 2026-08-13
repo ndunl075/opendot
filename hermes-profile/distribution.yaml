@@ -12,12 +12,3 @@ license: Apache-2.0
 # against a real Hermes build yet, so pinning a floor version here would be
 # a guess. Run `hermes --version` once installed and add a real constraint
 # if you want one -- see hermes-profile/README.md.
-
-env_requires:
-  - name: OPENROUTER_API_KEY
-    description: >-
-      Fallback cloud model provider, used only when the local Ollama
-      provider (config.yaml) is unavailable or insufficient. Get one at
-      https://openrouter.ai/keys.
-    required: false
-    default: ""

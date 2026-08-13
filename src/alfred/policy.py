@@ -223,7 +223,10 @@ class ApprovalService:
                     raise PolicyError("only the requesting actor can approve this action")
                 if row["state"] != "pending":
                     raise PolicyError(f"approval is not pending: {row['state']}")
-                token = secrets.token_urlsafe(32)
+                # URL-safe output may start with '-' and argparse then treats
+                # it as another option when pasted after ``--token``. A fixed
+                # alphabetic prefix preserves entropy and makes CLI use safe.
+                token = "alf_" + secrets.token_urlsafe(32)
                 connection.execute(
                     """
                     UPDATE approvals

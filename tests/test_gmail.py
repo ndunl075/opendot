@@ -14,6 +14,7 @@ def _message(message_id: str, internal_date: str, *, subject: str = "Re: capston
     return {
         "id": message_id,
         "internalDate": internal_date,
+        "labelIds": ["INBOX", "UNREAD", "CATEGORY_PRIMARY"],
         "snippet": "Quick question about the milestone due next week...",
         "payload": {
             "headers": [
@@ -61,11 +62,13 @@ def test_gmail_sync_stores_only_headers_and_snippet(tmp_path: Path) -> None:
         assert row["content"] == "Re: capstone review"
         assert "advisor@school.example" in row["metadata_json"]
         assert "milestone" in row["metadata_json"]
+        assert "CATEGORY_PRIMARY" in row["metadata_json"]
         record = connection.execute(
             "SELECT payload_json, active FROM connector_records WHERE connector = 'gmail' AND record_id = '1'"
         ).fetchone()
         assert record["active"] == 1
         assert "https://mail.google.com/mail/u/0/#inbox/1" in record["payload_json"]
+        assert "CATEGORY_PRIMARY" in record["payload_json"]
         assert connection.execute("SELECT last_success_at FROM sync_state WHERE connector = 'gmail'").fetchone()[0]
 
 

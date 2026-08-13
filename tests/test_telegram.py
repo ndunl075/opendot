@@ -210,3 +210,28 @@ def test_a_recognized_command_is_never_deferred_even_with_the_agent_enabled(tmp_
             connection.execute("SELECT metadata_json FROM events WHERE external_id = '8'").fetchone()["metadata_json"]
         )
         assert "agent_deferred" not in metadata
+
+
+def test_natural_due_date_and_reminder_create_one_sourced_task_and_job(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    receipt = _gateway(database_path, defer_unparsed_to_agent=True).handle(
+        _update(10, "my paper is due Friday; remind me Thursday")
+    )
+
+    assert receipt.agent_deferred is False
+    assert receipt.task_id and receipt.reminder_job_id
+    with Database(database_path).connect() as connection:
+        task = connection.execute(
+            "SELECT title, due_at, source_event_id FROM tasks WHERE id = ?", (receipt.task_id,)
+        ).fetchone()
+        job = connection.execute(
+            "SELECT next_run_at FROM jobs WHERE id = ?", (receipt.reminder_job_id,)
+        ).fetchone()
+        event = connection.execute("SELECT id FROM events WHERE external_id = '10'").fetchone()
+    due_at = datetime.fromisoformat(task["due_at"])
+    remind_at = datetime.fromisoformat(job["next_run_at"])
+    assert task["title"] == "paper"
+    assert task["source_event_id"] == event["id"]
+    assert due_at.weekday() == 4 and due_at.hour == 23
+    assert remind_at.weekday() == 3
+    assert remind_at < due_at

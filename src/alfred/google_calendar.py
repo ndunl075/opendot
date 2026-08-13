@@ -27,6 +27,10 @@ class CalendarTransport(Protocol):
     ) -> tuple[list[dict[str, Any]], str | None]: ...
 
 
+class CalendarCatalogTransport(Protocol):
+    def list_calendars(self) -> list[dict[str, Any]]: ...
+
+
 class CalendarWriteTransport(Protocol):
     def create_event(
         self, *, calendar_id: str, event_id: str, summary: str, start: datetime, end: datetime
@@ -102,6 +106,29 @@ class GoogleCalendarClient:
                 raise ValueError("Google Calendar response has invalid nextPageToken")
             params["pageToken"] = page_token
 
+    def list_calendars(self) -> list[dict[str, Any]]:
+        """Return calendars the user has placed in their Calendar UI."""
+        items: list[dict[str, Any]] = []
+        params: dict[str, str | bool | int] = {
+            "showHidden": False,
+            "minAccessRole": "reader",
+            "maxResults": 250,
+        }
+        while True:
+            response = self._client.get("/users/me/calendarList", params=params)
+            response.raise_for_status()
+            payload = response.json()
+            page_items = payload.get("items", [])
+            if not isinstance(page_items, list):
+                raise ValueError("Google Calendar list response has invalid items")
+            items.extend(item for item in page_items if isinstance(item, dict))
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                return items
+            if not isinstance(page_token, str):
+                raise ValueError("Google Calendar list response has invalid nextPageToken")
+            params["pageToken"] = page_token
+
     def create_event(
         self, *, calendar_id: str, event_id: str, summary: str, start: datetime, end: datetime
     ) -> dict[str, Any]:
@@ -130,6 +157,159 @@ class CalendarSyncResult(BaseModel):
     stored: int
     reset_cursor: bool = False
     next_cursor: str | None = None
+
+
+class CalendarHistorySyncResult(BaseModel):
+    calendar_id: str
+    received: int
+    stored: int
+
+
+class GoogleCalendarHistorySync:
+    """Backfill immutable past events without touching the live sync cursor."""
+
+    connector_name = "google_calendar_history"
+
+    def __init__(self, database: Database, transport: CalendarTransport) -> None:
+        self.database = database
+        self.transport = transport
+
+    def sync(
+        self, *, calendar_id: str = "primary", time_min: datetime, time_max: datetime
+    ) -> CalendarHistorySyncResult:
+        if time_max <= time_min:
+            raise ValueError("history end must be after history start")
+        self.database.migrate()
+        try:
+            items, _unused_cursor = self.transport.list_events(
+                calendar_id=calendar_id,
+                sync_token=None,
+                time_min=time_min,
+                time_max=time_max,
+            )
+        except Exception as error:
+            self._store_state(calendar_id, error=error.__class__.__name__)
+            raise
+
+        stored = 0
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                for item in items:
+                    if EventStore.append(connection, **_normalize_event(item, calendar_id)).is_new:
+                        stored += 1
+                self._store_state_in_transaction(connection, calendar_id)
+                AuditLog.append_in_transaction(
+                    connection,
+                    AuditEvent(
+                        actor="system:google_calendar_history",
+                        client="google_calendar",
+                        tool="calendar_history_read_sync",
+                        outcome="ok",
+                        arguments={
+                            "calendar_id": calendar_id,
+                            "time_min": _rfc3339(time_min),
+                            "time_max": _rfc3339(time_max),
+                        },
+                        result={"received": len(items), "stored": stored},
+                    ),
+                )
+        return CalendarHistorySyncResult(calendar_id=calendar_id, received=len(items), stored=stored)
+
+    def _store_state(self, calendar_id: str, *, error: str) -> None:
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                self._store_state_in_transaction(connection, calendar_id, error=error)
+
+    def _store_state_in_transaction(
+        self, connection: Any, calendar_id: str, *, error: str | None = None
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        connection.execute(
+            """
+            INSERT INTO sync_state (connector, account, cursor, last_success_at, last_error, updated_at)
+            VALUES (?, ?, NULL, ?, ?, ?)
+            ON CONFLICT(connector, account) DO UPDATE SET
+                last_success_at = COALESCE(excluded.last_success_at, sync_state.last_success_at),
+                last_error = excluded.last_error,
+                updated_at = excluded.updated_at
+            """,
+            (self.connector_name, calendar_id, None if error else now, error, now),
+        )
+
+
+class CalendarCatalogSync:
+    """Persist the calendars whose contents are selected in Google's UI."""
+
+    connector_name = "google_calendar_catalog"
+
+    def __init__(self, database: Database, transport: CalendarCatalogTransport) -> None:
+        self.database = database
+        self.transport = transport
+
+    def sync(self) -> list[dict[str, Any]]:
+        self.database.migrate()
+        items = self.transport.list_calendars()
+        selected: list[dict[str, Any]] = []
+        for item in items:
+            calendar_id = item.get("id")
+            primary = item.get("primary") is True
+            if not isinstance(calendar_id, str) or not calendar_id:
+                continue
+            if not primary and item.get("selected") is not True:
+                continue
+            selected.append(
+                {
+                    "id": calendar_id,
+                    "title": str(item.get("summaryOverride") or item.get("summary") or calendar_id),
+                    "primary": primary,
+                    "time_zone": item.get("timeZone"),
+                    "data_owner": item.get("dataOwner"),
+                    "access_role": item.get("accessRole"),
+                }
+            )
+
+        now = datetime.now(UTC).isoformat()
+        active_accounts = {"primary" if item["primary"] else item["id"] for item in selected}
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                ConnectorRecordStore.replace_snapshot(
+                    connection,
+                    connector="google_calendar",
+                    account="self",
+                    record_type="calendar",
+                    records={item["id"]: item for item in selected},
+                )
+                if active_accounts:
+                    placeholders = ",".join("?" for _ in active_accounts)
+                    connection.execute(
+                        f"""
+                        UPDATE connector_records SET active = 0
+                        WHERE connector = 'google_calendar'
+                          AND record_type = 'event'
+                          AND account NOT IN ({placeholders})
+                        """,
+                        tuple(sorted(active_accounts)),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE connector_records SET active = 0
+                        WHERE connector = 'google_calendar' AND record_type = 'event'
+                        """
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO sync_state (
+                        connector, account, cursor, last_success_at, last_error, updated_at
+                    ) VALUES (?, 'self', NULL, ?, NULL, ?)
+                    ON CONFLICT(connector, account) DO UPDATE SET
+                        last_success_at = excluded.last_success_at,
+                        last_error = NULL,
+                        updated_at = excluded.updated_at
+                    """,
+                    (self.connector_name, now, now),
+                )
+        return selected
 
 
 class GoogleCalendarSync:
@@ -181,9 +361,12 @@ class GoogleCalendarSync:
                     metadata = event["metadata"]
                     current_records[metadata["calendar_event_id"]] = {
                         "title": event["content"],
+                        "calendar_id": calendar_id,
                         "start": metadata["start"],
                         "end": metadata["end"],
                         "html_url": metadata["html_link"],
+                        "creator": metadata["creator"],
+                        "organizer": metadata["organizer"],
                     }
                 if cursor is None or reset_cursor:
                     ConnectorRecordStore.replace_snapshot(
@@ -401,7 +584,10 @@ def _normalize_event(item: dict[str, Any], calendar_id: str) -> dict[str, Any]:
     return {
         "source": "google_calendar",
         # Versioning makes source events immutable while allowing Calendar edits.
-        "external_id": f"{event_id}:{updated}",
+        # v2 records calendar provenance added after the original minimized
+        # schema. The suffix backfills current events once without mutating
+        # immutable v1 evidence rows.
+        "external_id": f"{event_id}:{updated}:calendar-v2",
         "occurred_at": occurred_at,
         "content": content,
         "metadata": {
@@ -411,6 +597,8 @@ def _normalize_event(item: dict[str, Any], calendar_id: str) -> dict[str, Any]:
             "start": _event_time(item.get("start")),
             "end": _event_time(item.get("end")),
             "html_link": item.get("htmlLink"),
+            "creator": _event_identity(item.get("creator")),
+            "organizer": _event_identity(item.get("organizer")),
         },
         "sensitivity": "personal",
     }
@@ -421,6 +609,18 @@ def _event_time(value: Any) -> str | None:
         return None
     timestamp = value.get("dateTime") or value.get("date")
     return timestamp if isinstance(timestamp, str) else None
+
+
+def _event_identity(value: Any) -> dict[str, Any] | None:
+    """Keep only Calendar's read-only creator/organizer identity fields."""
+    if not isinstance(value, dict):
+        return None
+    identity = {
+        key: value.get(key)
+        for key in ("displayName", "email", "self")
+        if value.get(key) is not None
+    }
+    return identity or None
 
 
 def _rfc3339(value: datetime) -> str:

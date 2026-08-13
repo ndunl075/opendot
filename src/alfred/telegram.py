@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,30 @@ class TelegramReceipt(BaseModel):
 class TelegramPair:
     chat_id: int
     user_id: int
+
+
+@dataclass(frozen=True)
+class ParsedCommand:
+    command: str
+    title: str
+    due_at: datetime | None = None
+    remind_at: datetime | None = None
+
+
+_NATURAL_DUE_REMINDER = re.compile(
+    r"^\s*my\s+(?P<title>.+?)\s+is\s+due\s+(?P<due>monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    r"\s*[;,.]?\s*remind\s+me\s+(?P<remind>monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+_WEEKDAYS = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
 
 
 class TelegramGateway:
@@ -169,7 +194,7 @@ class TelegramGateway:
         # event, and `hermes_bridge` later reads that marker instead of
         # re-deriving the decision with its own copy of this parser.
         try:
-            parsed: tuple[str, str, datetime | None] | None = self._parse_command(text)
+            parsed: ParsedCommand | None = self._parse_command(text, received_at=datetime.fromtimestamp(message.date, UTC).astimezone())
             parse_error: str | None = None
         except ValueError as error:
             parsed, parse_error = None, str(error)
@@ -220,7 +245,7 @@ class TelegramGateway:
         connection: sqlite3.Connection,
         event_id: str,
         *,
-        parsed: tuple[str, str, datetime | None] | None,
+        parsed: ParsedCommand | None,
         parse_error: str | None,
         deferred: bool,
         text: str,
@@ -235,10 +260,12 @@ class TelegramGateway:
                 return TelegramReceipt(text=self.acknowledgement_for(text), agent_deferred=True)
             return TelegramReceipt(text=f"{parse_error} Use /task <title> or /remind <ISO-8601 time> <title>.")
 
-        command, title, run_at = parsed
-        task = TaskStore.create(connection, title=title, source_event_id=event_id, due_at=run_at)
-        if command == "task":
+        task = TaskStore.create(connection, title=parsed.title, source_event_id=event_id, due_at=parsed.due_at)
+        if parsed.command == "task":
             return TelegramReceipt(text=f"Saved task: {task.title}", task_id=task.id)
+        run_at = parsed.remind_at or parsed.due_at
+        if run_at is None:
+            raise ValueError("reminder time is required")
         reminder = ReminderStore.create(
             connection,
                 run_at=run_at,
@@ -254,12 +281,12 @@ class TelegramGateway:
         )
 
     @staticmethod
-    def _parse_command(text: str) -> tuple[str, str, datetime | None]:
+    def _parse_command(text: str, *, received_at: datetime | None = None) -> ParsedCommand:
         normalized = text.strip()
         if normalized.startswith("/task"):
             title = normalized.removeprefix("/task").strip()
             if title:
-                return "task", title, None
+                return ParsedCommand("task", title)
             raise ValueError("Task title is required.")
         if normalized.startswith("/remind"):
             parts = normalized.split(maxsplit=2)
@@ -273,7 +300,30 @@ class TelegramGateway:
                 raise ValueError("Reminder time must include a timezone.")
             if not parts[2].strip():
                 raise ValueError("Reminder title is required.")
-            return "remind", parts[2].strip(), run_at
+            return ParsedCommand("remind", parts[2].strip(), due_at=run_at, remind_at=run_at)
+        natural = _NATURAL_DUE_REMINDER.match(normalized)
+        if natural:
+            base = (received_at or datetime.now().astimezone()).astimezone()
+            due_weekday = _WEEKDAYS[natural.group("due").casefold()]
+            days_until_due = (due_weekday - base.weekday()) % 7
+            if days_until_due == 0:
+                days_until_due = 7
+            due_day = base.date() + timedelta(days=days_until_due)
+            due_at = datetime.combine(due_day, time(23, 59), tzinfo=base.tzinfo)
+            reminder_weekday = _WEEKDAYS[natural.group("remind").casefold()]
+            days_before = (due_weekday - reminder_weekday) % 7
+            if days_before == 0:
+                days_before = 7
+            remind_day = due_day - timedelta(days=days_before)
+            remind_at = datetime.combine(remind_day, time(9, 0), tzinfo=base.tzinfo)
+            if remind_at <= base:
+                raise ValueError("Reminder time has already passed.")
+            return ParsedCommand(
+                "remind",
+                natural.group("title").strip(),
+                due_at=due_at,
+                remind_at=remind_at,
+            )
         raise ValueError("I do not understand that command.")
 
     @staticmethod

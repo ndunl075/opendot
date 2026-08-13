@@ -79,6 +79,32 @@ def test_morning_brief_includes_current_calendar_events_today(tmp_path: Path) ->
     assert "Today's calendar:\n- Advisor meeting" in brief.render()
 
 
+def test_morning_brief_uses_local_day_and_identifies_calendar_conflicts(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (connector, account, record_type, record_id, payload_json, observed_at, active)
+                VALUES ('google_calendar', 'primary', 'event', 'one', ?, '2026-08-14T07:00:00+00:00', 1),
+                       ('google_calendar', 'primary', 'event', 'two', ?, '2026-08-14T07:00:00+00:00', 1)
+                """,
+                (
+                    '{"title":"Late study","start":"2026-08-15T03:30:00Z","end":"2026-08-15T04:30:00Z"}',
+                    '{"title":"Project call","start":"2026-08-15T03:45:00Z","end":"2026-08-15T04:00:00Z"}',
+                ),
+            )
+
+    brief = BriefingService(database).morning_brief(
+        datetime(2026, 8, 14, 12, 0, tzinfo=UTC), timezone_name="America/New_York"
+    )
+
+    assert [item.title for item in brief.calendar_today] == ["Late study", "Project call"]
+    assert brief.conflicts == ["Late study overlaps Project call"]
+    assert "Calendar conflicts:" in brief.render()
+
+
 def test_morning_brief_includes_only_active_github_notifications(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     database.migrate()

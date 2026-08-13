@@ -79,3 +79,64 @@ def test_canvas_client_uses_current_user_read_only_endpoints() -> None:
     finally:
         client.close()
     assert seen == ["/api/v1/users/self/upcoming_events", "/api/v1/users/self/missing_submissions"]
+
+
+def test_canvas_client_reads_historical_assignments_with_course_context() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == "/api/v1/courses":
+            assert request.url.params["enrollment_state"] in {"active", "completed"}
+            if request.url.params["enrollment_state"] == "completed":
+                return httpx.Response(200, json=[])
+            return httpx.Response(200, json=[{"id": 7, "name": "Biology"}])
+        assert request.url.params["include[]"] == "submission"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "name": "Final lab",
+                    "due_at": "2026-05-01T16:00:00Z",
+                    "updated_at": "2026-05-02T16:00:00Z",
+                    "submission": {"workflow_state": "graded"},
+                }
+            ],
+        )
+
+    client = CanvasClient("https://school.example", "TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        items = client.list_historical_assignments()
+    finally:
+        client.close()
+
+    assert seen == ["/api/v1/courses", "/api/v1/courses", "/api/v1/courses/7/assignments"]
+    assert items[0]["course_name"] == "Biology"
+    assert items[0]["submission"]["workflow_state"] == "graded"
+
+
+def test_canvas_sync_persists_historical_submission_state(tmp_path: Path) -> None:
+    class HistoricalCanvas(FakeCanvas):
+        def list_historical_assignments(self, *, course_limit: int = 100):
+            assert course_limit == 100
+            return [
+                {
+                    "id": 99,
+                    "name": "Final lab",
+                    "due_at": "2026-05-01T16:00:00Z",
+                    "updated_at": "2026-05-02T16:00:00Z",
+                    "course_name": "Biology",
+                    "submission": {"workflow_state": "graded"},
+                }
+            ]
+
+    database = Database(tmp_path / "alfred.db")
+    result = CanvasSync(database, HistoricalCanvas(), include_history=True).sync()
+
+    assert result.historical == 1
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM connector_records WHERE connector = 'canvas' AND record_type = 'historical'"
+        ).fetchone()
+    assert json.loads(row["payload_json"])["submission_status"] == "graded"

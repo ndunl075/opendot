@@ -68,9 +68,14 @@ that refresh token; none is cached, and no token is ever written to the
 database, audit log, Markdown vault, or Git. Re-run `google-auth` any time the
 grant is revoked.
 
-`alfred calendar-sync` reads the primary calendar into local source events—
-title, timing, status, and a source link, never event descriptions or attendee
-lists. Calendar also has Alfred's first real write, and it is preview-then-confirm,
+The always-on runner reads every calendar selected in the user's Google Calendar
+UI into local source events—title, timing, status, and a source link, never event
+descriptions or attendee lists. Each event also keeps its calendar ID/name and
+Google's read-only creator/organizer identity when available, so Alfred can
+answer where an event came from without copying the guest list. This requires the narrow
+`calendar.calendarlist.readonly` scope in addition to event access. A one-shot
+`alfred calendar-sync` can still target one calendar explicitly. Calendar also
+has Alfred's first real write, and it is preview-then-confirm,
 not one step. `alfred calendar-event-propose --actor nico --summary "..." --start
 <ISO-8601> --end <ISO-8601>` creates a local preview and never touches Google.
 Approve it with `alfred approval-approve --approval-id <ID> --actor nico`, which
@@ -84,8 +89,9 @@ that event through Alfred's stable Calendar event ID.
 Canvas is also read-only and opt-in. If your school permits a personal Canvas
 token, save it under service `alfred`, account `canvas-api-token`, then invoke
 `alfred canvas-sync --base-url https://your-school.instructure.com`. It copies
-only upcoming/missing assignment title, deadline, course label, and source link;
-grades, submissions, files, and assignment body text stay out of Alfred.
+upcoming/missing plus accessible current/completed-course assignment history:
+title, deadline, course label, source link, and compact submission workflow
+state. Grades, submission contents, files, and assignment body text stay out.
 
 Google Health is also read-only and opt-in—and, unlike Calendar/Gmail/Canvas/
 GitHub above, it has not been exercised against a real wearable-linked account.
@@ -193,6 +199,10 @@ with a stale confirmation. Since a restore intentionally rolls the database
 back to an earlier point, it is non-replayable: any further restore requires a
 new preview and approval.
 
+`scripts/backup.ps1` creates timestamped encrypted snapshots under
+`.alfred/backups`. The deployed installation runs it through the `Alfred Backup`
+scheduled task daily at 02:30; keep testing an isolated restore at least monthly.
+
 ## Tasks and reminders
 
 Sending `/task <title>` or `/remind <ISO-8601> <text>` to the paired Telegram bot
@@ -278,6 +288,62 @@ The answer itself arrives as two to four consecutive messages rather than one
 block — `SOUL.md` asks the agent for short paragraphs and the bridge sends
 each as its own message, so it reads like someone texting.
 
+For inbox/GitHub questions, the bridge assembles a bounded context pack from
+the already-synced local records before starting Hermes. That avoids a second
+MCP discovery/tool-call loop on the cold path. Gmail's Promotions, Social,
+and Forums categories are counted but omitted from the pack by default, and
+two recent completed chat exchanges are included so a precise follow-up such
+as `yes, flag that` keeps its referent. Synced message content remains
+untrusted data, and Gmail context is still headers/snippets only, never a full
+message body.
+
+### Persistent learning
+
+When conversational replies are enabled, Alfred also runs a local learning
+pass after the reply has already been delivered. Explicit `remember that ...`
+statements become confirmed memories immediately. Ordinary preferences,
+identity facts, and goals enter as quarantined candidates and need the same
+fact in a separate source event before promotion. Sensitive candidates never
+auto-promote, recognizable secrets are not stored, and every observation
+keeps its immutable source-event provenance.
+
+Confirmed memories relevant to a request are placed directly in the bridge's
+bounded context pack, avoiding another agent tool round trip. Candidate,
+superseded, rejected, deleted, sensitive, and secret memories are excluded
+from that automatic path. `memory_correct` preserves the former version while
+installing a correction; `memory_feedback` records relevant, irrelevant, or
+incorrect retrievals as append-only evaluation data. That feedback now reorders
+only the memories already selected for a matching query; it cannot inject an
+unrelated popular memory into the candidate set.
+
+Calendar and Canvas history use a separate derived academic layer. Immutable
+connector events remain authoritative; after connector sync, Alfred
+deduplicates revisions into daily JSON rollups and course/calendar profiles,
+classifying exams, quizzes, assignments, and ordinary events while retaining
+each source-event ID. Academic questions retrieve only a few matching rollups
+(rather than scanning raw history), and rebuilding is skipped when the source
+fingerprint has not changed. A second deterministic pass promotes the current
+items into source-linked semantic memories, supersedes changed provider
+versions, and connects calendar/course entities to the owner graph. This
+background work never delays a chat reply.
+
+The continuous runner refreshes a three-year Calendar window weekly by
+default without replacing Calendar's live incremental cursor. Canvas keeps
+the small upcoming/missing read on the normal connector interval and scans
+accessible active/completed course assignments only once daily. Use
+`--calendar-history-days 0` to disable Calendar history, or tune
+`--calendar-history-interval` and `--canvas-history-interval` when needed.
+One-shot maintenance is available through `calendar-history-sync
+--all-selected --days 1095` and `academic-memory-rebuild`.
+
+The JSON in rollups is a replaceable cache, not the canonical archive. This
+keeps exports portable while preserving edits, cancellations, provenance, and
+forget/correction behavior in SQLite. Cognee is therefore not a source of
+truth for Alfred today: its graph/vector retrieval ideas are useful, but its
+LLM-backed ingestion and additional runtime/database surface are unnecessary
+for deterministic Calendar/Canvas facts. It can be evaluated later as an
+optional retrieval backend against the same source-linked memory tests.
+
 The agent step runs between intake and delivery, not as a connector.
 Connectors sync on a 15-minute interval and run *after* delivery, which
 stranded every answer in the outbox for an extra cycle; measured against a
@@ -285,10 +351,17 @@ real round trip that was 26s of pure latency on top of the model call.
 
 `--hermes-command` sets which executable to run (default `hermes`; use a
 full path when PATH differs, as it can under the Windows service) and
-`--hermes-timeout` bounds one turn (default 180s). A turn that times out,
+`--hermes-timeout` bounds one turn (default 60s). A turn that times out,
 exits non-zero, or produces nothing still gets a reply saying so, and is not
 retried — an unanswered `Thinking…` and an endlessly re-run model call are
 both worse than one honest failure message.
+
+`--embedding-model nomic-embed-text` enables local hybrid memory recall and
+background vector backfill. `--hermes-monthly-call-limit` is a hard external-turn
+cap (default 1000). Bridge context is bounded before launch and common PII is
+redacted at the final Hermes subprocess boundary. The shipped profile uses Nous
+free tier for interactive speed and only local Ollama fallback; it has no paid
+provider fallback.
 
 ### As a real Windows service (survives logoff/reboot)
 
@@ -515,8 +588,9 @@ stays FTS5 keyword-only, exactly as before. With one—for example
 `embeddings` table, and `memory-search` folds in nearby vector matches (within a
 cosine-distance cutoff) once keyword hits are exhausted. Vectors are namespaced by
 model name, so trying a different embedding model never mixes incomparable spaces;
-switching models means re-embedding, not migrating data. Nothing in the CLI or MCP
-server wires a live provider in yet—that's local configuration, not core behavior.
+switching models means re-embedding, not migrating data. Run
+`memory-embed-backfill --model nomic-embed-text` for a one-shot rebuild, or pass
+`--embedding-model nomic-embed-text` to `alfred run` for continuous local upkeep.
 
 ## Local model inference (optional)
 

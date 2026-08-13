@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from alfred.db import Database
-from alfred.embeddings import EmbeddingIndex
+from alfred.embeddings import EmbeddingBackfill, EmbeddingIndex
+from alfred.memory_graph import MemoryGraph
 
 
 class FakeEmbeddingProvider:
@@ -83,3 +84,22 @@ def test_search_is_scoped_to_the_provider_current_model(tmp_path: Path) -> None:
     results = EmbeddingIndex(database, new_provider).search("query")
 
     assert results == []
+
+
+def test_backfill_batches_only_confirmed_memories_missing_the_current_model(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    first = graph.remember("first memory")
+    second = graph.remember("second memory")
+    provider = FakeEmbeddingProvider(
+        "fake-v1", {"first memory": [1.0, 0.0], "second memory": [0.0, 1.0]}
+    )
+
+    embedded = EmbeddingBackfill(database, provider, batch_size=1).run()
+    again = EmbeddingBackfill(database, provider, batch_size=1).run()
+
+    assert embedded == 2
+    assert again == 0
+    with database.connect() as connection:
+        ids = {row["subject_id"] for row in connection.execute("SELECT subject_id FROM embeddings")}
+    assert ids == {first.id, second.id}

@@ -228,6 +228,11 @@ class GmailSync:
                         "subject": event["content"],
                         "from": metadata["from"],
                         "snippet": metadata["snippet"],
+                        # Gmail has already done useful inbox classification.
+                        # Keeping its category labels lets the conversational
+                        # layer omit Promotions/Social/Forums without asking a
+                        # model to rediscover that from sender names every turn.
+                        "label_ids": metadata["label_ids"],
                         "html_url": metadata["html_url"],
                     }
                 ConnectorRecordStore.replace_snapshot(
@@ -438,6 +443,12 @@ def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
     headers = parse_message_headers(item.get("payload"))
     subject = headers.get("subject") or "(no subject)"
     snippet = item.get("snippet")
+    raw_label_ids = item.get("labelIds")
+    label_ids = (
+        [label for label in raw_label_ids if isinstance(label, str)]
+        if isinstance(raw_label_ids, list)
+        else []
+    )
     return {
         "source": "gmail",
         # A Gmail message body never changes once received, so the ID alone is a stable key.
@@ -448,6 +459,7 @@ def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
             "message_id": message_id,
             "from": headers.get("from"),
             "snippet": snippet if isinstance(snippet, str) else None,
+            "label_ids": label_ids,
             "html_url": f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
         },
         "sensitivity": "personal",

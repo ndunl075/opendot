@@ -41,9 +41,21 @@ class OllamaEmbeddingProvider:
         self._timeout = timeout
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Call Ollama's embeddings endpoint once per text; no batching guarantee upstream."""
-        vectors: list[list[float]] = []
+        """Use Ollama's batched local endpoint, with legacy compatibility."""
+        if not texts:
+            return []
         with httpx.Client(timeout=self._timeout) as client:
+            response = client.post(
+                f"{self._base_url}/api/embed",
+                json={"model": self.model_name, "input": texts},
+            )
+            if response.status_code != 404:
+                response.raise_for_status()
+                payload = response.json().get("embeddings")
+                if not isinstance(payload, list) or len(payload) != len(texts):
+                    raise ValueError("Ollama returned an invalid embedding batch")
+                return payload
+            vectors: list[list[float]] = []
             for text in texts:
                 response = client.post(
                     f"{self._base_url}/api/embeddings",
@@ -71,6 +83,30 @@ class EmbeddingIndex:
         self.database.migrate()
         vector = self.provider.embed([text])[0]
         self._store(subject_kind=subject_kind, subject_id=subject_id, vector=vector)
+
+    def upsert_many(self, items: list[tuple[str, str, str]]) -> int:
+        """Embed and store a batch of ``(kind, id, text)`` items."""
+        if not items:
+            return 0
+        vectors = self.provider.embed([text for _kind, _id, text in items])
+        if len(vectors) != len(items):
+            raise ValueError("embedding provider returned the wrong number of vectors")
+        self.database.migrate()
+        now = datetime.now(UTC).isoformat()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                for (subject_kind, subject_id, _text), vector in zip(items, vectors, strict=True):
+                    blob = _serialize(vector)
+                    connection.execute(
+                        """
+                        INSERT INTO embeddings (id, subject_kind, subject_id, model_name, dim, vector, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(subject_kind, subject_id, model_name) DO UPDATE SET
+                            dim = excluded.dim, vector = excluded.vector, created_at = excluded.created_at
+                        """,
+                        (str(uuid4()), subject_kind, subject_id, self.provider.model_name, len(vector), blob, now),
+                    )
+        return len(items)
 
     def delete(self, *, subject_kind: str, subject_id: str) -> None:
         """Drop every stored vector for one subject, across all model versions."""
@@ -139,3 +175,38 @@ class EmbeddingIndex:
 
 def _serialize(vector: list[float]) -> bytes:
     return struct.pack(f"{len(vector)}f", *vector)
+
+
+class EmbeddingBackfill:
+    """Populate missing local memory vectors in bounded batches."""
+
+    def __init__(self, database: Database, provider: EmbeddingProvider, *, batch_size: int = 32) -> None:
+        self.database = database
+        self.provider = provider
+        self.batch_size = batch_size
+
+    def run(self, *, limit: int | None = None) -> int:
+        self.database.migrate()
+        total = 0
+        while limit is None or total < limit:
+            take = self.batch_size if limit is None else min(self.batch_size, limit - total)
+            with self.database.connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT m.id, m.statement
+                    FROM memories m
+                    LEFT JOIN embeddings e
+                      ON e.subject_kind = 'memory' AND e.subject_id = m.id AND e.model_name = ?
+                    WHERE m.status = 'confirmed' AND e.id IS NULL
+                    ORDER BY m.created_at, m.id
+                    LIMIT ?
+                    """,
+                    (self.provider.model_name, take),
+                ).fetchall()
+            if not rows:
+                break
+            EmbeddingIndex(self.database, self.provider).upsert_many(
+                [("memory", str(row["id"]), str(row["statement"])) for row in rows]
+            )
+            total += len(rows)
+        return total
