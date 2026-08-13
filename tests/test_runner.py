@@ -97,7 +97,8 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
     assert report.errors == []
     assert report.agent_replies == 1
     # Both the acknowledgement and the real answer leave in this same cycle.
-    assert fake.sent == [(20, "one sec"), (20, "nothing due today.")]
+    # The ack names the topic, matched by keyword at intake (no model call).
+    assert fake.sent == [(20, "checking your agenda..."), (20, "nothing due today.")]
 
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:

@@ -56,10 +56,60 @@ class TelegramPair:
 class TelegramGateway:
     """Accept updates from locally paired identities and create durable intents."""
 
-    #: Receipt sent immediately when a message is handed to the agent, and
-    #: delivered before the agent runs so it lands while the answer is still
-    #: being written. Lowercase and terse to match the persona in SOUL.md.
+    #: Fallback acknowledgement when the message doesn't match a known topic.
     agent_ack_text = "one sec"
+
+    #: Topic-specific acknowledgements, checked in order, covering every tool
+    #: on the MCP surface plus the connectors that feed them. This is a
+    #: keyword match, not a model call, on purpose: the ack is produced inside
+    #: the intake write transaction and has to be instant, which is the same
+    #: reason the real answer is deferred to `hermes_bridge` at all. Phrased
+    #: to say what is being worked on, never to promise a result, since the
+    #: agent decides for itself which tools it actually needs.
+    #:
+    #: Order matters. Action phrasing comes first so "schedule a meeting"
+    #: (a write) doesn't get answered like "what's my schedule" (a read), and
+    #: "draft an email" doesn't read as an inbox lookup. Every write below is
+    #: still preview-then-approve; the ack says work is starting, never that
+    #: anything was sent.
+    agent_ack_topics: tuple[tuple[tuple[str, ...], str], ...] = (
+        # -- writes and actions, checked before the reads they overlap with --
+        (("draft", "reply to", "respond to", "send an email", "send email", "email him", "email her", "email them"),
+         "drafting that..."),
+        (("schedule a", "schedule an", "book a", "book an", "put on my calendar", "add to my calendar",
+          "add to calendar", "set up a meeting"), "setting that up..."),
+        (("open an issue", "file an issue", "create an issue", "make an issue"), "writing that issue..."),
+        (("forget", "delete that", "scrub", "wipe"), "on it..."),
+        (("remind",), "on it..."),
+        (("add a task", "new task", "add task", "mark", "finish", "done with", "completed"), "checking your tasks..."),
+        # -- reads, most specific source first --
+        (("canvas", "assignment", "homework", "syllabus", "coursework", "class", "course", "exam", "quiz"),
+         "checking canvas..."),
+        (("github", "repo", "pull request", " pr ", " prs ", "ci ", "commit", "issue"), "checking github..."),
+        (("slack",), "checking slack..."),
+        (("steps", "sleep", "heart rate", "workout", "health", "fitness"), "checking your health data..."),
+        (("note", "notes", "obsidian", "vault"), "checking your notes..."),
+        (("inbox", "email", "e-mail", "gmail", "mail", "unread"), "checking your inbox..."),
+        (("task", "todo", "to-do", "to do"), "checking your tasks..."),
+        (("week", "review", "recap"), "pulling up your week..."),
+        (("agenda", "schedule", "calendar", "today", "tomorrow", "due", "meeting", "brief"),
+         "checking your agenda..."),
+        (("remember", "recall", "memory", "did i say", "did i tell", "about me", "who am i", "my profile"),
+         "checking what i know..."),
+        (("connector", "synced", "sync status", "connected", "working", "status", "everything ok", "everything okay"),
+         "checking connections..."),
+    )
+
+    @classmethod
+    def acknowledgement_for(cls, text: str) -> str:
+        """Pick the acknowledgement that matches what was asked."""
+        # Padded so " pr " and "ci " match whole words rather than firing on
+        # "prepare" or "specific".
+        haystack = f" {text.lower().strip()} "
+        for keywords, ack in cls.agent_ack_topics:
+            if any(keyword in haystack for keyword in keywords):
+                return ack
+        return cls.agent_ack_text
 
     def __init__(
         self,
@@ -131,6 +181,7 @@ class TelegramGateway:
                     parsed=parsed,
                     parse_error=parse_error,
                     deferred=deferred,
+                    text=text,
                     chat_id=message.chat.id,
                     update_id=update.update_id,
                 )
@@ -150,6 +201,7 @@ class TelegramGateway:
         parsed: tuple[str, str, datetime | None] | None,
         parse_error: str | None,
         deferred: bool,
+        text: str,
         chat_id: int,
         update_id: int,
     ) -> TelegramReceipt:
@@ -158,7 +210,7 @@ class TelegramGateway:
                 # Deliberately only an acknowledgement: the agent turn takes
                 # seconds and must not run inside this write transaction, so
                 # `hermes_bridge` sends the real answer as a second message.
-                return TelegramReceipt(text=self.agent_ack_text, agent_deferred=True)
+                return TelegramReceipt(text=self.acknowledgement_for(text), agent_deferred=True)
             return TelegramReceipt(text=f"{parse_error} Use /task <title> or /remind <ISO-8601 time> <title>.")
 
         command, title, run_at = parsed

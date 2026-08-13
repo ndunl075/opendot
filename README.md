@@ -257,7 +257,10 @@ transport; Hermes is invoked as a one-shot subprocess (`hermes -p <profile>
 -z <message>`) and never touches Telegram itself — deliberately, since
 Hermes's own Telegram gateway does not currently work on this platform.
 
-You get a quick `one sec` first, then the answer. That's structural, not
+You get a quick acknowledgement first, naming what it's looking at
+(`checking your agenda...`, `checking your inbox...`, falling back to
+`one sec`), then the answer. That ack is a keyword match rather than a
+model call, because it's produced inside the intake write transaction. That's structural, not
 cosmetic: Telegram intake runs inside a write transaction, and an agent turn
 takes seconds and opens its own connection to this same database, so it has
 to happen after that transaction closes. The acknowledgement is flushed

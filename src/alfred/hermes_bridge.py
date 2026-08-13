@@ -30,6 +30,7 @@ staring at an unanswered "Thinking…".
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable, Protocol
@@ -50,6 +51,14 @@ TELEGRAM_MAX_MESSAGE_CHARS = 4096
 DEFAULT_MAX_BUBBLES = 4
 
 _TRUNCATION_NOTE = "\n\n[truncated]"
+
+#: SOUL.md forbids em/en dashes, and the model breaks that rule anyway --
+#: observed on the very first live reply ("not much on my end -- just here").
+#: A dash joining two clauses is exactly the long-sentence habit the persona
+#: is trying to avoid, so it becomes a sentence break instead. Plain hyphens
+#: are left alone: they are real punctuation inside words (fine-grained,
+#: re-run) and in the "- item" lines SOUL.md allows for short lists.
+_CLAUSE_DASH = re.compile(r"\s*[—–]\s*")
 
 
 class AgentRunResult(BaseModel):
@@ -264,6 +273,22 @@ class HermesBridge:
         )
 
 
+def enforce_style(text: str) -> str:
+    """Apply the one persona rule a prompt can't reliably hold.
+
+    SOUL.md covers voice, length, and structure, and the model follows those
+    well enough. Dashes are the exception: the instruction not to use them is
+    explicit and the model used one in its first live reply anyway. Rewriting
+    a dash-joined clause as its own sentence is both the rule and the house
+    style, so it is enforced here rather than re-asked for in the prompt.
+    """
+    replaced = _CLAUSE_DASH.sub(". ", text)
+    # A dash right after sentence-ending punctuation would otherwise leave
+    # ".. " or "?. " behind.
+    replaced = re.sub(r"([.!?])\.\s+", r"\1 ", replaced)
+    return replaced
+
+
 def split_into_bubbles(
     text: str, *, max_bubbles: int = DEFAULT_MAX_BUBBLES, limit: int = TELEGRAM_MAX_MESSAGE_CHARS
 ) -> list[str]:
@@ -275,6 +300,7 @@ def split_into_bubbles(
     back into the last bubble so nothing is silently dropped, and every
     bubble is individually truncated to Telegram's per-message limit.
     """
+    text = enforce_style(text)
     paragraphs = [block.strip() for block in text.split("\n\n") if block.strip()]
     if not paragraphs:
         return [_truncate(text.strip() or "(no answer)", limit=limit)]

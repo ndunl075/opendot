@@ -9,6 +9,7 @@ from alfred.hermes_bridge import (
     AgentRunResult,
     HermesBridge,
     SubprocessAgentRunner,
+    enforce_style,
     split_into_bubbles,
 )
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -181,6 +182,28 @@ def test_an_answer_is_split_into_one_bubble_per_paragraph(tmp_path: Path) -> Non
 
 def test_split_keeps_a_single_paragraph_as_one_bubble() -> None:
     assert split_into_bubbles("just the one thing.") == ["just the one thing."]
+
+
+def test_em_dashes_become_sentence_breaks() -> None:
+    """SOUL.md forbids dashes and the model used one in its first live reply
+    anyway, so this rule is enforced in code rather than only asked for."""
+    assert enforce_style("not much on my end — just here.") == "not much on my end. just here."
+    assert enforce_style("3 tasks–2 overdue") == "3 tasks. 2 overdue"
+
+
+def test_plain_hyphens_are_left_alone() -> None:
+    """Hyphens are real punctuation inside words and in the short "- item"
+    lists SOUL.md allows; only clause-joining em/en dashes are rewritten."""
+    assert enforce_style("re-run the fine-grained sync") == "re-run the fine-grained sync"
+    assert enforce_style("- file taxes\n- call mom") == "- file taxes\n- call mom"
+
+
+def test_a_dash_after_sentence_punctuation_does_not_double_the_period() -> None:
+    assert enforce_style("done. — next up") == "done. next up"
+
+
+def test_bubbles_are_style_enforced_too() -> None:
+    assert split_into_bubbles("first — thing\n\nsecond one") == ["first. thing", "second one"]
 
 
 def test_split_folds_extra_paragraphs_into_the_last_bubble() -> None:
