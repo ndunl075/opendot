@@ -21,6 +21,7 @@ from .audit import AuditEvent, AuditLog
 from .db import Database
 from .jobs import JobRunner
 from .telegram import TelegramPair
+from .telegram_actions import TelegramActionWorker
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker, TelegramTransport
 from .slack import SlackOutboxWorker, SlackPair, SlackTransport
 
@@ -46,6 +47,7 @@ class RunOnceReport:
     connectors_synced: list[str]
     agent_replies: int = 0
     memories_learned: int = 0
+    actions_executed: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -126,6 +128,16 @@ class AlfredRunner:
             )
             telegram_polled = polled
 
+        actions_executed = 0
+        if transport is not None and self.telegram_pairs:
+            actions_ok, action_count = self._safe(
+                "telegram_actions",
+                lambda: TelegramActionWorker(self.database).run_pending(),
+                errors,
+            )
+            if actions_ok and action_count is not None:
+                actions_executed = int(action_count)
+
         ran, due_jobs = self._safe("run_due", lambda: JobRunner(self.database).run_due(), errors)
         jobs_executed = len(due_jobs) if ran and due_jobs is not None else 0
 
@@ -193,6 +205,7 @@ class AlfredRunner:
             connectors_synced=synced,
             agent_replies=agent_replies,
             memories_learned=memories_learned,
+            actions_executed=actions_executed,
             errors=errors,
         )
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import re
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .audit import AuditEvent, AuditLog
 from .db import Database
 from .events import EventStore
 from .outbox import Outbox
@@ -98,6 +99,10 @@ _FEEDBACK_OUTCOME = {
     "m": "missing_context",
     "w": "wrong_context",
 }
+_ACTION_CALLBACK = re.compile(
+    r"^aa:(?P<approval_id>[0-9a-f]{8}-[0-9a-f-]{27}):(?P<code>[yn])$",
+    re.IGNORECASE,
+)
 
 
 class TelegramGateway:
@@ -125,6 +130,8 @@ class TelegramGateway:
     #: preview-then-approve, so the wording says work is starting and never
     #: that anything was sent, created, or deleted.
     agent_ack_actions: tuple[tuple[tuple[str, ...], str], ...] = (
+        (("search the web", "search online", "look it up", "look up online", "look online"),
+         "searching the web..."),
         (("draft", "reply to", "respond to", "send an email", "send email", "email him", "email her", "email them"),
          "drafting that..."),
         (("schedule a", "schedule an", "book a", "book an", "put on my calendar", "add to my calendar",
@@ -204,6 +211,9 @@ class TelegramGateway:
     def handle(self, update: TelegramUpdate) -> TelegramReceipt:
         """Translate one update atomically; no network message is sent here."""
         if update.callback_query is not None:
+            data = update.callback_query.data or ""
+            if _ACTION_CALLBACK.fullmatch(data):
+                return self._handle_action_callback(update)
             return self._handle_feedback_callback(update)
         message = update.message
         if message is None or not message.text:
@@ -339,6 +349,84 @@ class TelegramGateway:
                 return TelegramReceipt(
                     text=messages[outcome],
                     feedback_recorded=True,
+                )
+
+    def _handle_action_callback(self, update: TelegramUpdate) -> TelegramReceipt:
+        callback = update.callback_query
+        if callback is None or callback.message is None or not callback.data:
+            raise ValueError("Telegram action callback is incomplete")
+        pair = TelegramPair(chat_id=callback.message.chat.id, user_id=callback.sender.id)
+        if pair not in self.allowed_pairs:
+            raise PermissionError("Telegram sender is not locally paired with Alfred")
+        match = _ACTION_CALLBACK.fullmatch(callback.data)
+        if match is None:
+            raise ValueError("Telegram callback is not an Alfred action")
+        approval_id = match.group("approval_id")
+        decision = "approve" if match.group("code").lower() == "y" else "reject"
+
+        self.database.migrate()
+        now = datetime.now(UTC)
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                link = connection.execute(
+                    """
+                    SELECT l.*, a.state, a.expires_at
+                    FROM telegram_action_links l
+                    JOIN approvals a ON a.id = l.approval_id
+                    WHERE l.approval_id = ?
+                    """,
+                    (approval_id,),
+                ).fetchone()
+                if link is None:
+                    raise ValueError("Telegram action target is unavailable")
+                if link["chat_id"] != pair.chat_id or link["user_id"] != pair.user_id:
+                    raise PermissionError("Telegram action does not belong to this paired sender")
+                if link["state"] != "pending":
+                    return TelegramReceipt(text=f"that action is already {link['state']}", duplicate=True)
+                if datetime.fromisoformat(link["expires_at"]) <= now:
+                    return TelegramReceipt(text="that approval expired. ask me again", duplicate=True)
+
+                stored_event = EventStore.append(
+                    connection,
+                    source="telegram",
+                    external_id=str(update.update_id),
+                    occurred_at=now,
+                    content="action decision",
+                    metadata={
+                        "chat_id": pair.chat_id,
+                        "user_id": pair.user_id,
+                        "action_callback": True,
+                        "approval_id": approval_id,
+                        "decision": decision,
+                    },
+                )
+                if not stored_event.is_new:
+                    return TelegramReceipt(text="decision already received", duplicate=True)
+                inserted = connection.execute(
+                    """
+                    INSERT INTO telegram_action_intents (
+                        approval_id, callback_query_id, feedback_update_id,
+                        decision, state, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                    ON CONFLICT(approval_id) DO NOTHING
+                    """,
+                    (approval_id, callback.id, str(update.update_id), decision, now.isoformat(), now.isoformat()),
+                ).rowcount
+                if inserted != 1:
+                    return TelegramReceipt(text="decision already received", duplicate=True)
+                AuditLog.append_in_transaction(
+                    connection,
+                    AuditEvent(
+                        actor="owner:telegram",
+                        client="telegram",
+                        tool="telegram_action_decision",
+                        outcome="recorded",
+                        result={"approval_id": approval_id, "decision": decision},
+                        correlation_id=approval_id,
+                    ),
+                )
+                return TelegramReceipt(
+                    text="approved. doing it now" if decision == "approve" else "cancelled"
                 )
 
     def _handle_new_event(

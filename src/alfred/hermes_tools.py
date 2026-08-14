@@ -53,7 +53,6 @@ _STATUS_TERMS = re.compile(
 # When a truly multi-topic request matches more than eight tools, retain the
 # tools that can safely complete an explicit action before broad read helpers.
 _TOOL_PRIORITY = (
-    "action_commit",
     "calendar_event_propose",
     "message_draft",
     "message_send_propose",
@@ -94,13 +93,13 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
     if _CALENDAR_TERMS.search(topic_text):
         selected.update({"agenda_get", "brief_get", "connector_records_get"})
         if _CALENDAR_WRITE_TERMS.search(topic_text):
-            selected.update({"calendar_event_propose", "action_commit"})
+            selected.add("calendar_event_propose")
 
     if _MAIL_TERMS.search(topic_text):
         if _MAIL_DRAFT_TERMS.search(topic_text):
-            selected.update({"message_draft", "action_commit"})
+            selected.add("message_draft")
         if _MAIL_SEND_TERMS.search(topic_text):
-            selected.update({"message_send_propose", "action_commit"})
+            selected.add("message_send_propose")
 
     if _GITHUB_TERMS.search(topic_text) and _GITHUB_WRITE_TERMS.search(topic_text):
         selected.update({"github_issue_propose", "action_commit"})
@@ -112,7 +111,7 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
         if _MEMORY_CORRECT_TERMS.search(topic_text):
             selected.update({"memory_correct", "memory_feedback"})
         if _MEMORY_FORGET_TERMS.search(topic_text):
-            selected.update({"forget", "action_commit"})
+            selected.add("forget")
 
     ordered = [name for name in _TOOL_PRIORITY if name in selected]
     return frozenset(ordered[:MAX_HERMES_TOOLS_PER_TURN])

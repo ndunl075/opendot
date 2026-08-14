@@ -162,6 +162,7 @@ def test_action_phrasing_wins_over_the_read_topic_it_overlaps_with() -> None:
     assert ack("what's my schedule tomorrow") == "checking your agenda..."
 
     assert ack("draft an email to my advisor") == "drafting that..."
+    assert ack("search the web for the latest Python release") == "searching the web..."
     assert ack("anything new in my email") == "checking your inbox..."
 
     assert ack("open an issue on the alfred repo") == "writing that issue..."

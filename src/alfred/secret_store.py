@@ -19,14 +19,17 @@ class SystemKeyringSecretStore:
     service_name = "alfred"
 
     def get_required(self, name: str) -> str:
+        value = self.get_optional(name)
+        if not value:
+            raise SecretStoreError(f"missing local credential-store secret: {name}")
+        return value
+
+    def get_optional(self, name: str) -> str | None:
         try:
             import keyring
         except ImportError as error:
             raise SecretStoreError("keyring support is not installed") from error
-        value = keyring.get_password(self.service_name, name)
-        if not value:
-            raise SecretStoreError(f"missing local credential-store secret: {name}")
-        return value
+        return keyring.get_password(self.service_name, name)
 
     def store(self, name: str, value: str) -> None:
         """Write a secret obtained by a local flow directly to the OS keyring."""
@@ -37,3 +40,14 @@ class SystemKeyringSecretStore:
         except ImportError as error:
             raise SecretStoreError("keyring support is not installed") from error
         keyring.set_password(self.service_name, name, value)
+
+    def delete(self, name: str) -> None:
+        """Remove a temporary secret; absence is already the desired state."""
+        try:
+            import keyring
+        except ImportError as error:
+            raise SecretStoreError("keyring support is not installed") from error
+        try:
+            keyring.delete_password(self.service_name, name)
+        except keyring.errors.PasswordDeleteError:
+            return

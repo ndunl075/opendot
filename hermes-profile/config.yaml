@@ -45,3 +45,8 @@ model:
   # private degraded mode when Nous is unavailable.
   fallback_providers: ["ollama-local"]
   fallback_model: "qwen3.5:9b"
+
+# Supported, read-only public web search. DDGS needs no API key; install the
+# optional package in Hermes's own environment as described in README.md.
+web:
+  search_backend: ddgs

@@ -26,10 +26,10 @@ from .config import Settings
 from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
-from .gmail import GmailActions, GmailClient, GmailSendActions
-from .github import GitHubActions, GitHubClient
-from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
-from .google_oauth import current_access_token
+from .action_executor import ActionExecutor
+from .gmail import GmailActions, GmailSendActions
+from .github import GitHubActions
+from .google_calendar import GoogleCalendarActions
 from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
@@ -39,7 +39,6 @@ from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
 from .policy import ApprovalService, PolicyError, PolicyStore
 from .reminders import ReminderStore
-from .secret_store import SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
@@ -189,11 +188,7 @@ def create_server(
 
     @server.tool()
     def message_draft(to: str, subject: str, body: str) -> dict:
-        """Preview a Gmail draft; nothing reaches Gmail until action_commit confirms it.
-
-        This creates a draft only -- Alfred's code never calls a send
-        endpoint. Sending is connector order's next phase and stays unbuilt.
-        """
+        """Preview a Gmail draft; nothing reaches Gmail until a human confirms it."""
         policy.require_write(client_id, "message_draft")
         actions = GmailActions(database, approvals)
         approval = actions.propose_draft(actor=f"mcp:{client_id}", to=to, subject=subject, body=body)
@@ -220,42 +215,9 @@ def create_server(
     def action_commit(approval_id: str, token: str) -> dict:
         """Consume a fresh approval token and perform the action it previewed."""
         policy.require_write(client_id, "action_commit")
-        actor = f"mcp:{client_id}"
-        approval = approvals.get(approval_id)
-        if approval is None:
-            raise PolicyError("approval does not exist")
-        if approval.action_type == "memory_forget":
-            receipt = MemoryActions(database, approvals).execute_forget(approval_id, actor=actor, token=token)
-            return receipt.model_dump(mode="json")
-        if approval.action_type == "calendar_event_create":
-            client = GoogleCalendarClient(current_access_token(SystemKeyringSecretStore()))
-            try:
-                receipt = GoogleCalendarActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
-            finally:
-                client.close()
-            return receipt.model_dump(mode="json")
-        if approval.action_type == "gmail_draft_create":
-            client = GmailClient(current_access_token(SystemKeyringSecretStore()))
-            try:
-                receipt = GmailActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
-            finally:
-                client.close()
-            return receipt.model_dump(mode="json")
-        if approval.action_type == "github_issue_create":
-            client = GitHubClient(SystemKeyringSecretStore().get_required("github-issue-token"))
-            try:
-                receipt = GitHubActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
-            finally:
-                client.close()
-            return receipt.model_dump(mode="json")
-        if approval.action_type == "gmail_message_send":
-            client = GmailClient(current_access_token(SystemKeyringSecretStore()))
-            try:
-                receipt = GmailSendActions(database, approvals, client).execute(approval_id, actor=actor, token=token)
-            finally:
-                client.close()
-            return receipt.model_dump(mode="json")
-        raise PolicyError(f"action_commit does not yet support this action type: {approval.action_type}")
+        return ActionExecutor(database).execute(
+            approval_id, actor=f"mcp:{client_id}", token=token
+        )
 
     @server.tool()
     def brief_get(now: str | None = None) -> str:

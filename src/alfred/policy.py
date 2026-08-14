@@ -214,6 +214,20 @@ class ApprovalService:
 
     def approve(self, approval_id: str, *, actor: str, now: datetime | None = None) -> IssuedApproval:
         """Approve only the original requester and issue one fresh raw token once."""
+        token = "alf_" + secrets.token_urlsafe(32)
+        return self.approve_with_token(approval_id, actor=actor, token=token, now=now)
+
+    def approve_with_token(
+        self,
+        approval_id: str,
+        *,
+        actor: str,
+        token: str,
+        now: datetime | None = None,
+    ) -> IssuedApproval:
+        """Approve with a caller-supplied token that can be escrowed before commit."""
+        if not token.startswith("alf_") or len(token) < 32:
+            raise PolicyError("approval token is malformed")
         approved_at = (now or datetime.now(UTC)).astimezone(UTC)
         self.database.migrate()
         with self.database.connect() as connection:
@@ -223,10 +237,6 @@ class ApprovalService:
                     raise PolicyError("only the requesting actor can approve this action")
                 if row["state"] != "pending":
                     raise PolicyError(f"approval is not pending: {row['state']}")
-                # URL-safe output may start with '-' and argparse then treats
-                # it as another option when pasted after ``--token``. A fixed
-                # alphabetic prefix preserves entropy and makes CLI use safe.
-                token = "alf_" + secrets.token_urlsafe(32)
                 connection.execute(
                     """
                     UPDATE approvals
@@ -240,6 +250,27 @@ class ApprovalService:
                 )
                 self._audit(connection, actor, "approval_approve", {"approval_id": approval_id})
                 return IssuedApproval(approval=approved, token=token)
+
+    def reject(self, approval_id: str, *, actor: str, now: datetime | None = None) -> Approval:
+        """Reject a still-pending proposal without issuing any authorization token."""
+        rejected_at = (now or datetime.now(UTC)).astimezone(UTC)
+        self.database.migrate()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                row = self._load_for_change(connection, approval_id, rejected_at)
+                if row["actor"] != actor:
+                    raise PolicyError("only the requesting actor can reject this action")
+                if row["state"] != "pending":
+                    raise PolicyError(f"approval is not pending: {row['state']}")
+                connection.execute(
+                    "UPDATE approvals SET state = 'rejected' WHERE id = ? AND state = 'pending'",
+                    (approval_id,),
+                )
+                rejected = self._approval_from_row(
+                    connection.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+                )
+                self._audit(connection, actor, "approval_reject", {"approval_id": approval_id})
+                return rejected
 
     def consume(self, approval_id: str, *, actor: str, token: str, now: datetime | None = None) -> Approval:
         """Consume an unexpired token exactly once before executing a consequential action."""

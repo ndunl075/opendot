@@ -139,7 +139,8 @@ def test_todays_agenda_is_answered_locally_without_starting_the_agent(tmp_path: 
     assert agent.prompts == []
     replies = _replies(database_path)
     assert replies[0][0:2] == ("hermes-reply:1:0", "telegram:20")
-    assert replies[0][2].startswith("you have 1 event today:\n- 6:30 pm: Dinner (Personal)\ncalendar checked ")
+    assert replies[0][2] == "today: 1 event\n6:30 pm: Dinner"
+    assert "http" not in replies[0][2]
     assert "added by Nico" in HermesBridge(database, agent)._direct_answer(
         "who added today's calendar events?"
     )
@@ -553,7 +554,6 @@ def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
     assert select_hermes_tools("what's going on with my inbox and github today?") == frozenset()
     assert select_hermes_tools("draft a reply to that email") == {
         "message_draft",
-        "action_commit",
     }
     assert select_hermes_tools("remember that I prefer short answers") == {
         "memory_search",
@@ -565,7 +565,9 @@ def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
         "correct memory, and show connector status"
     )
     assert len(broad) == MAX_HERMES_TOOLS_PER_TURN
-    assert "action_commit" in broad
+    assert "action_commit" not in broad
+    assert "calendar_event_propose" in broad
+    assert "message_send_propose" in broad
 
 
 def test_subprocess_runner_redacts_pii_at_the_final_hermes_boundary() -> None:

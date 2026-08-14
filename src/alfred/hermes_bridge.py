@@ -47,6 +47,7 @@ from .outbox import Outbox
 from .memory_graph import MemoryGraph
 from .models import Redactor
 from .response_feedback import ResponseFeedbackService, feedback_keyboard
+from .telegram_actions import action_keyboard
 
 #: Telegram rejects a sendMessage payload over 4096 characters outright, so a
 #: long agent answer is truncated rather than lost to a failed delivery.
@@ -89,7 +90,7 @@ _ACADEMIC_TERMS = re.compile(
     re.IGNORECASE,
 )
 _CALENDAR_PROVENANCE_TERMS = re.compile(
-    r"\b(?:added|calendar|created|creator|organized|organizer|owner|whose|who)\b",
+    r"\b(?:added|created|creator|organized|organizer|owner|whose|who|which calendar)\b",
     re.IGNORECASE,
 )
 _LOW_VALUE_GMAIL_LABELS = frozenset(
@@ -373,6 +374,7 @@ class HermesBridge:
                     "external_id": row["external_id"],
                     "content": row["content"] or "",
                     "chat_id": chat_id,
+                    "user_id": metadata.get("user_id"),
                     "occurred_at": row["occurred_at"],
                 }
             )
@@ -427,6 +429,8 @@ class HermesBridge:
             detail=result.detail,
             telemetry=telemetry,
             context_trace=context_trace,
+            user_id=event.get("user_id"),
+            approval_requested_since=bridge_started_at,
         )
 
     def _direct_answer(self, request: str) -> str | None:
@@ -508,13 +512,7 @@ class HermesBridge:
             if payload.get("primary"):
                 calendar_labels["primary"] = label
 
-        successful_syncs = [
-            str(row["last_success_at"])
-            for row in calendar_states
-            if row["last_success_at"] and not row["last_error"]
-        ]
-        freshness = max(successful_syncs) if successful_syncs else str(catalog_state["last_success_at"])
-        events: list[tuple[datetime | None, str, str, str | None, str | None]] = []
+        events: list[tuple[datetime | None, str, str, str | None]] = []
         for row in rows:
             payload = json.loads(row["payload_json"])
             start_value = payload.get("start")
@@ -540,8 +538,7 @@ class HermesBridge:
                 added_by = None
                 if isinstance(creator, dict):
                     added_by = str(creator.get("displayName") or creator.get("email") or "") or None
-                url = payload.get("html_url") or payload.get("html_link")
-                events.append((start, title, calendar_label, added_by, str(url) if url else None))
+                events.append((start, title, calendar_label, added_by))
 
         events.sort(
             key=lambda item: (
@@ -555,22 +552,27 @@ class HermesBridge:
         if not events and incomplete:
             return "I don't see anything today on the calendars I could check, but my calendar coverage is incomplete."
         if not events:
-            return f"your calendar is clear today.\ncalendar checked {freshness}."
+            return "your calendar is clear today."
 
-        lines = [f"you have {len(events)} event{'s' if len(events) != 1 else ''} today:"]
-        show_added_by = bool(_CALENDAR_PROVENANCE_TERMS.search(request) and re.search(r"\bwho\b|\badded\b|\bcreated\b|\bcreator\b", request, re.IGNORECASE))
-        for start, title, calendar_label, added_by, url in events[:8]:
+        lines = [f"today: {len(events)} event{'s' if len(events) != 1 else ''}"]
+        show_provenance = bool(_CALENDAR_PROVENANCE_TERMS.search(request))
+        show_added_by = bool(
+            show_provenance
+            and re.search(r"\bwho\b|\badded\b|\bcreated\b|\bcreator\b", request, re.IGNORECASE)
+        )
+        for start, title, calendar_label, added_by in events[:3]:
             when = "all day" if start is None else start.strftime("%I:%M %p").lstrip("0").lower()
-            provenance = calendar_label
-            if show_added_by and added_by:
-                provenance += f", added by {added_by}"
-            source_link = f" {url}" if url else ""
-            lines.append(f"- {when}: {title} ({provenance}){source_link}")
-        if len(events) > 8:
-            lines.append(f"- plus {len(events) - 8} more")
+            detail = ""
+            if show_provenance:
+                detail = f" ({calendar_label}"
+                if show_added_by and added_by:
+                    detail += f", added by {added_by}"
+                detail += ")"
+            lines.append(f"{when}: {title}{detail}")
+        if len(events) > 3:
+            lines.append(f"plus {len(events) - 3} more")
         if incomplete:
-            lines.append("one selected calendar could not be checked, so this may not be complete.")
-        lines.append(f"calendar checked {freshness}.")
+            lines.append("one calendar couldn't be checked, so this may be incomplete.")
         return "\n".join(lines)
 
     def _calendar_context_freshness(self) -> str | None:
@@ -930,22 +932,13 @@ class HermesBridge:
         detail: str,
         telemetry: dict[str, Any] | None = None,
         context_trace: dict[str, Any] | None = None,
+        user_id: int | None = None,
+        approval_requested_since: str | None = None,
     ) -> HermesBridgeReceipt:
         bubbles = split_into_bubbles(text, max_bubbles=self.max_bubbles)
         with self.database.connect() as connection:
             with self.database.transaction(connection):
-                for index, bubble in enumerate(bubbles):
-                    # Index 0 is what _pending()'s NOT EXISTS checks, so the
-                    # whole set is claimed atomically with the first bubble.
-                    payload: dict[str, Any] = {"text": bubble}
-                    if ok and index == len(bubbles) - 1:
-                        payload["reply_markup"] = feedback_keyboard(external_id)
-                    Outbox.enqueue(
-                        connection,
-                        destination=f"telegram:{chat_id}",
-                        payload=payload,
-                        idempotency_key=f"hermes-reply:{external_id}:{index}",
-                    )
+                approvals: list[tuple[str, str]] = []
                 if ok:
                     trace = context_trace or {"sources": [], "freshness": {}, "items": []}
                     ResponseFeedbackService.record_context_in_transaction(
@@ -954,6 +947,46 @@ class HermesBridge:
                         sources=list(trace.get("sources") or []),
                         freshness=dict(trace.get("freshness") or {}),
                         items=list(trace.get("items") or []),
+                    )
+                    if isinstance(user_id, int) and approval_requested_since:
+                        rows = connection.execute(
+                            """
+                            SELECT id, action_type FROM approvals
+                            WHERE actor = 'mcp:hermes'
+                              AND state = 'pending'
+                              AND requested_at >= ?
+                            ORDER BY requested_at, id
+                            LIMIT 3
+                            """,
+                            (approval_requested_since,),
+                        ).fetchall()
+                        now = datetime.now(UTC).isoformat()
+                        approvals = [(str(row["id"]), str(row["action_type"])) for row in rows]
+                        for approval_id, action_type in approvals:
+                            connection.execute(
+                                """
+                                INSERT INTO telegram_action_links (
+                                    approval_id, response_update_id, chat_id, user_id,
+                                    action_type, created_at
+                                ) VALUES (?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(approval_id) DO NOTHING
+                                """,
+                                (approval_id, external_id, chat_id, user_id, action_type, now),
+                            )
+                for index, bubble in enumerate(bubbles):
+                    # Index 0 is what _pending()'s NOT EXISTS checks, so the
+                    # whole set is claimed atomically with the first bubble.
+                    payload: dict[str, Any] = {"text": bubble}
+                    if ok and index == len(bubbles) - 1:
+                        feedback_rows = feedback_keyboard(external_id)["inline_keyboard"]
+                        payload["reply_markup"] = action_keyboard(
+                            approvals, existing_rows=feedback_rows
+                        )
+                    Outbox.enqueue(
+                        connection,
+                        destination=f"telegram:{chat_id}",
+                        payload=payload,
+                        idempotency_key=f"hermes-reply:{external_id}:{index}",
                     )
                 AuditLog.append_in_transaction(
                     connection,

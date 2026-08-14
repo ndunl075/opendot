@@ -91,6 +91,19 @@ supports this for development; no separate git repo needed yet):
 hermes profile install .\hermes-profile
 ```
 
+Install Hermes's supported no-key web-search dependency in the same Python
+environment Hermes uses:
+
+```powershell
+& "$env:LOCALAPPDATA\hermes\hermes-agent\venv\Scripts\python.exe" -m pip install ddgs
+hermes -p alfred config set web.search_backend ddgs
+```
+
+The profile already declares that backend in `config.yaml`; the second command
+also applies it immediately to an existing installation. Web search is
+read-only. Calendar, Gmail, and GitHub writes continue through Alfred Core's
+proposal and Telegram approval boundary.
+
 (Not `--alias alfred` -- see point 2 in the verification-status note above.
 The profile name comes from `distribution.yaml`'s `name: alfred` automatically.)
 
