@@ -107,11 +107,15 @@ the saved credential, and performs the first sync. The native reader
 checks the feed every 15 minutes when `alfred run` includes `--canvas-ical`,
 uses ETag/Last-Modified conditional requests, and stores only assignment title,
 deadline, course label when present, a query-free source link, status, and
-versioned evidence. It never stores the feed URL or event description. Canvas's
+versioned evidence. It never stores the feed URL or event description. If the
+same item also arrives through a Google Calendar subscription, exact matches
+on title and time are shown once in briefs and academic memory, with the native
+Canvas evidence preferred. Canvas's
 iCal export is less complete than the API: it omits To Do/submission state and
 is limited by Canvas to 30 past days, 366 future days, and 1,000 items. Remove
-the same Canvas subscription from Google Calendar when enabling this native
-path, or the assignment can appear through both connectors.
+the same Canvas subscription from Google Calendar later if you do not want the
+redundant raw calendar evidence; it is no longer required to prevent duplicate
+briefing or memory entries.
 
 Google Health is also read-only and opt-in—and, unlike Calendar/Gmail/Canvas/
 GitHub above, it has not been exercised against a real wearable-linked account.

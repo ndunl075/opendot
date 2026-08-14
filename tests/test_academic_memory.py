@@ -119,3 +119,40 @@ def test_canvas_assignments_are_grouped_by_course(tmp_path: Path) -> None:
     )
     assert '"academic_history"' in prompt
     assert "Problem Set 3" in prompt
+
+
+def test_rollups_prefer_canvas_evidence_over_an_identical_google_calendar_copy(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            _calendar_event(
+                connection,
+                event_id="google-copy",
+                title="Project 1 [CSE 2231]",
+                start="2026-08-14T22:00:00Z",
+                updated="2026-08-01T12:00:00Z",
+            )
+            EventStore.append(
+                connection,
+                source="canvas",
+                external_id="canvas-ical:canvas-copy:v1",
+                occurred_at=datetime(2026, 8, 1, 12, tzinfo=UTC),
+                content="Project 1 [CSE 2231]",
+                metadata={
+                    "assignment_id": "canvas-copy",
+                    "kind": "assignment",
+                    "due_at": "2026-08-14T18:00:00-04:00",
+                    "course_name": "CSE 2231",
+                    "html_url": None,
+                    "source_connector": "canvas_ical",
+                },
+            )
+
+    result = AcademicMemoryService(database).rebuild_if_changed()
+    found = AcademicMemoryService(database).search("Project 1")
+
+    assert result.source_events == 2
+    assert result.items == result.groups == 1
+    assert found.groups[0]["label"] == "CSE 2231"
+    assert found.days[0]["items"][0]["stable_key"] == "canvas:canvas-copy"

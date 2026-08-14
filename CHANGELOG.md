@@ -21,6 +21,8 @@ only bumps the minor version — see RELEASING.md).
 
 - Canvas Calendar Feed setup now has one guided, secret-safe command that
   validates before saving and repairs an exact accidental double-paste.
+- Briefs and academic memory now collapse an exact Canvas/Google Calendar
+  title-and-time match, preferring the native Canvas evidence.
 
 - Slack app setup (`deploy/slack-app/`): a ready-to-paste manifest
   (`manifest.yml`) configuring OAuth scopes, event subscriptions, and
