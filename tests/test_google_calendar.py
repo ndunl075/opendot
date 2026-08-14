@@ -159,6 +159,30 @@ def test_http_client_uses_read_only_events_list_contract() -> None:
     assert cursor == "next"
 
 
+def test_http_client_encodes_hash_in_holiday_calendar_id() -> None:
+    calendar_id = "en.usa#holiday@group.v.calendar.google.com"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.raw_path.startswith(
+            b"/calendar/v3/calendars/en.usa%23holiday%40group.v.calendar.google.com/events"
+        )
+        return httpx.Response(200, json={"items": [], "nextSyncToken": "next"})
+
+    client = GoogleCalendarClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        events, cursor = client.list_events(
+            calendar_id=calendar_id,
+            sync_token=None,
+            time_min=datetime(2026, 8, 10, tzinfo=UTC),
+            time_max=None,
+        )
+    finally:
+        client.close()
+
+    assert events == []
+    assert cursor == "next"
+
+
 def test_http_client_lists_calendars_selected_in_the_google_ui() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/calendar/v3/users/me/calendarList"

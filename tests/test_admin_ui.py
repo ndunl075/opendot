@@ -189,6 +189,30 @@ def test_connector_icon_falls_back_to_a_generic_glyph_for_an_unknown_connector()
     assert "<path" in icon
 
 
+def test_connector_icon_returns_the_real_browseros_mark_not_the_generic_fallback() -> None:
+    icon = _connector_icon("browseros")
+
+    assert "connector-icon-browseros" in icon
+    assert "connector-icon-generic" not in icon
+    assert "<path" in icon
+
+
+def test_connectors_page_always_includes_a_live_browseros_row(tmp_path: Path) -> None:
+    # No sync_state rows at all -- browseros isn't sync_state-derived, so it
+    # must still show up even when every other connector is empty.
+    database = Database(tmp_path / "alfred.db")
+    client = _client(database)
+    _login(client)
+
+    response = client.get("/connectors")
+
+    assert "browseros" in response.text
+    assert "127.0.0.1:9200" in response.text
+    # Whatever's actually listening on 9200 in the test environment, the
+    # row must resolve to one of the two states this probe can produce.
+    assert ">Connected<" in response.text or ">Disconnected<" in response.text
+
+
 def test_audit_page_shows_redacted_records_never_raw_content(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     database.migrate()

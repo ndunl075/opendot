@@ -91,6 +91,19 @@ supports this for development; no separate git repo needed yet):
 hermes profile install .\hermes-profile
 ```
 
+Install Hermes's supported no-key web-search dependency in the same Python
+environment Hermes uses:
+
+```powershell
+& "$env:LOCALAPPDATA\hermes\hermes-agent\venv\Scripts\python.exe" -m pip install ddgs
+hermes -p alfred config set web.search_backend ddgs
+```
+
+The profile already declares that backend in `config.yaml`; the second command
+also applies it immediately to an existing installation. Web search is
+read-only. Calendar, Gmail, and GitHub writes continue through Alfred Core's
+proposal and Telegram approval boundary.
+
 (Not `--alias alfred` -- see point 2 in the verification-status note above.
 The profile name comes from `distribution.yaml`'s `name: alfred` automatically.)
 
@@ -169,3 +182,85 @@ alfred-service restart
 gateway` with your Telegram bot token. This is a live change to a system
 we've already verified working end-to-end, so it's deliberately not
 something this profile or its install steps do automatically.
+
+## 8. BrowserOS neo: give Hermes real browser hands
+
+[BrowserOS neo](https://www.browseros.com/neo/) is a standalone browser
+built for AI agents to drive -- navigate, click, fill forms, read pages --
+signed into whatever accounts you're logged into there. It runs locally and
+serves its MCP endpoint at a fixed address, `http://127.0.0.1:9200/mcp`, only
+while the app itself is open.
+
+`config.yaml` in this distribution already declares the connection:
+
+```yaml
+mcp_servers:
+  browseros-neo:
+    url: "http://127.0.0.1:9200/mcp"
+```
+
+Same caveat as the `alfred` MCP server (point 1 above): this key alone isn't
+enough if a profile update ever regenerates the live config from a version
+of this file predating this section. If `hermes -p alfred mcp list` doesn't
+show `browseros-neo`, register it directly against the live profile:
+
+```powershell
+hermes -p alfred mcp add browseros-neo
+```
+
+**Status: wired, not yet verified end-to-end.** BrowserOS neo wasn't running
+when this was set up, so the connection hasn't actually been exercised --
+open the app first, then confirm with `hermes -p alfred mcp list` (expect
+`browseros-neo` with status `✓ enabled`) and a real request, e.g. `hermes -p
+alfred chat` and ask it to open a URL.
+
+This gives Hermes the same "full access for personal use" reach as the
+`terminal`/`process` tools already in the `hermes-telegram` toolset (see
+Hermes's own `toolsets.py`) -- a real website interaction, not a sandboxed
+read, driven by anything that reaches this Telegram bot. Alfred Core's own
+MCP tools stay policy-gated and propose/approve for writes; BrowserOS and
+the terminal tools are Hermes's own core toolset and don't go through that
+boundary. See point 9 below for why that reach is not as unguarded as it
+sounds.
+
+## 9. The `approvals.deny` floor -- read this before relying on the terminal
+
+Every Telegram turn calls `hermes -p alfred -z "<prompt>"` -- one-shot, no
+TTY. Hermes's own `hermes_cli/oneshot.py` unconditionally sets
+`HERMES_YOLO_MODE=1` for that code path (there's no one to answer an
+approval prompt, so it auto-approves instead of hanging forever). Traced
+through `tools/approval.py`: yolo bypasses the normal "dangerous command"
+approval tier entirely -- `rm -rf`, `chmod -R 777`, `git reset --hard`,
+`curl | sh`, and similar all run with zero confirmation on every message
+that reaches this bot. Two things still block unconditionally, even under
+yolo: the tiny code-shipped hardline list (root-filesystem wipes, raw
+block-device overwrites, shutdown/reboot, DoS) and `approvals.deny` --
+`config.yaml`'s own user-defined glob blocklist, matched case-insensitively
+as a substring anywhere in the command line.
+
+`config.yaml` now ships ~70 deny patterns across filesystem destruction,
+destructive git operations, permission/ownership changes, remote-script
+piping, disk/partition tools, anti-recovery commands (shadow-copy deletion,
+etc.), registry/persistence/account changes, firewall changes, destructive
+database statements, and log/history erasure. They're intentionally broad
+substring matches, not narrowly scoped -- e.g. `*rm -rf*` blocks all of it,
+including everyday `rm -rf node_modules`, not just the catastrophic cases.
+A false positive costs you one manual command; the alternative is a silent
+gap. If a specific pattern gets in the way of something you actually want
+automated regularly, narrow that one pattern rather than removing it.
+
+Same profile-update caveat as points 1 and 8: if `hermes -p alfred mcp
+list`-style regeneration ever overwrites the live config with an older copy
+of this file, re-apply the `approvals:` block from this file's current
+version.
+
+## Deferred: real Claude/OpenAI model access
+
+Nous Portal's free tier is deliberately primary (`config.yaml`, point 2
+above) to keep Alfred's operational cloud-spend ceiling at $0. Hermes
+supports paid providers as a `fallback_model` (see the commented block in
+`%LOCALAPPDATA%\hermes\config.yaml`) -- OpenRouter routes to any model,
+including real Claude or GPT, and needs an `OPENROUTER_API_KEY`. Deliberately
+not configured yet: it's a real per-token cost decision (primary vs.
+fallback-only), not a technical blocker, and it's the user's call once
+there's an actual key to point at.

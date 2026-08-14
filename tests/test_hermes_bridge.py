@@ -17,6 +17,7 @@ from alfred.hermes_bridge import (
 from alfred.hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
     MAX_HERMES_TOOLS_PER_TURN,
+    is_casual_conversation,
     select_hermes_tools,
 )
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -41,6 +42,16 @@ class ScopedFakeAgent(FakeAgent):
 
     def run_scoped(self, prompt: str, *, allowed_tools: frozenset[str]) -> AgentRunResult:
         self.tool_scopes.append(allowed_tools)
+        return self(prompt)
+
+
+class RoutedFakeAgent(ScopedFakeAgent):
+    def __init__(self, result: AgentRunResult) -> None:
+        super().__init__(result)
+        self.conversation_prompts: list[str] = []
+
+    def run_conversation(self, prompt: str) -> AgentRunResult:
+        self.conversation_prompts.append(prompt)
         return self(prompt)
 
 
@@ -76,6 +87,19 @@ def _replies(database_path: Path) -> list[tuple[str, str, str]]:
             "WHERE idempotency_key LIKE 'hermes-reply:%' ORDER BY idempotency_key"
         ).fetchall()
     return [(row["idempotency_key"], row["destination"], json.loads(row["payload_json"])["text"]) for row in rows]
+
+
+class FakeReactingTelegram:
+    def __init__(self) -> None:
+        self.reactions: list[tuple[int, int, str]] = []
+
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        self.reactions.append((chat_id, message_id, emoji))
+
+
+class BrokenReactingTelegram:
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        raise RuntimeError("emoji rejected")
 
 
 def test_todays_agenda_is_answered_locally_without_starting_the_agent(tmp_path: Path) -> None:
@@ -139,7 +163,9 @@ def test_todays_agenda_is_answered_locally_without_starting_the_agent(tmp_path: 
     assert agent.prompts == []
     replies = _replies(database_path)
     assert replies[0][0:2] == ("hermes-reply:1:0", "telegram:20")
-    assert replies[0][2].startswith("you have 1 event today:\n- 6:30 pm: Dinner (Personal)\ncalendar checked ")
+    assert replies[0][2] == "today: 1 event\n6:30 pm: Dinner"
+    assert "http" not in replies[0][2]
+    assert replies[1][2] == "want me to add or change anything?"
     assert "added by Nico" in HermesBridge(database, agent)._direct_answer(
         "who added today's calendar events?"
     )
@@ -156,6 +182,132 @@ def test_non_today_calendar_question_still_uses_the_agent(tmp_path: Path) -> Non
     assert _replies(database_path) == [
         ("hermes-reply:2:0", "telegram:20", "tomorrow is clear.")
     ]
+
+
+def test_pending_chat_ids_disappear_as_soon_as_the_reply_is_stored(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(20, "tell me something useful"))
+    bridge = HermesBridge(
+        Database(database_path),
+        FakeAgent(AgentRunResult(text="here you go", ok=True)),
+    )
+
+    assert bridge.pending_chat_ids() == frozenset({20})
+
+    bridge.run_once()
+
+    assert bridge.pending_chat_ids() == frozenset()
+
+
+def test_reacts_to_the_original_message_on_a_successful_tool_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(5, "what's on my calendar tomorrow"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,  # deterministic: always roll True in this test
+        random_emoji=lambda: "\U0001f44d",  # deterministic: always pick 👍 in this test
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == [(20, 105, "\U0001f44d")]  # message_id = update_id + 100
+
+
+def test_never_reacts_when_the_dice_dont_land(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(6, "what's on my calendar tomorrow"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        telegram_transport=telegram,
+        reaction_chance=0.0,  # deterministic: never roll True
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_never_reacts_on_a_casual_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(7, "yo"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        RoutedFakeAgent(AgentRunResult(text="yo.", ok=True, tool_count=5)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_never_reacts_when_the_turn_used_no_tools(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(8, "what's on my calendar next month"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="here's next month.", ok=True, tool_count=0)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_never_reacts_on_a_failed_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(9, "what's on my calendar next month"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="", ok=False, tool_count=3, detail="agent timed out")),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_a_rejected_reaction_never_breaks_the_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(10, "what's on my calendar tomorrow"))
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        telegram_transport=BrokenReactingTelegram(),
+        reaction_chance=1.0,
+    )
+
+    result = bridge.run_once()
+
+    assert result.answered == 1
+    assert _replies(database_path)[0][2] == "tomorrow's clear."
+
+
+def test_no_reaction_without_a_configured_transport(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(11, "what's on my calendar tomorrow"))
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        reaction_chance=1.0,
+    )
+
+    result = bridge.run_once()  # must not raise for lack of a transport
+
+    assert result.answered == 1
 
 
 def test_bridge_scopes_a_task_turn_before_calling_a_scoped_agent(tmp_path: Path) -> None:
@@ -218,6 +370,24 @@ def test_inbox_and_github_are_prefetched_while_bulk_mail_stays_out_of_the_prompt
     assert "do not call connector_records_get again" in prompt
     assert prompt.count("</alfred_context>") == 1
     assert r"\u003c/alfred_context\u003e" in prompt
+    with database.connect() as connection:
+        context_row = connection.execute(
+            "SELECT sources_json, freshness_json, items_json FROM response_context WHERE response_update_id = '40'"
+        ).fetchone()
+        reply_payload = json.loads(
+            connection.execute(
+                "SELECT payload_json FROM outbox WHERE idempotency_key = 'hermes-reply:40:0'"
+            ).fetchone()[0]
+        )
+    assert json.loads(context_row["sources_json"]) == ["github", "gmail"]
+    assert json.loads(context_row["items_json"]) == [
+        {"rank": 0, "record_id": "important", "source": "gmail"}
+    ]
+    assert "Project Trayce" not in context_row["items_json"]
+    assert reply_payload["reply_markup"]["inline_keyboard"][0][0] == {
+        "callback_data": "af:40:h",
+        "text": "helpful",
+    }
 
 
 def test_a_follow_up_gets_the_recent_exchange_and_requires_a_precise_action(
@@ -262,7 +432,7 @@ def test_confirmed_memory_is_prefetched_but_candidates_are_quarantined(tmp_path:
     assert confirmed.id in prompt
     assert "prefers concise status updates" in prompt
     assert "pirate voice" not in prompt
-    assert "do not call memory_search again" in prompt
+    assert "ongoing private text conversation" in prompt
 
 
 def test_running_twice_answers_once(tmp_path: Path) -> None:
@@ -453,6 +623,27 @@ def test_context_budget_trims_current_gmail_and_github_keys() -> None:
     assert len(fitted["github"]["notifications"]) < 8
 
 
+def test_context_budget_trims_the_oldest_exchange_first() -> None:
+    context = {
+        "recent_conversation": [
+            {"user": "old-question " * 5, "assistant": "old-answer " * 5},
+            {"user": "mid-question " * 5, "assistant": "mid-answer " * 5},
+            {
+                "user": "newest question that the current message is replying to",
+                "assistant": "the most recent answer",
+            },
+        ]
+    }
+
+    fitted = _fit_context_budget(context, 300)
+
+    assert len(json.dumps(fitted, separators=(",", ":"))) <= 300
+    # The most recent exchange -- the one the current message is actually
+    # replying to -- must survive; the oldest is what gets dropped.
+    assert fitted["recent_conversation"][-1]["assistant"] == "the most recent answer"
+    assert all("old-question" not in exchange["user"] for exchange in fitted["recent_conversation"])
+
+
 class _FakeCompleted:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode
@@ -531,11 +722,41 @@ def test_subprocess_runner_passes_a_turn_local_tool_allowlist_to_hermes() -> Non
     assert HERMES_MCP_TOOL_FILTER_ENV not in __import__("os").environ
 
 
+def test_subprocess_runner_uses_no_reasoning_and_no_mcp_tools_for_conversation() -> None:
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _FakeCompleted(0, stdout="yo what's good")
+
+    result = SubprocessAgentRunner(
+        command="hermes",
+        profile="alfred",
+        conversation_model="poolside/laguna-xs-2.1:free",
+        runner=fake_run,
+    ).run_conversation("yo")
+
+    assert result.ok is True
+    argv, kwargs = calls[0]
+    assert argv == [
+        "hermes",
+        "-p",
+        "alfred",
+        "-m",
+        "poolside/laguna-xs-2.1:free",
+        "--reasoning",
+        "none",
+        "-z",
+        "yo",
+    ]
+    assert kwargs["env"][HERMES_MCP_TOOL_FILTER_ENV] == ""
+
+
 def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
     assert select_hermes_tools("what's going on with my inbox and github today?") == frozenset()
+    assert select_hermes_tools("what should i work on today?") == {"agenda_get", "brief_get"}
     assert select_hermes_tools("draft a reply to that email") == {
         "message_draft",
-        "action_commit",
     }
     assert select_hermes_tools("remember that I prefer short answers") == {
         "memory_search",
@@ -547,7 +768,44 @@ def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
         "correct memory, and show connector status"
     )
     assert len(broad) == MAX_HERMES_TOOLS_PER_TURN
-    assert "action_commit" in broad
+    assert "action_commit" not in broad
+    assert "calendar_event_propose" in broad
+    assert "message_send_propose" in broad
+
+
+def test_casual_routing_separates_chat_from_work_and_inherits_short_followups() -> None:
+    assert is_casual_conversation("yo") is True
+    assert is_casual_conversation("how are you today?") is True
+    assert is_casual_conversation("what do you think about that movie?") is True
+    assert is_casual_conversation("what should i work on today?") is False
+    assert is_casual_conversation("check my calendar") is False
+    assert is_casual_conversation("yeah do that", recent_topic_text="draft the email") is False
+
+
+def test_casual_turn_uses_the_conversation_lane(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(71, "yo"))
+    agent = RoutedFakeAgent(AgentRunResult(text="yo. what's good?", ok=True))
+
+    HermesBridge(Database(database_path), agent).run_once()
+
+    assert len(agent.conversation_prompts) == 1
+    assert agent.tool_scopes == []
+    assert "don't turn a greeting into a work check-in" in agent.conversation_prompts[0]
+
+
+def test_casual_turn_skips_slow_vector_recall_but_keeps_exact_memory(tmp_path: Path) -> None:
+    from alfred.memory_graph import MemoryGraph
+
+    database_path = tmp_path / "alfred.db"
+    graph = MemoryGraph(Database(database_path))
+    graph.remember("Nico likes ambient music while studying.")
+    _defer(database_path, _update(72, "ambient music while studying?"))
+    agent = RoutedFakeAgent(AgentRunResult(text="ambient stuff", ok=True))
+
+    HermesBridge(Database(database_path), agent, memory_graph=graph).run_once()
+
+    assert "ambient music while studying" in agent.conversation_prompts[0]
 
 
 def test_subprocess_runner_redacts_pii_at_the_final_hermes_boundary() -> None:

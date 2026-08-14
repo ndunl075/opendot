@@ -216,6 +216,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             )
         )
     agent_bridge = None
+    agent_typing_chat_ids = None
     if args.hermes_profile:
         hermes_command = args.hermes_python or args.hermes_command
         hermes_command_prefix = ("-m", "hermes_cli.main") if args.hermes_python else ()
@@ -224,18 +225,22 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             if embedding_provider is not None
             else MemoryGraph(database)
         )
-        agent_bridge = HermesBridge(
+        hermes_bridge = HermesBridge(
             database,
             SubprocessAgentRunner(
                 command=hermes_command,
                 command_prefix=hermes_command_prefix,
                 profile=args.hermes_profile,
+                conversation_model=args.hermes_conversation_model,
                 timeout_seconds=args.hermes_timeout,
                 database=database,
                 monthly_call_limit=args.hermes_monthly_call_limit,
             ),
             memory_graph=memory_graph,
-        ).run_once
+            telegram_transport=telegram_transport,
+        )
+        agent_bridge = hermes_bridge.run_once
+        agent_typing_chat_ids = hermes_bridge.pending_chat_ids
     runner = AlfredRunner(
         database,
         telegram_transport=telegram_transport,
@@ -243,11 +248,13 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         telegram_chat_ids=chat_ids,
         defer_unparsed_to_agent=bool(args.hermes_profile),
         agent_bridge=agent_bridge,
+        agent_typing_chat_ids=agent_typing_chat_ids,
         memory_learning=MemoryLearningService(database).run_once if args.hermes_profile else None,
         slack_transport=slack_bot,
         slack_pairs=slack_pairs,
         slack_channel_ids=slack_channel_ids,
         connectors=tuple(connectors),
+        background_connectors=telegram_transport is not None or slack_bot is not None,
         poll_timeout_seconds=args.poll_timeout,
         idle_sleep_seconds=args.idle_sleep,
     )
@@ -655,8 +662,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--hermes-timeout",
         type=float,
-        default=60.0,
+        default=120.0,
         help="seconds to allow one agent turn before giving up on it",
+    )
+    run.add_argument(
+        "--hermes-conversation-model",
+        default="poolside/laguna-xs-2.1:free",
+        help=(
+            "fast model used only for casual no-tool conversation "
+            "(default: poolside/laguna-xs-2.1:free)"
+        ),
     )
     run.add_argument(
         "--embedding-model",
@@ -669,8 +684,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="hard monthly cap on external Hermes turns; local direct answers do not count",
     )
     run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
-    run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")
-    run.add_argument("--idle-sleep", type=float, default=5.0, help="seconds to rest between cycles")
+    run.add_argument("--poll-timeout", type=int, default=10, help="seconds per Telegram long-poll cycle")
+    run.add_argument("--idle-sleep", type=float, default=1.0, help="seconds to rest between cycles")
     run.add_argument("--connector-interval", type=float, default=900.0, help="minimum seconds between each connector sync")
     run.add_argument("--iterations", type=int, help="stop after N cycles instead of running forever (mainly for testing)")
     service_configure = subcommands.add_parser(

@@ -1,4 +1,6 @@
 from pathlib import Path
+from threading import Event, Thread
+import time
 
 from alfred.audit import AuditLog
 from alfred.db import Database
@@ -11,13 +13,26 @@ class FakeTelegram:
     def __init__(self, updates: list[dict] | None = None) -> None:
         self.updates = updates or []
         self.sent: list[tuple[int, str]] = []
+        self.chat_actions: list[tuple[int, str]] = []
+        self.reactions: list[tuple[int, int, str]] = []
+        self.polls = 0
 
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
+        self.polls += 1
         return [update for update in self.updates if offset is None or update.get("update_id", -1) >= offset]
 
-    def send_message(self, *, chat_id: int, text: str) -> int:
+    def send_message(self, *, chat_id: int, text: str, reply_markup: dict | None = None) -> int:
         self.sent.append((chat_id, text))
         return 1
+
+    def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+        self.chat_actions.append((chat_id, action))
+
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        self.reactions.append((chat_id, message_id, emoji))
+
+    def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
+        return None
 
 
 def _reminder_update() -> dict:
@@ -96,8 +111,8 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
 
     assert report.errors == []
     assert report.agent_replies == 1
-    # Both the acknowledgement and the real answer leave in this same cycle.
-    # The ack names the topic, matched by keyword at intake (no model call).
+    # The acknowledgement and both conversational answer bubbles leave in
+    # this same cycle. The ack is matched by keyword at intake (no model call).
     assert fake.sent == [
         (20, "checking your agenda..."),
         (
@@ -105,7 +120,103 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
             "I only have your primary calendar synced right now, so I can't reliably say "
             "whether your full Google Calendar is clear.",
         ),
+        (20, "want me to check the calendar connection?"),
     ]
+    assert fake.chat_actions == []
+
+
+def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from alfred.hermes_bridge import AgentRunResult, HermesBridge
+
+    database = Database(tmp_path / "alfred.db")
+    fake = FakeTelegram(
+        [
+            {
+                "update_id": 3,
+                "message": {
+                    "message_id": 3,
+                    "date": int(datetime.now(UTC).timestamp()),
+                    "chat": {"id": 20},
+                    "from": {"id": 10},
+                    "text": "yo",
+                },
+            }
+        ]
+    )
+    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="yo. what's good?", ok=True))
+    report = AlfredRunner(
+        database,
+        telegram_transport=fake,
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        telegram_chat_ids=frozenset({20}),
+        defer_unparsed_to_agent=True,
+        agent_bridge=bridge.run_once,
+    ).run_once()
+
+    assert report.errors == []
+    assert report.agent_replies == 1
+    assert fake.sent == [(20, "yo. what's good?")]
+    assert fake.chat_actions == [(20, "typing")]
+
+
+def test_typing_status_is_refreshed_until_the_agent_finishes(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    fake = FakeTelegram()
+    agent_started = Event()
+    release_agent = Event()
+    reports: list[object] = []
+
+    def slow_agent_bridge():
+        agent_started.set()
+        assert release_agent.wait(timeout=2.0)
+        return type("Answer", (), {"answered": 1})()
+
+    runner = AlfredRunner(
+        database,
+        telegram_transport=fake,
+        telegram_chat_ids=frozenset({20}),
+        agent_bridge=slow_agent_bridge,
+        agent_typing_chat_ids=lambda: frozenset({20}),
+        typing_heartbeat_interval_seconds=0.01,
+    )
+    worker = Thread(target=lambda: reports.append(runner.run_once()))
+
+    worker.start()
+    assert agent_started.wait(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while len(fake.chat_actions) < 3 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    release_agent.set()
+    worker.join(timeout=2.0)
+
+    assert not worker.is_alive()
+    assert len(fake.chat_actions) >= 3
+    assert set(fake.chat_actions) == {(20, "typing")}
+    stopped_count = len(fake.chat_actions)
+    time.sleep(0.03)
+    assert len(fake.chat_actions) == stopped_count
+    assert reports[0].errors == []
+
+
+def test_typing_heartbeat_failure_never_blocks_the_agent(tmp_path: Path) -> None:
+    class BrokenTypingTelegram(FakeTelegram):
+        def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+            raise TimeoutError("cosmetic request failed")
+
+    called: list[str] = []
+    report = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        telegram_transport=BrokenTypingTelegram(),
+        agent_bridge=lambda: called.append("agent") or type("Answer", (), {"answered": 1})(),
+        agent_typing_chat_ids=lambda: frozenset({20}),
+        typing_heartbeat_interval_seconds=0.01,
+    ).run_once()
+
+    assert called == ["agent"]
+    assert report.agent_replies == 1
+    assert report.errors == []
 
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
@@ -154,6 +265,41 @@ def test_connector_sync_runs_once_per_configured_interval(tmp_path: Path) -> Non
     assert second.connectors_synced == []
     assert third.connectors_synced == ["canvas"]
     assert len(calls) == 2
+
+
+def test_background_connector_batch_does_not_block_telegram_cycles(tmp_path: Path) -> None:
+    started = Event()
+    release = Event()
+    completed = Event()
+
+    def slow_sync() -> None:
+        started.set()
+        release.wait(timeout=2)
+        completed.set()
+
+    fake = FakeTelegram()
+    runner = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        telegram_transport=fake,
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        telegram_chat_ids=frozenset({20}),
+        connectors=(ConnectorSync(name="slow", interval_seconds=900, run=slow_sync),),
+        background_connectors=True,
+    )
+
+    first = runner.run_once()
+    assert started.wait(timeout=1)
+    second = runner.run_once()
+
+    assert first.connectors_synced == []
+    assert second.connectors_synced == []
+    assert fake.polls == 2
+
+    release.set()
+    assert completed.wait(timeout=1)
+    third = runner.run_once()
+
+    assert third.connectors_synced == ["slow"]
 
 
 def test_a_failing_connector_does_not_stop_the_loop_or_other_connectors(tmp_path: Path) -> None:
@@ -220,6 +366,25 @@ def test_run_forever_stops_after_the_configured_iteration_count(tmp_path: Path) 
 
     # Slept between cycles but not after the final one.
     assert sleeps == [7, 7]
+
+
+def test_run_forever_retries_a_failed_telegram_poll_after_one_second(tmp_path: Path) -> None:
+    class OfflineTelegram(FakeTelegram):
+        def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
+            raise TimeoutError("offline")
+
+    sleeps: list[float] = []
+    runner = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        telegram_transport=OfflineTelegram(),
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        idle_sleep_seconds=5.0,
+        sleep=sleeps.append,
+    )
+
+    runner.run_forever(iterations=2)
+
+    assert sleeps == [1.0]
 
 
 def test_run_forever_stops_when_stop_check_reports_true(tmp_path: Path) -> None:

@@ -299,15 +299,17 @@ transport; Hermes is invoked as a one-shot subprocess (`hermes -p <profile>
 -z <message>`) and never touches Telegram itself — deliberately, since
 Hermes's own Telegram gateway does not currently work on this platform.
 
-You get a quick acknowledgement first, naming what it's looking at
-(`checking your agenda...`, `checking your inbox...`, falling back to
-`one sec`), then the answer. That ack is a keyword match rather than a
-model call, because it's produced inside the intake write transaction. That's structural, not
-cosmetic: Telegram intake runs inside a write transaction, and an agent turn
-takes seconds and opens its own connection to this same database, so it has
-to happen after that transaction closes. The acknowledgement is flushed
-before the agent runs, so it lands while the answer is still being written
-rather than arriving alongside it.
+Explicit work gets a quick acknowledgement first, naming what Alfred is
+looking at (`checking your agenda...`, `checking your inbox...`), then the
+answer. Casual conversation gets no synthetic acknowledgement and goes
+straight to the real reply; Telegram's native `typing...` status appears as
+soon as Alfred accepts it and clears automatically when the reply arrives.
+The typing hint is best effort and never blocks the durable answer path. Work
+acknowledgements are keyword matches rather
+than model calls because they're produced inside the intake write transaction.
+That's structural, not cosmetic: Telegram intake runs inside a write
+transaction, and an agent turn takes seconds and opens its own connection to
+this same database, so it has to happen after that transaction closes.
 
 The answer itself arrives as two to four consecutive messages rather than one
 block — `SOUL.md` asks the agent for short paragraphs and the bridge sends
@@ -317,10 +319,16 @@ For inbox/GitHub questions, the bridge assembles a bounded context pack from
 the already-synced local records before starting Hermes. That avoids a second
 MCP discovery/tool-call loop on the cold path. Gmail's Promotions, Social,
 and Forums categories are counted but omitted from the pack by default, and
-two recent completed chat exchanges are included so a precise follow-up such
-as `yes, flag that` keeps its referent. Synced message content remains
-untrusted data, and Gmail context is still headers/snippets only, never a full
-message body.
+two recent completed chat exchanges are included for work turns so a precise
+follow-up such as `yes, flag that` keeps its referent. Casual turns use up to
+eight completed exchanges from the last week, `poolside/laguna-xs-2.1:free`
+with reasoning disabled, exact local FTS memory recall, and an empty Alfred
+MCP tool surface. Skipping the optional vector lookup avoids waiting for an
+Ollama embedding on greetings; tool-backed and explicit memory questions keep
+hybrid vector recall and the profile's stronger `stepfun/step-3.7-flash:free`
+default. Override the casual model with `--hermes-conversation-model`. Synced
+message content remains untrusted data, and Gmail context is still
+headers/snippets only, never a full message body.
 
 The bridge also narrows Alfred's MCP surface independently for every Hermes
 turn. A deterministic classifier uses the current request plus the two recent
@@ -368,6 +376,15 @@ incorrect retrievals as append-only evaluation data. That feedback now reorders
 only the memories already selected for a matching query; it cannot inject an
 unrelated popular memory into the candidate set.
 
+Every successful Telegram answer ends with `helpful`, `missing context`, and
+`wrong context` buttons. A tap records one vote for that response plus a
+content-free trace of source names, connector freshness, and opaque ranked
+record IDs; it stores neither the prompt nor the answer. Helpful/wrong signals
+can reorder Gmail or GitHub records only within their existing deterministic
+priority tier, while `missing context` remains an evaluation signal instead of
+guessing what was absent. Feedback callbacks are paired to the original sender,
+accept one vote per response, and never approve or execute an action.
+
 Calendar and Canvas history use a separate derived academic layer. Immutable
 connector events remain authoritative; after connector sync, Alfred
 deduplicates revisions into daily JSON rollups and course/calendar profiles,
@@ -396,14 +413,17 @@ LLM-backed ingestion and additional runtime/database surface are unnecessary
 for deterministic Calendar/Canvas facts. It can be evaluated later as an
 optional retrieval backend against the same source-linked memory tests.
 
-The agent step runs between intake and delivery, not as a connector.
-Connectors sync on a 15-minute interval and run *after* delivery, which
-stranded every answer in the outbox for an extra cycle; measured against a
-real round trip that was 26s of pure latency on top of the model call.
+The agent step runs between intake and delivery, not as a connector. When a
+chat transport is configured, periodic connectors run sequentially on one
+bounded background worker, so a long Calendar/Gmail/Canvas batch cannot stop
+Telegram from polling. Telegram's server long-poll is ten seconds by default;
+the HTTP read budget is only two seconds longer, and a failed poll retries
+after one second. This bounds the failure mode where a stuck 60-second poll
+previously hid a message even though the model itself answered in 4.7 seconds.
 
 `--hermes-command` sets which executable to run (default `hermes`; use a
 full path when PATH differs, as it can under the Windows service) and
-`--hermes-timeout` bounds one turn (default 60s). A turn that times out,
+`--hermes-timeout` bounds one turn (default 120s). A turn that times out,
 exits non-zero, or produces nothing still gets a reply saying so, and is not
 retried — an unanswered `Thinking…` and an endlessly re-run model call are
 both worse than one honest failure message.

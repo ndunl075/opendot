@@ -10,7 +10,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
 
     assert main(["--db", str(database_path), "init"]) == 0
     initialized = json.loads(capsys.readouterr().out)
-    assert initialized["schema_version"] == 12
+    assert initialized["schema_version"] == 14
 
     assert (
         main(
@@ -70,6 +70,7 @@ def test_cli_exposes_windows_safe_hermes_python_launch() -> None:
     )
 
     assert args.hermes_python == r"C:\Hermes\python.exe"
+    assert args.hermes_conversation_model == "poolside/laguna-xs-2.1:free"
 
 
 def test_cli_imports_a_vault_note_as_a_confirmed_memory(tmp_path: Path, capsys) -> None:

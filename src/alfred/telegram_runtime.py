@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 from datetime import UTC, datetime
+from threading import Event, Thread
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -18,7 +19,15 @@ from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 class TelegramTransport(Protocol):
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]: ...
 
-    def send_message(self, *, chat_id: int, text: str) -> int: ...
+    def send_message(
+        self, *, chat_id: int, text: str, reply_markup: dict | None = None
+    ) -> int: ...
+
+    def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None: ...
+
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None: ...
+
+    def answer_callback_query(self, *, callback_query_id: str, text: str) -> None: ...
 
 
 class PollResult(BaseModel):
@@ -33,6 +42,60 @@ class DeliveryResult(BaseModel):
     state: str
     telegram_message_id: int | None = None
     error: str | None = None
+
+
+class TelegramTypingHeartbeat:
+    """Refresh Telegram's short-lived typing status until a response is ready.
+
+    Chat actions are cosmetic and deliberately best effort. They run on one
+    daemon thread so a slow Bot API call cannot hold up the agent, then stop
+    before durable outbox delivery so a late refresh cannot outlive the reply.
+    """
+
+    def __init__(
+        self,
+        transport: TelegramTransport | None,
+        chat_ids: set[int] | frozenset[int],
+        *,
+        interval_seconds: float = 4.0,
+        join_timeout_seconds: float = 2.5,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("typing heartbeat interval must be positive")
+        self.transport = transport
+        self.chat_ids = tuple(sorted(chat_ids))
+        self.interval_seconds = interval_seconds
+        self.join_timeout_seconds = join_timeout_seconds
+        self._stop = Event()
+        self._thread: Thread | None = None
+
+    def __enter__(self) -> TelegramTypingHeartbeat:
+        if self.transport is not None and self.chat_ids:
+            self._thread = Thread(
+                target=self._run,
+                name="alfred-telegram-typing",
+                daemon=True,
+            )
+            self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.join_timeout_seconds)
+
+    def _run(self) -> None:
+        assert self.transport is not None
+        while not self._stop.is_set():
+            for chat_id in self.chat_ids:
+                if self._stop.is_set():
+                    return
+                try:
+                    self.transport.send_chat_action(chat_id=chat_id, action="typing")
+                except Exception:
+                    pass
+            if self._stop.wait(self.interval_seconds):
+                return
 
 
 class TelegramLongPoller:
@@ -75,7 +138,40 @@ class TelegramLongPoller:
                 continue
             try:
                 update = TelegramUpdate.model_validate(raw_update)
-                self.gateway.handle(update)
+                receipt = self.gateway.handle(update)
+                # Casual deferred messages deliberately have no synthetic
+                # text acknowledgement. Telegram's native typing indicator is
+                # the lightweight receipt instead; it expires on its own and
+                # the eventual reply clears it immediately. This is best
+                # effort so a cosmetic Bot API failure can never lose or
+                # delay the actual queued answer.
+                if (
+                    receipt.agent_deferred
+                    and not receipt.duplicate
+                    and not receipt.text.strip()
+                    and update.message is not None
+                ):
+                    try:
+                        self.transport.send_chat_action(
+                            chat_id=update.message.chat.id,
+                            action="typing",
+                        )
+                    except Exception:
+                        pass
+                if update.callback_query is not None:
+                    try:
+                        self.transport.answer_callback_query(
+                            callback_query_id=update.callback_query.id,
+                            text=receipt.text,
+                        )
+                    except Exception as error:
+                        self._audit(
+                            "telegram_callback_ack_failed",
+                            {
+                                "update_id": str(update_id),
+                                "reason": error.__class__.__name__,
+                            },
+                        )
                 handled += 1
             except (ValueError, PermissionError) as error:
                 rejected += 1
@@ -162,7 +258,18 @@ class TelegramOutboxWorker:
                 results.append(self._fail(outbox_id, "outbox payload has no text message"))
                 continue
             try:
-                message_id = self.transport.send_message(chat_id=int(match.group(1)), text=text)
+                reply_markup = payload.get("reply_markup")
+                if reply_markup is not None and not isinstance(reply_markup, dict):
+                    results.append(self._fail(outbox_id, "outbox reply markup is invalid"))
+                    continue
+                if reply_markup is None:
+                    message_id = self.transport.send_message(chat_id=int(match.group(1)), text=text)
+                else:
+                    message_id = self.transport.send_message(
+                        chat_id=int(match.group(1)),
+                        text=text,
+                        reply_markup=reply_markup,
+                    )
             except Exception as error:
                 # A timeout can still have delivered the message. Leave it failed for human review, never auto-retry.
                 results.append(self._fail(outbox_id, f"Telegram send failed: {error.__class__.__name__}"))

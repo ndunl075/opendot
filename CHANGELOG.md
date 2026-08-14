@@ -9,6 +9,9 @@ only bumps the minor version — see RELEASING.md).
 
 ### Fixed
 
+- Google Calendar REST paths now encode provider IDs as path segments, fixing
+  the built-in US Holidays calendar whose `#` previously truncated the ID and
+  surfaced only as `HTTPStatusError`.
 - `gmail-sync` bounded to the most recent `--limit` unread messages
   (default 500) instead of the entire unread backlog. An account with a
   very large unread count (found live: north of 10,000) previously
@@ -19,6 +22,10 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Telegram answers now include explicit helpful/missing/wrong context buttons.
+  Feedback stores only source/freshness/opaque-record provenance, is paired to
+  the original sender, cannot authorize actions, and has bounded influence on
+  Gmail/GitHub ordering within existing priority tiers.
 - Hermes turns now expose at most eight request-relevant Alfred MCP tools;
   inbox/GitHub reads already prefetched by the bridge expose none.
 

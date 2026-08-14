@@ -455,7 +455,7 @@ def test_calendar_event_propose_never_touches_a_google_credential(tmp_path: Path
     _grant(database_path, allowed_tools={"calendar_event_propose"})
     server = create_server(database_path)
 
-    with mock.patch("alfred.mcp_server.current_access_token", side_effect=AssertionError("must not be called")):
+    with mock.patch("alfred.action_executor.current_access_token", side_effect=AssertionError("must not be called")):
         proposed = _call(
             server,
             "calendar_event_propose",
@@ -482,8 +482,8 @@ def test_calendar_event_is_never_created_without_action_commit(tmp_path: Path) -
     issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
     fake_client = _FakeCalendarClient()
     with (
-        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
-        mock.patch("alfred.mcp_server.GoogleCalendarClient", return_value=fake_client),
+        mock.patch("alfred.action_executor.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.action_executor.GoogleCalendarClient", return_value=fake_client),
     ):
         receipt = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
 
@@ -513,8 +513,8 @@ def test_action_commit_replays_a_calendar_event_instead_of_creating_twice(tmp_pa
     fake_client = _FakeCalendarClient()
 
     with (
-        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
-        mock.patch("alfred.mcp_server.GoogleCalendarClient", return_value=fake_client),
+        mock.patch("alfred.action_executor.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.action_executor.GoogleCalendarClient", return_value=fake_client),
     ):
         first = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
         second = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
@@ -551,8 +551,8 @@ def test_message_draft_never_creates_a_draft_without_action_commit(tmp_path: Pat
     issued = ApprovalService(Database(database_path)).approve(proposed["id"], actor="mcp:local-mcp")
     fake_client = _FakeGmailClient()
     with (
-        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
-        mock.patch("alfred.mcp_server.GmailClient", return_value=fake_client),
+        mock.patch("alfred.action_executor.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.action_executor.GmailClient", return_value=fake_client),
     ):
         receipt = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
 
@@ -579,8 +579,8 @@ def test_action_commit_replays_a_gmail_draft_instead_of_creating_twice(tmp_path:
     fake_client = _FakeGmailClient()
 
     with (
-        mock.patch("alfred.mcp_server.current_access_token", return_value="FAKE_TOKEN"),
-        mock.patch("alfred.mcp_server.GmailClient", return_value=fake_client),
+        mock.patch("alfred.action_executor.current_access_token", return_value="FAKE_TOKEN"),
+        mock.patch("alfred.action_executor.GmailClient", return_value=fake_client),
     ):
         first = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})
         second = _call(server, "action_commit", {"approval_id": proposed["id"], "token": issued.token})

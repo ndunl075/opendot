@@ -45,3 +45,129 @@ model:
   # private degraded mode when Nous is unavailable.
   fallback_providers: ["ollama-local"]
   fallback_model: "qwen3.5:9b"
+
+# Supported, read-only public web search. DDGS needs no API key; install the
+# optional package in Hermes's own environment as described in README.md.
+web:
+  search_backend: ddgs
+
+# BrowserOS neo (https://www.browseros.com/neo/) gives Hermes real browser
+# hands -- navigate, click, fill forms, read pages -- in a dedicated
+# agent-driven browser signed into whatever sites you're logged into there.
+# It runs locally and must already be open for this to connect; the URL is
+# fixed (BrowserOS neo always serves its MCP endpoint on 127.0.0.1:9200).
+# See hermes-profile/README.md's BrowserOS section for the manual-setup
+# alternative (`hermes -p alfred mcp add browseros-neo`) if this file's copy
+# ever gets overwritten by a profile update.
+mcp_servers:
+  browseros-neo:
+    url: "http://127.0.0.1:9200/mcp"
+
+# Every Telegram turn runs through `hermes -z` (one-shot, no TTY), which
+# unconditionally sets HERMES_YOLO_MODE=1 -- there's no one there to answer
+# an approval prompt, so Hermes auto-approves everything in the normal
+# "dangerous command" tier (rm -rf, chmod -R 777, git reset --hard, curl|sh,
+# etc). This list is the one thing that still blocks those unconditionally,
+# same floor as the code-shipped hardline list -- not even --yolo bypasses
+# it. Deliberately broad substring matches (case-insensitive, matched
+# anywhere in the command line) over precision: a false-positive just means
+# running something yourself once instead of Alfred doing it. Loosen an
+# individual pattern (e.g. narrow "*rm -rf*" to "*rm -rf ~*") if it blocks
+# something you actually want automated often.
+approvals:
+  deny:
+    # -- Filesystem destruction (non-root but still costly/irreversible) --
+    - "*rm -rf*"
+    - "*rm -fr*"
+    - "*rm -r -f*"
+    - "*rd /s*"
+    - "*remove-item*-recurse*-force*"
+    - "*remove-item*-force*-recurse*"
+    - "*del /f /s /q*"
+    - "*shred *"
+    - "*wipefs*"
+    - "*sdelete*"
+
+    # -- Git: history/branch destruction, not everyday commits --
+    - "*git reset --hard*"
+    - "*git clean -fdx*"
+    - "*git clean -xdf*"
+    - "*git clean -fd*"
+    - "*git push*--force*"
+    - "*git push*-f *"
+    - "*git filter-branch*"
+    - "*git filter-repo*"
+    - "*git update-ref -d*"
+    - "*git branch -d*"
+    - "*git branch -D*"
+
+    # -- Permission/ownership blast radius --
+    - "*chmod -r 777*"
+    - "*chmod 777 /*"
+    - "*chmod -r 000*"
+    - "*chown -r*"
+    - "*icacls*grant*everyone*"
+    - "*takeown*"
+
+    # -- Piping a remote script straight into a shell (supply-chain risk) --
+    - "*curl*|*sh*"
+    - "*curl*|*bash*"
+    - "*wget*|*sh*"
+    - "*wget*|*bash*"
+    - "*iwr*|*iex*"
+    - "*invoke-webrequest*|*invoke-expression*"
+    - "*invoke-expression*downloadstring*"
+    - "*curl*-o*/tmp/*&&*chmod*+x*"
+
+    # -- Disk/partition tools --
+    - "*mkfs*"
+    - "*fdisk*"
+    - "*diskpart*"
+    - "*format *:*"
+    - "*dd if=*of=/dev/*"
+    - "*dd if=*of=\\\\.\\*"
+    - "*clear-disk*"
+    - "*format-volume*"
+    - "*remove-partition*"
+
+    # -- Ransomware-style anti-recovery moves --
+    - "*vssadmin delete shadows*"
+    - "*vssadmin resize shadowstorage*"
+    - "*wbadmin delete*"
+    - "*bcdedit*"
+    - "*cipher /w*"
+
+    # -- Registry, persistence, accounts (Windows) --
+    - "*reg delete*"
+    - "*reg add*\\run*"
+    - "*net user*/delete*"
+    - "*net localgroup administrators*/add*"
+    - "*schtasks*/delete*/f*"
+    - "*schtasks*/create*/ru system*"
+
+    # -- Firewall / network surface --
+    - "*netsh advfirewall*"
+    - "*netsh firewall*"
+    - "*iptables -f*"
+    - "*iptables --flush*"
+    - "*disable-netfirewallrule*"
+
+    # -- Databases: irreversible without a backup --
+    - "*drop database*"
+    - "*drop table*"
+    - "*drop schema*"
+    - "*truncate table*"
+
+    # -- Log/history erasure (anti-forensics feel) --
+    - "*wevtutil cl*"
+    - "*clear-eventlog*"
+    - "*history -c*"
+    - "*rm*.bash_history*"
+
+    # -- Scheduled-task / cron wipe --
+    - "*crontab -r*"
+
+    # -- Process manager / service-level destruction --
+    - "*sc delete*"
+    - "*sc.exe delete*"
+    - "*stop-service*-force*"

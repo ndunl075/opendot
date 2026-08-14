@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -88,7 +89,9 @@ class GoogleCalendarClient:
         items: list[dict[str, Any]] = []
         next_sync_token: str | None = None
         while True:
-            response = self._client.get(f"/calendars/{calendar_id}/events", params=params)
+            response = self._client.get(
+                f"/calendars/{_path_segment(calendar_id)}/events", params=params
+            )
             if response.status_code == 410 and sync_token:
                 raise SyncTokenExpired("Google Calendar sync token expired")
             response.raise_for_status()
@@ -134,7 +137,7 @@ class GoogleCalendarClient:
     ) -> dict[str, Any]:
         """Create one event, recovering a duplicate custom ID after an uncertain retry."""
         response = self._client.post(
-            f"/calendars/{calendar_id}/events",
+            f"/calendars/{_path_segment(calendar_id)}/events",
             json={
                 "id": event_id,
                 "summary": summary,
@@ -146,7 +149,9 @@ class GoogleCalendarClient:
             # A prior call may have reached Calendar just before Alfred crashed
             # or lost its response.  The stable event ID makes this a safe
             # recovery lookup rather than a second create.
-            response = self._client.get(f"/calendars/{calendar_id}/events/{event_id}")
+            response = self._client.get(
+                f"/calendars/{_path_segment(calendar_id)}/events/{_path_segment(event_id)}"
+            )
         response.raise_for_status()
         return response.json()
 
@@ -625,6 +630,16 @@ def _event_identity(value: Any) -> dict[str, Any] | None:
 
 def _rfc3339(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _path_segment(value: str) -> str:
+    """Encode provider IDs before placing them in a Calendar REST path.
+
+    Google calendar IDs can contain ``#`` (notably the built-in US Holidays
+    calendar). An unescaped hash starts a URL fragment, so the server receives
+    only the text before it and returns a misleading 404/HTTPStatusError.
+    """
+    return quote(value, safe="")
 
 
 def _calendar_event_id(approval_id: str) -> str:
