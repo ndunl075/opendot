@@ -8,6 +8,7 @@ from alfred.admin_ui import (
     _CONNECTOR_ICON_PATHS,
     _connector_icon,
     _format_dt,
+    _rate,
     _result_preview,
     _status_label,
     create_admin_app,
@@ -211,6 +212,58 @@ def test_connectors_page_always_includes_a_live_browseros_row(tmp_path: Path) ->
     # Whatever's actually listening on 9200 in the test environment, the
     # row must resolve to one of the two states this probe can produce.
     assert ">Connected<" in response.text or ">Disconnected<" in response.text
+
+
+def test_rate_filter_distinguishes_unmeasured_from_zero() -> None:
+    # A fresh install has not scored 0%, it has not been scored at all.
+    assert _rate(None) == "—"
+    assert _rate(0.0) == "0%"
+    assert _rate(1.0) == "100%"
+    assert _rate(0.666) == "67%"
+
+
+def test_evaluation_page_renders_with_no_feedback_yet(tmp_path: Path) -> None:
+    client = _client(Database(tmp_path / "alfred.db"))
+    _login(client)
+
+    response = client.get("/evaluation")
+
+    assert response.status_code == 200
+    assert "Evaluation" in response.text
+    assert "nothing to attribute" in response.text
+
+
+def test_evaluation_page_shows_rates_and_source_attribution(tmp_path: Path) -> None:
+    from alfred.response_feedback import ResponseFeedbackService
+
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            for index, outcome in enumerate(["helpful", "helpful", "wrong_context", "helpful"]):
+                response_id = str(700 + index)
+                ResponseFeedbackService.record_context_in_transaction(
+                    connection,
+                    response_update_id=response_id,
+                    sources=["gmail"],
+                    freshness={"gmail": None},
+                    items=[],
+                )
+                ResponseFeedbackService.record_feedback_in_transaction(
+                    connection,
+                    callback_query_id=f"callback-{index}",
+                    feedback_update_id=str(800 + index),
+                    response_update_id=response_id,
+                    outcome=outcome,
+                )
+    client = _client(database)
+    _login(client)
+
+    response = client.get("/evaluation")
+
+    assert "75%" in response.text  # three helpful of four votes
+    assert "gmail" in response.text
+    assert "nothing to attribute" not in response.text
 
 
 def test_audit_page_shows_redacted_records_never_raw_content(tmp_path: Path) -> None:

@@ -346,6 +346,18 @@ enters the report. Telegram's source timestamp has one-second resolution, so
 acknowledgement and delivered totals are best treated as operator-facing
 end-to-end measurements rather than a microbenchmark.
 
+`alfred evaluation-status --window-days 30` closes the other half of that loop.
+Alfred already recorded response feedback, memory retrieval outcomes, workflow
+proposal decisions, and implicit-candidate promotion; this reads them back as
+one summary instead of leaving four tables nobody queries. It also reports
+which context sources were present when each feedback vote landed — a starting
+point for "why was that answer wrong", not proof of cause, since a turn packs
+several sources at once. The same summary is a page in the admin UI. Nothing
+here runs a model, writes a row, or changes ranking, and the output is
+content-free (outcomes, counts, source names, opaque record IDs), so it is
+safe to paste into an issue. A metric with no votes yet reports `null` rather
+than `0` — a system nobody has rated is not a system that scored zero.
+
 Hermes ACP and `serve` were evaluated as ways to remove the one-shot process
 start. ACP passes its compatibility check, but its tool surface is fixed when
 a session is created, while Alfred narrows MCP tools for every turn. Creating
@@ -650,8 +662,8 @@ controls.
 ## Admin dashboard
 
 `alfred admin-ui-run` serves a small, read-only web dashboard: today's
-agenda, pending approvals, connector health, and the recent audit trail, at
-`http://127.0.0.1:8200`. There was no shape spec for this anywhere in
+agenda, pending approvals, connector health, evaluation signals, and the
+recent audit trail, at `http://127.0.0.1:8200`. There was no shape spec for this anywhere in
 ARCHITECTURE.md—unlike everything else built this session—so it's a
 deliberate design choice: one page per concern, no write actions (approving
 a pending action still goes through `alfred approval-approve`, never a

@@ -47,6 +47,7 @@ from .briefing import BriefingService
 from .browseros_health import browseros_health
 from .connector_health import connector_health
 from .db import Database
+from .evaluation import EvaluationService
 from .http_auth import bearer_token
 from .policy import ApprovalService
 
@@ -193,10 +194,23 @@ def _outcome_label(outcome: str) -> str:
     return _OUTCOME_LABELS.get(outcome, outcome.replace("_", " ").title())
 
 
+def _rate(value: float | None) -> str:
+    """Render a ratio as a percentage, distinguishing "none yet" from zero.
+
+    An em dash rather than 0% when nothing has been measured: a fresh install
+    with no feedback votes has not scored 0, it has not been scored at all,
+    and showing 0% would read as a failing system.
+    """
+    if value is None:
+        return "—"
+    return f"{round(value * 100)}%"
+
+
 _env.filters["dt"] = _format_dt
 _env.filters["connector_icon"] = _connector_icon
 _env.filters["status_label"] = _status_label
 _env.filters["outcome_label"] = _outcome_label
+_env.filters["rate"] = _rate
 
 
 class _SessionAuthMiddleware(BaseHTTPMiddleware):
@@ -270,6 +284,13 @@ def create_admin_app(database: Database, *, bearer_token_value: str) -> Starlett
         connectors = [*connector_health(database), browseros_health()]
         return _render("connectors.html", active="connectors", connectors=connectors)
 
+    async def evaluation_page(request: Request) -> Response:
+        return _render(
+            "evaluation.html",
+            active="evaluation",
+            report=EvaluationService(database).report(),
+        )
+
     async def audit_page(request: Request) -> Response:
         records = AuditLog(database).recent(limit=50)
         return _render(
@@ -284,6 +305,7 @@ def create_admin_app(database: Database, *, bearer_token_value: str) -> Starlett
             Route("/", overview),
             Route("/approvals", approvals_page),
             Route("/connectors", connectors_page),
+            Route("/evaluation", evaluation_page),
             Route("/audit", audit_page),
         ],
         middleware=[],

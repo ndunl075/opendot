@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Evaluation{% endblock %}
+{% block page_title %}Evaluation{% endblock %}
+{% block page_meta %}last {{ report.window_days }} days{% endblock %}
+{% block content %}
+  <div class="section">
+    <p class="section-label">Signal summary</p>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-value">{{ report.response_feedback.positive_rate|rate }}</div>
+        <div class="stat-label">Answers marked helpful</div>
+        <div class="stat-meta">{{ report.response_feedback.total }} vote{{ '' if report.response_feedback.total == 1 else 's' }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ report.retrieval_feedback.positive_rate|rate }}</div>
+        <div class="stat-label">Memory recalled relevantly</div>
+        <div class="stat-meta">{{ report.retrieval_feedback.total }} vote{{ '' if report.retrieval_feedback.total == 1 else 's' }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ report.workflows.acceptance_rate|rate }}</div>
+        <div class="stat-label">Workflows accepted</div>
+        <div class="stat-meta">{{ report.workflows.pending }} awaiting review</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ report.memory_learning.promotion_rate|rate }}</div>
+        <div class="stat-label">Candidates promoted</div>
+        <div class="stat-meta">{{ report.memory_learning.candidates }} observed</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <p class="section-label">Response feedback</p>
+    <div class="card">
+      {% for outcome, count in report.response_feedback.counts.items() %}
+        <div class="row">
+          <div class="row-title">{{ outcome|outcome_label }}</div>
+          <div class="row-meta">{{ count }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="section">
+    <p class="section-label">Context sources when feedback was given</p>
+    <div class="card">
+      {% for source in report.sources %}
+        <div class="row">
+          <div class="row-title">{{ source.source|connector_icon }} {{ source.source }}</div>
+          <div class="row-meta">
+            {{ source.helpful }} helpful · {{ source.missing_context }} missing · {{ source.wrong_context }} wrong
+          </div>
+        </div>
+      {% else %}
+        <div class="empty-state">No feedback votes yet, so there is nothing to attribute.</div>
+      {% endfor %}
+    </div>
+    <p class="section-note">
+      A turn usually packs several sources at once, so this shows what was present
+      when a vote landed — a place to start looking, not proof of cause.
+    </p>
+  </div>
+{% endblock %}
