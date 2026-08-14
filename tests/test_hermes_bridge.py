@@ -14,6 +14,11 @@ from alfred.hermes_bridge import (
     enforce_style,
     split_into_bubbles,
 )
+from alfred.hermes_tools import (
+    HERMES_MCP_TOOL_FILTER_ENV,
+    MAX_HERMES_TOOLS_PER_TURN,
+    select_hermes_tools,
+)
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -27,6 +32,16 @@ class FakeAgent:
     def __call__(self, prompt: str) -> AgentRunResult:
         self.prompts.append(prompt)
         return self.result
+
+
+class ScopedFakeAgent(FakeAgent):
+    def __init__(self, result: AgentRunResult) -> None:
+        super().__init__(result)
+        self.tool_scopes: list[frozenset[str]] = []
+
+    def run_scoped(self, prompt: str, *, allowed_tools: frozenset[str]) -> AgentRunResult:
+        self.tool_scopes.append(allowed_tools)
+        return self(prompt)
 
 
 def _update(update_id: int, text: str, *, chat_id: int = 20, user_id: int = 10, date: int = 0) -> TelegramUpdate:
@@ -141,6 +156,16 @@ def test_non_today_calendar_question_still_uses_the_agent(tmp_path: Path) -> Non
     assert _replies(database_path) == [
         ("hermes-reply:2:0", "telegram:20", "tomorrow is clear.")
     ]
+
+
+def test_bridge_scopes_a_task_turn_before_calling_a_scoped_agent(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(3, "create a task to rotate the Canvas feed URL"))
+    agent = ScopedFakeAgent(AgentRunResult(text="task created.", ok=True))
+
+    HermesBridge(Database(database_path), agent).run_once()
+
+    assert agent.tool_scopes == [frozenset({"agenda_get", "brief_get", "task_upsert"})]
 
 
 def test_inbox_and_github_are_prefetched_while_bulk_mail_stays_out_of_the_prompt(
@@ -454,6 +479,43 @@ def test_subprocess_runner_builds_the_documented_hermes_invocation() -> None:
     # Windows would otherwise decode Hermes's em dashes and emoji with the ANSI codepage.
     assert kwargs["encoding"] == "utf-8"
     assert kwargs["check"] is False
+
+
+def test_subprocess_runner_passes_a_turn_local_tool_allowlist_to_hermes() -> None:
+    calls: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(kwargs)
+        return _FakeCompleted(0, stdout="ok")
+
+    runner = SubprocessAgentRunner(command="hermes", profile="alfred", runner=fake_run)
+    result = runner.run_scoped(
+        "create a task",
+        allowed_tools=frozenset({"task_upsert", "agenda_get"}),
+    )
+
+    assert result.ok is True
+    assert calls[0]["env"][HERMES_MCP_TOOL_FILTER_ENV] == "agenda_get,task_upsert"
+    assert HERMES_MCP_TOOL_FILTER_ENV not in __import__("os").environ
+
+
+def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
+    assert select_hermes_tools("what's going on with my inbox and github today?") == frozenset()
+    assert select_hermes_tools("draft a reply to that email") == {
+        "message_draft",
+        "action_commit",
+    }
+    assert select_hermes_tools("remember that I prefer short answers") == {
+        "memory_search",
+        "profile_get",
+        "remember",
+    }
+    broad = select_hermes_tools(
+        "create a calendar event, remind me, send email, file a github issue, "
+        "correct memory, and show connector status"
+    )
+    assert len(broad) == MAX_HERMES_TOOLS_PER_TURN
+    assert "action_commit" in broad
 
 
 def test_subprocess_runner_redacts_pii_at_the_final_hermes_boundary() -> None:

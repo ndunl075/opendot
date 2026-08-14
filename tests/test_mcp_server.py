@@ -11,7 +11,8 @@ from alfred.connector_records import ConnectorRecordStore
 from alfred.db import Database
 from alfred.gmail import _draft_message_id
 from alfred.google_calendar import _calendar_event_id
-from alfred.mcp_server import create_server, main, parse_stdio_args
+from alfred.hermes_tools import HERMES_MCP_TOOL_FILTER_ENV
+from alfred.mcp_server import MCP_TOOL_NAMES, create_server, main, parse_stdio_args
 from alfred.policy import ApprovalService, PolicyStore
 
 
@@ -19,6 +20,27 @@ def test_mcp_server_can_be_constructed(tmp_path: Path) -> None:
     server = create_server(tmp_path / "alfred.db")
 
     assert server.name == "Alfred"
+    assert {tool.name for tool in asyncio.run(server.list_tools())} == MCP_TOOL_NAMES
+
+
+def test_mcp_server_registers_only_an_explicit_per_turn_tool_filter(tmp_path: Path) -> None:
+    server = create_server(
+        tmp_path / "alfred.db",
+        client_id="hermes",
+        tool_filter=frozenset({"agenda_get", "brief_get"}),
+    )
+
+    assert {tool.name for tool in asyncio.run(server.list_tools())} == {"agenda_get", "brief_get"}
+    with pytest.raises(Exception, match="Unknown tool"):
+        asyncio.run(server.call_tool("remember", {"statement": "must stay unavailable"}))
+
+    empty_server = create_server(tmp_path / "empty.db", tool_filter=frozenset())
+    assert asyncio.run(empty_server.list_tools()) == []
+
+
+def test_mcp_server_rejects_an_unknown_filter_entry(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown MCP tool filter entries: invented_tool"):
+        create_server(tmp_path / "alfred.db", tool_filter=frozenset({"invented_tool"}))
 
 
 def test_parse_stdio_args_defaults_match_prior_hardcoded_behavior() -> None:
@@ -46,6 +68,26 @@ def test_main_builds_the_server_with_the_parsed_client_id_and_db() -> None:
         main(["--client-id", "chatgpt-tunnel", "--db", "custom.db"])
 
     create_server_mock.assert_called_once_with("custom.db", client_id="chatgpt-tunnel")
+    run_mock.assert_called_once_with(transport="stdio")
+
+
+def test_main_applies_the_inherited_hermes_tool_filter() -> None:
+    with (
+        mock.patch.dict(
+            "os.environ",
+            {HERMES_MCP_TOOL_FILTER_ENV: "brief_get, agenda_get"},
+            clear=False,
+        ),
+        mock.patch("alfred.mcp_server.create_server") as create_server_mock,
+        mock.patch.object(create_server_mock.return_value, "run") as run_mock,
+    ):
+        main(["--client-id", "hermes"])
+
+    create_server_mock.assert_called_once_with(
+        None,
+        client_id="hermes",
+        tool_filter=frozenset({"agenda_get", "brief_get"}),
+    )
     run_mock.assert_called_once_with(transport="stdio")
 
 

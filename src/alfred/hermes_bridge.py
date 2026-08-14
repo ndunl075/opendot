@@ -30,6 +30,7 @@ staring at an unanswered "Thinking…".
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -40,6 +41,7 @@ from pydantic import BaseModel
 from .academic_memory import AcademicMemoryService
 from .audit import AuditEvent, AuditLog
 from .db import Database
+from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV, select_hermes_tools
 from .outbox import Outbox
 from .memory_graph import MemoryGraph
 from .models import Redactor
@@ -181,6 +183,14 @@ class SubprocessAgentRunner:
         self._runner = runner
 
     def __call__(self, prompt: str) -> AgentRunResult:
+        return self._run(prompt, allowed_tools=None)
+
+    def run_scoped(self, prompt: str, *, allowed_tools: frozenset[str]) -> AgentRunResult:
+        """Run one turn whose inherited MCP server exposes only ``allowed_tools``."""
+
+        return self._run(prompt, allowed_tools=allowed_tools)
+
+    def _run(self, prompt: str, *, allowed_tools: frozenset[str] | None) -> AgentRunResult:
         if self.database is not None and self.monthly_call_limit is not None:
             if self._month_to_date_calls() >= self.monthly_call_limit:
                 return AgentRunResult(text="", ok=False, detail="monthly Hermes call limit reached")
@@ -190,16 +200,20 @@ class SubprocessAgentRunner:
         if self.redact_outbound:
             prompt = self._redactor.redact(prompt)
         argv = [self.command, "-p", self.profile, "-z", prompt]
+        run_arguments: dict[str, Any] = {
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "timeout": self.timeout_seconds,
+            "check": False,
+        }
+        if allowed_tools is not None:
+            environment = os.environ.copy()
+            environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))
+            run_arguments["env"] = environment
         try:
-            completed = self._runner(
-                argv,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout_seconds,
-                check=False,
-            )
+            completed = self._runner(argv, **run_arguments)
         except subprocess.TimeoutExpired:
             return AgentRunResult(
                 text="", ok=False, detail=f"agent timed out after {self.timeout_seconds:.0f}s"
@@ -224,7 +238,11 @@ class SubprocessAgentRunner:
                     client="hermes_bridge",
                     tool="hermes_subprocess_call",
                     outcome="ok",
-                    result={"profile": self.profile},
+                    result={
+                        "profile": self.profile,
+                        "tool_count": len(allowed_tools) if allowed_tools is not None else None,
+                        "tools": sorted(allowed_tools) if allowed_tools is not None else None,
+                    },
                 )
             )
         return AgentRunResult(text=stdout, ok=True)
@@ -334,12 +352,14 @@ class HermesBridge:
 
     def _answer(self, event: dict[str, Any]) -> HermesBridgeReceipt:
         external_id = str(event["external_id"])
-        direct_answer = self._direct_answer(str(event["content"]))
-        result = (
-            AgentRunResult(text=direct_answer, ok=True, detail="local calendar fast path")
-            if direct_answer is not None
-            else self.agent(self._agent_prompt(event))
-        )
+        request = str(event["content"])
+        direct_answer = self._direct_answer(request)
+        if direct_answer is not None:
+            result = AgentRunResult(text=direct_answer, ok=True, detail="local calendar fast path")
+        else:
+            history = self._recent_conversation(event)
+            prompt = self._agent_prompt(event, history=history)
+            result = self._run_agent_scoped(prompt, request=request, history=history)
         text = result.text if result.ok else self.failure_reply
         return self._store(
             external_id, chat_id=event["chat_id"], text=text, ok=result.ok, detail=result.detail
@@ -489,7 +509,31 @@ class HermesBridge:
         lines.append(f"calendar checked {freshness}.")
         return "\n".join(lines)
 
-    def _agent_prompt(self, event: dict[str, Any]) -> str:
+    def _run_agent_scoped(
+        self,
+        prompt: str,
+        *,
+        request: str,
+        history: list[dict[str, str]],
+    ) -> AgentRunResult:
+        topic_text = "\n".join(
+            [
+                request,
+                *(str(exchange["user"]) for exchange in history),
+                *(str(exchange["assistant"]) for exchange in history),
+            ]
+        )
+        run_scoped = getattr(self.agent, "run_scoped", None)
+        if callable(run_scoped):
+            return run_scoped(prompt, allowed_tools=select_hermes_tools(topic_text))
+        return self.agent(prompt)
+
+    def _agent_prompt(
+        self,
+        event: dict[str, Any],
+        *,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
         """Attach a tiny trusted context pack before starting cold Hermes.
 
         Reading SQLite here takes milliseconds and removes avoidable MCP tool
@@ -498,7 +542,7 @@ class HermesBridge:
         treating an email or notification as an instruction.
         """
         request = str(event["content"])
-        history = self._recent_conversation(event)
+        history = self._recent_conversation(event) if history is None else history
         topic_text = "\n".join(
             [request, *(str(exchange["user"]) for exchange in history)]
         )
