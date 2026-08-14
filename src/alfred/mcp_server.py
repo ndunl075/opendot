@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence, cast
@@ -29,6 +30,7 @@ from .gmail import GmailActions, GmailClient, GmailSendActions
 from .github import GitHubActions, GitHubClient
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
 from .google_oauth import current_access_token
+from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
 from .http_auth import generate_token as generate_http_token
@@ -41,9 +43,37 @@ from .secret_store import SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
+MCP_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "system_status",
+        "agenda_get",
+        "memory_search",
+        "profile_get",
+        "remember",
+        "memory_correct",
+        "memory_feedback",
+        "forget",
+        "calendar_event_propose",
+        "message_draft",
+        "message_send_propose",
+        "github_issue_propose",
+        "action_commit",
+        "brief_get",
+        "connector_status",
+        "connector_records_get",
+        "task_upsert",
+        "task_complete",
+        "reminder_set",
+    }
+)
 
 
-def create_server(database_path: Path | str | None = None, *, client_id: str = "local-mcp") -> FastMCP:
+def create_server(
+    database_path: Path | str | None = None,
+    *,
+    client_id: str = "local-mcp",
+    tool_filter: frozenset[str] | None = None,
+) -> FastMCP:
     """Create Alfred's MCP server: local memory reads/writes and connector status.
 
     Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
@@ -359,7 +389,20 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
                 )
         return job.model_dump(mode="json")
 
+    if tool_filter is not None:
+        unknown = tool_filter - MCP_TOOL_NAMES
+        if unknown:
+            raise ValueError(f"unknown MCP tool filter entries: {', '.join(sorted(unknown))}")
+        for tool_name in MCP_TOOL_NAMES - tool_filter:
+            server.remove_tool(tool_name)
     return server
+
+
+def _tool_filter_from_environment() -> frozenset[str] | None:
+    value = os.environ.get(HERMES_MCP_TOOL_FILTER_ENV)
+    if value is None:
+        return None
+    return frozenset(name.strip() for name in value.split(",") if name.strip())
 
 
 def parse_stdio_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -388,7 +431,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     Claude/Cursor's default ``local-mcp`` grant.
     """
     args = parse_stdio_args(argv)
-    create_server(args.db, client_id=args.client_id).run(transport="stdio")
+    tool_filter = _tool_filter_from_environment()
+    if tool_filter is None:
+        create_server(args.db, client_id=args.client_id).run(transport="stdio")
+    else:
+        create_server(args.db, client_id=args.client_id, tool_filter=tool_filter).run(transport="stdio")
 
 
 def run_streamable_http(

@@ -322,6 +322,14 @@ as `yes, flag that` keeps its referent. Synced message content remains
 untrusted data, and Gmail context is still headers/snippets only, never a full
 message body.
 
+The bridge also narrows Alfred's MCP surface independently for every Hermes
+turn. A deterministic classifier uses the current request plus the two recent
+exchanges to select at most eight task, calendar, communication, memory, or
+status tools. `alfred-mcp` registers only that allowlist in the child process;
+an inbox/GitHub read already satisfied by the context pack exposes no tools.
+This is defense in depth on top of the existing per-client policy checks and
+does not narrow Claude, Cursor, HTTP, or other MCP clients.
+
 ### Persistent learning
 
 When conversational replies are enabled, Alfred also runs a local learning

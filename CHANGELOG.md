@@ -19,6 +19,9 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Hermes turns now expose at most eight request-relevant Alfred MCP tools;
+  inbox/GitHub reads already prefetched by the bridge expose none.
+
 - Canvas Calendar Feed setup now has one guided, secret-safe command that
   validates before saving and repairs an exact accidental double-paste.
 - Briefs and academic memory now collapse an exact Canvas/Google Calendar
