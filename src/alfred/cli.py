@@ -661,7 +661,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--hermes-timeout",
         type=float,
-        default=60.0,
+        default=120.0,
         help="seconds to allow one agent turn before giving up on it",
     )
     run.add_argument(

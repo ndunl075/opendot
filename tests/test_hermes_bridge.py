@@ -499,6 +499,27 @@ def test_context_budget_trims_current_gmail_and_github_keys() -> None:
     assert len(fitted["github"]["notifications"]) < 8
 
 
+def test_context_budget_trims_the_oldest_exchange_first() -> None:
+    context = {
+        "recent_conversation": [
+            {"user": "old-question " * 5, "assistant": "old-answer " * 5},
+            {"user": "mid-question " * 5, "assistant": "mid-answer " * 5},
+            {
+                "user": "newest question that the current message is replying to",
+                "assistant": "the most recent answer",
+            },
+        ]
+    }
+
+    fitted = _fit_context_budget(context, 300)
+
+    assert len(json.dumps(fitted, separators=(",", ":"))) <= 300
+    # The most recent exchange -- the one the current message is actually
+    # replying to -- must survive; the oldest is what gets dropped.
+    assert fitted["recent_conversation"][-1]["assistant"] == "the most recent answer"
+    assert all("old-question" not in exchange["user"] for exchange in fitted["recent_conversation"])
+
+
 class _FakeCompleted:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode

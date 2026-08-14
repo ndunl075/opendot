@@ -423,7 +423,7 @@ previously hid a message even though the model itself answered in 4.7 seconds.
 
 `--hermes-command` sets which executable to run (default `hermes`; use a
 full path when PATH differs, as it can under the Windows service) and
-`--hermes-timeout` bounds one turn (default 60s). A turn that times out,
+`--hermes-timeout` bounds one turn (default 120s). A turn that times out,
 exits non-zero, or produces nothing still gets a reply saying so, and is not
 retried — an unanswered `Thinking…` and an endlessly re-run model call are
 both worse than one honest failure message.

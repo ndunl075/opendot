@@ -68,11 +68,13 @@ DEFAULT_MAX_BUBBLES = 4
 DEFAULT_CONTEXT_CHAR_BUDGET = 10_000
 
 # Keep follow-ups grounded without turning every one-shot invocation into a
-# transcript dump. Two completed exchanges are enough for "yes, do that" and
-# similar replies, while the time window prevents an old topic being mistaken
-# for the current one.
+# transcript dump. Matches the casual lane's depth so a multi-turn tool
+# conversation ("yeah tell me about that error" three messages later) doesn't
+# lose earlier context sooner than a plain chat would; the time window still
+# prevents an old topic being mistaken for the current one, and
+# _fit_context_budget trims from the oldest end if the pack gets too big.
 CONVERSATION_LOOKBACK_SECONDS = 6 * 60 * 60
-MAX_CONTEXT_EXCHANGES = 2
+MAX_CONTEXT_EXCHANGES = 8
 CASUAL_CONVERSATION_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 CASUAL_MAX_CONTEXT_EXCHANGES = 8
 
@@ -181,7 +183,7 @@ class SubprocessAgentRunner:
         command_prefix: tuple[str, ...] = (),
         profile: str,
         conversation_model: str | None = None,
-        timeout_seconds: float = 60.0,
+        timeout_seconds: float = 120.0,
         redact_outbound: bool = True,
         database: Database | None = None,
         monthly_call_limit: int | None = None,
@@ -1198,7 +1200,10 @@ def _fit_context_budget(context: dict[str, Any], limit: int) -> dict[str, Any]:
     """Drop lowest-ranked context items until the serialized pack fits.
 
     Connector builders rank useful items first, so trimming from list tails is
-    deterministic and cheap. Conversation is trimmed before current connector
+    deterministic and cheap. ``recent_conversation`` is ordered oldest first
+    instead, so it is trimmed from the head -- an over-budget conversation
+    should lose its earliest exchange, not the one the current message is
+    actually replying to. Conversation is trimmed before current connector
     facts; the current request itself never enters this function.
     """
     if limit < 256:
@@ -1229,7 +1234,7 @@ def _fit_context_budget(context: dict[str, Any], limit: int) -> dict[str, Any]:
                 target = target.get(key)
             values = target.get(path[-1]) if isinstance(target, dict) else None
             if isinstance(values, list) and values:
-                values.pop()
+                values.pop(0 if path == ("recent_conversation",) else -1)
                 changed = True
                 if size() <= limit:
                     return compact
