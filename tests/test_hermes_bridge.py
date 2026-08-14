@@ -20,6 +20,7 @@ from alfred.hermes_tools import (
     is_casual_conversation,
     select_hermes_tools,
 )
+from alfred.workflow_learning import WORKFLOW_TURN_ID_ENV
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -720,6 +721,25 @@ def test_subprocess_runner_passes_a_turn_local_tool_allowlist_to_hermes() -> Non
     assert result.ok is True
     assert calls[0]["env"][HERMES_MCP_TOOL_FILTER_ENV] == "agenda_get,task_upsert"
     assert HERMES_MCP_TOOL_FILTER_ENV not in __import__("os").environ
+
+
+def test_subprocess_runner_passes_a_private_turn_correlation_id_to_mcp() -> None:
+    calls: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(kwargs)
+        return _FakeCompleted(0, stdout="ok")
+
+    runner = SubprocessAgentRunner(command="hermes", profile="alfred", runner=fake_run)
+    result = runner.run_scoped(
+        "draft it",
+        allowed_tools=frozenset({"message_draft"}),
+        correlation_id="telegram:123",
+    )
+
+    assert result.ok is True
+    assert calls[0]["env"][WORKFLOW_TURN_ID_ENV] == "telegram:123"
+    assert WORKFLOW_TURN_ID_ENV not in __import__("os").environ
 
 
 def test_subprocess_runner_uses_no_reasoning_and_no_mcp_tools_for_conversation() -> None:
