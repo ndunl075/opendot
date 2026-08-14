@@ -230,6 +230,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 command=hermes_command,
                 command_prefix=hermes_command_prefix,
                 profile=args.hermes_profile,
+                conversation_model=args.hermes_conversation_model,
                 timeout_seconds=args.hermes_timeout,
                 database=database,
                 monthly_call_limit=args.hermes_monthly_call_limit,
@@ -657,6 +658,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=60.0,
         help="seconds to allow one agent turn before giving up on it",
+    )
+    run.add_argument(
+        "--hermes-conversation-model",
+        default="poolside/laguna-xs-2.1:free",
+        help=(
+            "fast model used only for casual no-tool conversation "
+            "(default: poolside/laguna-xs-2.1:free)"
+        ),
     )
     run.add_argument(
         "--embedding-model",

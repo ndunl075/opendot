@@ -318,10 +318,14 @@ MCP discovery/tool-call loop on the cold path. Gmail's Promotions, Social,
 and Forums categories are counted but omitted from the pack by default, and
 two recent completed chat exchanges are included for work turns so a precise
 follow-up such as `yes, flag that` keeps its referent. Casual turns use up to
-eight completed exchanges from the last week, the free fast model with
-reasoning disabled, and an empty Alfred MCP tool surface. Synced message content remains
-untrusted data, and Gmail context is still headers/snippets only, never a full
-message body.
+eight completed exchanges from the last week, `poolside/laguna-xs-2.1:free`
+with reasoning disabled, exact local FTS memory recall, and an empty Alfred
+MCP tool surface. Skipping the optional vector lookup avoids waiting for an
+Ollama embedding on greetings; tool-backed and explicit memory questions keep
+hybrid vector recall and the profile's stronger `stepfun/step-3.7-flash:free`
+default. Override the casual model with `--hermes-conversation-model`. Synced
+message content remains untrusted data, and Gmail context is still
+headers/snippets only, never a full message body.
 
 The bridge also narrows Alfred's MCP surface independently for every Hermes
 turn. A deterministic classifier uses the current request plus the two recent

@@ -398,6 +398,7 @@ class MemoryGraph:
         *,
         limit: int = 8,
         allowed_sensitivities: set[str] | None = None,
+        include_vectors: bool = True,
     ) -> SearchResult:
         """Use local FTS anchors plus, when configured, vector recall, then one active graph hop.
 
@@ -413,7 +414,7 @@ class MemoryGraph:
             return SearchResult()
         self.database.migrate()
         vector_memory_ids: list[str] = []
-        if self._embedding_index is not None:
+        if include_vectors and self._embedding_index is not None:
             vector_memory_ids = [
                 subject_id for subject_id, _distance in self._embedding_index.search(query, subject_kind="memory", limit=limit)
             ]

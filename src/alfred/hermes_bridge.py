@@ -180,6 +180,7 @@ class SubprocessAgentRunner:
         command: str = "hermes",
         command_prefix: tuple[str, ...] = (),
         profile: str,
+        conversation_model: str | None = None,
         timeout_seconds: float = 60.0,
         redact_outbound: bool = True,
         database: Database | None = None,
@@ -190,6 +191,7 @@ class SubprocessAgentRunner:
         self.command = command
         self.command_prefix = command_prefix
         self.profile = profile
+        self.conversation_model = conversation_model
         self.timeout_seconds = timeout_seconds
         self.redact_outbound = redact_outbound
         self._redactor = Redactor()
@@ -208,7 +210,12 @@ class SubprocessAgentRunner:
 
     def run_conversation(self, prompt: str) -> AgentRunResult:
         """Use the free fast model as a plain conversational model."""
-        return self._run(prompt, allowed_tools=frozenset(), reasoning="none")
+        return self._run(
+            prompt,
+            allowed_tools=frozenset(),
+            reasoning="none",
+            model=self.conversation_model,
+        )
 
     def _run(
         self,
@@ -216,6 +223,7 @@ class SubprocessAgentRunner:
         *,
         allowed_tools: frozenset[str] | None,
         reasoning: str | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
         started = self._monotonic()
         tool_count = len(allowed_tools) if allowed_tools is not None else None
@@ -239,6 +247,8 @@ class SubprocessAgentRunner:
         if self.redact_outbound:
             prompt = self._redactor.redact(prompt)
         argv = [self.command, *self.command_prefix, "-p", self.profile]
+        if model:
+            argv.extend(["-m", model])
         if reasoning:
             argv.extend(["--reasoning", reasoning])
         argv.extend(["-z", prompt])
@@ -676,7 +686,11 @@ class HermesBridge:
         trace_candidates: dict[str, list[str]] = {}
         if history:
             context["recent_conversation"] = history
-        memory = self._memory_context(request)
+        # Casual chat needs continuity, but waiting several seconds for an
+        # Ollama embedding on every text ruins the conversational rhythm.
+        # Exact local FTS recall remains available; semantic vector recall is
+        # reserved for work/memory turns where the extra latency is justified.
+        memory = self._memory_context(request, include_vectors=not casual)
         if memory:
             context["memory"] = memory
         if _INBOX_TERMS.search(topic_text):
@@ -688,6 +702,14 @@ class HermesBridge:
             if academic:
                 context["academic_history"] = academic
         if not context:
+            if casual:
+                return (
+                    "this is a casual private text. reply naturally in alfred's voice. "
+                    "never mention the workspace, repository, files, tools, capabilities, or "
+                    "being ready to help unless the user asked about them. don't turn a greeting "
+                    "into a work check-in.\n"
+                    f"current message: {request}"
+                )
             return request
 
         # Escape angle brackets so a malicious synced subject/snippet cannot
@@ -783,9 +805,14 @@ class HermesBridge:
             "scope": "derived from immutable local Calendar/Canvas events; full evidence remains local",
         }
 
-    def _memory_context(self, request: str) -> dict[str, Any] | None:
+    def _memory_context(
+        self, request: str, *, include_vectors: bool = True
+    ) -> dict[str, Any] | None:
         recalled = self.memory_graph.search(
-            request, limit=5, allowed_sensitivities={"public", "personal"}
+            request,
+            limit=5,
+            allowed_sensitivities={"public", "personal"},
+            include_vectors=include_vectors,
         )
         if not recalled.memories and not recalled.entities and not recalled.relationships:
             return None

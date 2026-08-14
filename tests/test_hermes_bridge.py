@@ -569,11 +569,26 @@ def test_subprocess_runner_uses_no_reasoning_and_no_mcp_tools_for_conversation()
         calls.append((argv, kwargs))
         return _FakeCompleted(0, stdout="yo what's good")
 
-    result = SubprocessAgentRunner(command="hermes", profile="alfred", runner=fake_run).run_conversation("yo")
+    result = SubprocessAgentRunner(
+        command="hermes",
+        profile="alfred",
+        conversation_model="poolside/laguna-xs-2.1:free",
+        runner=fake_run,
+    ).run_conversation("yo")
 
     assert result.ok is True
     argv, kwargs = calls[0]
-    assert argv == ["hermes", "-p", "alfred", "--reasoning", "none", "-z", "yo"]
+    assert argv == [
+        "hermes",
+        "-p",
+        "alfred",
+        "-m",
+        "poolside/laguna-xs-2.1:free",
+        "--reasoning",
+        "none",
+        "-z",
+        "yo",
+    ]
     assert kwargs["env"][HERMES_MCP_TOOL_FILTER_ENV] == ""
 
 
@@ -616,6 +631,21 @@ def test_casual_turn_uses_the_conversation_lane(tmp_path: Path) -> None:
 
     assert len(agent.conversation_prompts) == 1
     assert agent.tool_scopes == []
+    assert "don't turn a greeting into a work check-in" in agent.conversation_prompts[0]
+
+
+def test_casual_turn_skips_slow_vector_recall_but_keeps_exact_memory(tmp_path: Path) -> None:
+    from alfred.memory_graph import MemoryGraph
+
+    database_path = tmp_path / "alfred.db"
+    graph = MemoryGraph(Database(database_path))
+    graph.remember("Nico likes ambient music while studying.")
+    _defer(database_path, _update(72, "ambient music while studying?"))
+    agent = RoutedFakeAgent(AgentRunResult(text="ambient stuff", ok=True))
+
+    HermesBridge(Database(database_path), agent, memory_graph=graph).run_once()
+
+    assert "ambient music while studying" in agent.conversation_prompts[0]
 
 
 def test_subprocess_runner_redacts_pii_at_the_final_hermes_boundary() -> None:
