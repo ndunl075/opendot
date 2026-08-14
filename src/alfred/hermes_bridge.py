@@ -483,10 +483,14 @@ class HermesBridge:
         if not catalog_state or not catalog_state["last_success_at"]:
             return (
                 "I only have your primary calendar synced right now, so I can't reliably say "
-                "whether your full Google Calendar is clear."
+                "whether your full Google Calendar is clear.\n\n"
+                "want me to check the calendar connection?"
             )
         if catalog_state["last_error"]:
-            return "I couldn't verify your full Google Calendar list, so I can't answer that reliably yet."
+            return (
+                "I couldn't verify your full Google Calendar list, so I can't answer that reliably yet.\n\n"
+                "want me to check the calendar connection?"
+            )
 
         expected_accounts = {
             "primary" if payload.get("primary") else str(payload.get("id"))
@@ -548,11 +552,17 @@ class HermesBridge:
             )
         )
         if not expected_accounts:
-            return "My calendar coverage is incomplete right now, so I can't answer that reliably yet."
+            return (
+                "My calendar coverage is incomplete right now, so I can't answer that reliably yet.\n\n"
+                "want me to check the calendar connection?"
+            )
         if not events and incomplete:
-            return "I don't see anything today on the calendars I could check, but my calendar coverage is incomplete."
+            return (
+                "I don't see anything today on the calendars I could check, but my calendar coverage is incomplete.\n\n"
+                "want me to check the missing calendar connection?"
+            )
         if not events:
-            return "your calendar is clear today."
+            return "your calendar is clear today.\n\nwant me to add anything?"
 
         lines = [f"today: {len(events)} event{'s' if len(events) != 1 else ''}"]
         show_provenance = bool(_CALENDAR_PROVENANCE_TERMS.search(request))
@@ -573,7 +583,7 @@ class HermesBridge:
             lines.append(f"plus {len(events) - 3} more")
         if incomplete:
             lines.append("one calendar couldn't be checked, so this may be incomplete.")
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n\nwant me to add or change anything?"
 
     def _calendar_context_freshness(self) -> str | None:
         with self.database.connect() as connection:

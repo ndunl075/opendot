@@ -141,6 +141,7 @@ def test_todays_agenda_is_answered_locally_without_starting_the_agent(tmp_path: 
     assert replies[0][0:2] == ("hermes-reply:1:0", "telegram:20")
     assert replies[0][2] == "today: 1 event\n6:30 pm: Dinner"
     assert "http" not in replies[0][2]
+    assert replies[1][2] == "want me to add or change anything?"
     assert "added by Nico" in HermesBridge(database, agent)._direct_answer(
         "who added today's calendar events?"
     )

@@ -108,8 +108,9 @@ _ACTION_CALLBACK = re.compile(
 class TelegramGateway:
     """Accept updates from locally paired identities and create durable intents."""
 
-    #: Fallback acknowledgement when the message doesn't match a known topic.
-    agent_ack_text = "one sec"
+    #: Casual conversation gets no synthetic acknowledgement. Hermes answers
+    #: it directly; only explicit work gets an immediate progress message.
+    agent_ack_text = ""
 
     #: Topic-specific acknowledgements, checked in order, covering every tool
     #: on the MCP surface plus the connectors that feed them. This is a
@@ -154,8 +155,8 @@ class TelegramGateway:
         (("note", "notes", "obsidian", "vault"), "your notes"),
         (("inbox", "email", "e-mail", "gmail", "mail", "unread"), "your inbox"),
         (("task", "todo", "to-do", "to do"), "your tasks"),
-        (("week", "review", "recap"), "your week"),
-        (("agenda", "schedule", "calendar", "today", "tomorrow", "due", "meeting", "brief"), "your agenda"),
+        (("my week", "weekly review", "week review", "weekly recap"), "your week"),
+        (("agenda", "schedule", "calendar", "due", "meeting", "brief"), "your agenda"),
         (("remember", "recall", "memory", "did i say", "did i tell", "about me", "who am i", "my profile"),
          "what i know"),
         (("connector", "synced", "sync status", "connected", "working", "status", "everything ok", "everything okay"),
@@ -266,12 +267,13 @@ class TelegramGateway:
                     chat_id=message.chat.id,
                     update_id=update.update_id,
                 )
-                Outbox.enqueue(
-                    connection,
-                    destination=f"telegram:{message.chat.id}",
-                    payload={"text": receipt.text},
-                    idempotency_key=receipt_key,
-                )
+                if receipt.text:
+                    Outbox.enqueue(
+                        connection,
+                        destination=f"telegram:{message.chat.id}",
+                        payload={"text": receipt.text},
+                        idempotency_key=receipt_key,
+                    )
                 return receipt
 
     def _handle_feedback_callback(self, update: TelegramUpdate) -> TelegramReceipt:
@@ -522,7 +524,12 @@ class TelegramGateway:
             (receipt_key,),
         ).fetchone()
         if row is None:
+            update_id = receipt_key.removeprefix("telegram-receipt:")
+            event = connection.execute(
+                "SELECT metadata_json FROM events WHERE source = 'telegram' AND external_id = ?",
+                (update_id,),
+            ).fetchone()
+            if event is not None and json.loads(event["metadata_json"]).get("agent_deferred"):
+                return TelegramReceipt(text="", duplicate=True, agent_deferred=True)
             raise RuntimeError("duplicate Telegram update has no receipt outbox record")
-        import json
-
         return TelegramReceipt(text=json.loads(row["payload_json"])["text"], duplicate=True)

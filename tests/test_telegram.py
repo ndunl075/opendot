@@ -177,8 +177,9 @@ def test_an_approval_gated_action_is_never_acknowledged_as_already_done() -> Non
         assert not any(word in ack for word in ("sent", "created", "deleted", "done", "scheduled"))
 
 
-def test_the_acknowledgement_falls_back_when_no_topic_matches() -> None:
-    assert TelegramGateway.acknowledgement_for("yo what's up") == TelegramGateway.agent_ack_text
+def test_casual_conversation_has_no_synthetic_acknowledgement() -> None:
+    assert TelegramGateway.acknowledgement_for("yo what's up") == ""
+    assert TelegramGateway.acknowledgement_for("how are you today?") == ""
 
 
 def test_topic_keywords_do_not_fire_on_substrings_of_other_words() -> None:
@@ -186,6 +187,23 @@ def test_topic_keywords_do_not_fire_on_substrings_of_other_words() -> None:
     assert TelegramGateway.acknowledgement_for("help me prepare something specific") == (
         TelegramGateway.agent_ack_text
     )
+
+
+def test_casual_deferred_message_enqueues_no_empty_telegram_message(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    gateway = _gateway(database_path, defer_unparsed_to_agent=True)
+
+    receipt = gateway.handle(_update(10, "yo"))
+    duplicate = gateway.handle(_update(10, "yo"))
+
+    assert receipt.text == ""
+    assert receipt.agent_deferred is True
+    assert duplicate.duplicate is True
+    assert duplicate.agent_deferred is True
+    with Database(database_path).connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM outbox WHERE idempotency_key = 'telegram-receipt:10'"
+        ).fetchone()[0] == 0
 
 
 def test_the_deferred_receipt_uses_the_topic_acknowledgement(tmp_path: Path) -> None:

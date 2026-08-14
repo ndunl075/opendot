@@ -99,8 +99,8 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
 
     assert report.errors == []
     assert report.agent_replies == 1
-    # Both the acknowledgement and the real answer leave in this same cycle.
-    # The ack names the topic, matched by keyword at intake (no model call).
+    # The acknowledgement and both conversational answer bubbles leave in
+    # this same cycle. The ack is matched by keyword at intake (no model call).
     assert fake.sent == [
         (20, "checking your agenda..."),
         (
@@ -108,7 +108,43 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
             "I only have your primary calendar synced right now, so I can't reliably say "
             "whether your full Google Calendar is clear.",
         ),
+        (20, "want me to check the calendar connection?"),
     ]
+
+
+def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from alfred.hermes_bridge import AgentRunResult, HermesBridge
+
+    database = Database(tmp_path / "alfred.db")
+    fake = FakeTelegram(
+        [
+            {
+                "update_id": 3,
+                "message": {
+                    "message_id": 3,
+                    "date": int(datetime.now(UTC).timestamp()),
+                    "chat": {"id": 20},
+                    "from": {"id": 10},
+                    "text": "yo",
+                },
+            }
+        ]
+    )
+    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="yo. what's good?", ok=True))
+    report = AlfredRunner(
+        database,
+        telegram_transport=fake,
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        telegram_chat_ids=frozenset({20}),
+        defer_unparsed_to_agent=True,
+        agent_bridge=bridge.run_once,
+    ).run_once()
+
+    assert report.errors == []
+    assert report.agent_replies == 1
+    assert fake.sent == [(20, "yo. what's good?")]
 
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
