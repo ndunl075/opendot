@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import subprocess
 import time
@@ -77,6 +78,17 @@ CONVERSATION_LOOKBACK_SECONDS = 6 * 60 * 60
 MAX_CONTEXT_EXCHANGES = 8
 CASUAL_CONVERSATION_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 CASUAL_MAX_CONTEXT_EXCHANGES = 8
+
+# A reaction on the user's own message, not a reply -- the same small human
+# gesture as glancing up and giving a nod before actually going to do the
+# thing. Only considered for turns that went through the tool-enabled work
+# lane (never casual chat, which always runs with zero tools) and only some
+# of the time (REACTION_CHANCE below); a reaction on every single message
+# reads as a scripted tic, not a person. Every emoji here is confirmed
+# against Telegram's own quick-reaction set -- Telegram silently rejects
+# anything outside it, so this isn't a free-form choice.
+REACTION_EMOJI = ("\U0001f44d", "\U0001fae1", "\U0001f525", "\U0001f440")  # 👍 🫡 🔥 👀
+REACTION_CHANCE = 0.25
 
 _INBOX_TERMS = re.compile(r"\b(?:inbox|e-?mail|gmail|mail|unread|reply)\b", re.IGNORECASE)
 _GITHUB_TERMS = re.compile(
@@ -150,6 +162,19 @@ class AgentRunResult(BaseModel):
 
 class AgentRunner(Protocol):
     def __call__(self, prompt: str) -> AgentRunResult: ...
+
+
+class ReactingTelegram(Protocol):
+    """The one Telegram capability HermesBridge needs directly, not through the outbox.
+
+    A reaction is ephemeral UI on the user's own message, the same category
+    as the typing heartbeat -- never a persisted reply, so it has no reason
+    to go through Outbox. Narrowed to this one method (rather than importing
+    the full TelegramTransport protocol) so this module doesn't need to know
+    telegram_runtime exists at all.
+    """
+
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None: ...
 
 
 class HermesBridgeReceipt(BaseModel):
@@ -335,6 +360,10 @@ class HermesBridge:
         context_char_budget: int = DEFAULT_CONTEXT_CHAR_BUDGET,
         memory_graph: MemoryGraph | None = None,
         monotonic: Callable[[], float] = time.perf_counter,
+        telegram_transport: ReactingTelegram | None = None,
+        reaction_chance: float = REACTION_CHANCE,
+        random_chance: Callable[[], float] = random.random,
+        random_emoji: Callable[[], str] = lambda: random.choice(REACTION_EMOJI),
     ) -> None:
         self.database = database
         self.agent = agent
@@ -344,6 +373,10 @@ class HermesBridge:
         self.context_char_budget = context_char_budget
         self.memory_graph = memory_graph or MemoryGraph(database)
         self._monotonic = monotonic
+        self.telegram_transport = telegram_transport
+        self.reaction_chance = reaction_chance
+        self._random_chance = random_chance
+        self._random_emoji = random_emoji
 
     def run_once(self) -> HermesBridgeResult:
         """Answer up to ``max_per_run`` deferred messages; never raises for one bad turn."""
@@ -413,6 +446,7 @@ class HermesBridge:
                     "chat_id": chat_id,
                     "user_id": metadata.get("user_id"),
                     "occurred_at": row["occurred_at"],
+                    "message_id": metadata.get("message_id"),
                 }
             )
         return pending
@@ -439,6 +473,7 @@ class HermesBridge:
             context_trace["freshness"] = {
                 "google_calendar": self._calendar_context_freshness()
             }
+            casual = False
         else:
             context_started = self._monotonic()
             initial_history = self._recent_conversation(event)
@@ -460,6 +495,7 @@ class HermesBridge:
                 prompt, request=request, history=history, casual=casual
             )
             agent_ms = max(0, round((self._monotonic() - agent_started) * 1000))
+        self._maybe_react(event, result=result, casual=casual)
         text = result.text if result.ok else self.failure_reply
         telemetry = {
             "timing_version": 1,
@@ -482,6 +518,33 @@ class HermesBridge:
             user_id=event.get("user_id"),
             approval_requested_since=bridge_started_at,
         )
+
+    def _maybe_react(self, event: dict[str, Any], *, result: AgentRunResult, casual: bool) -> None:
+        """Sometimes react to the user's own message on a real, successful tool turn.
+
+        Best effort like every other cosmetic Telegram call in this codebase:
+        no transport configured, no message_id recorded, a failed turn, a
+        casual turn (always zero tools), a turn that never touched a tool, or
+        the dice not landing all just skip quietly. A Telegram rejection
+        (an emoji outside its quick-reaction set, a since-deleted message)
+        must never surface as a bridge failure over one purely decorative
+        gesture.
+        """
+        if self.telegram_transport is None or casual or not result.ok:
+            return
+        if not result.tool_count:
+            return
+        message_id = event.get("message_id")
+        if not isinstance(message_id, int):
+            return
+        if self._random_chance() >= self.reaction_chance:
+            return
+        try:
+            self.telegram_transport.set_message_reaction(
+                chat_id=event["chat_id"], message_id=message_id, emoji=self._random_emoji()
+            )
+        except Exception:
+            pass
 
     def _direct_answer(self, request: str) -> str | None:
         """Answer narrow read-only questions locally when language adds no value.

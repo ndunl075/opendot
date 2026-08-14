@@ -237,6 +237,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 monthly_call_limit=args.hermes_monthly_call_limit,
             ),
             memory_graph=memory_graph,
+            telegram_transport=telegram_transport,
         )
         agent_bridge = hermes_bridge.run_once
         agent_typing_chat_ids = hermes_bridge.pending_chat_ids

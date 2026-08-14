@@ -85,6 +85,25 @@ class TelegramBotClient:
         if result is not True:
             raise TelegramAPIError("Telegram sendChatAction response was not successful")
 
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        # Bots are limited to exactly one reaction per message (no is_big --
+        # that's for humans double-tapping a reaction, not a bot's cue).
+        # Telegram only accepts emoji from its own fixed quick-reaction set;
+        # an unsupported one is rejected with a normal API error, which
+        # callers are expected to treat the same as any other cosmetic,
+        # best-effort Telegram call.
+        result = self._request(
+            "setMessageReaction",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reaction": [{"type": "emoji", "emoji": emoji}],
+            },
+            timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=2.0),
+        )
+        if result is not True:
+            raise TelegramAPIError("Telegram setMessageReaction response was not successful")
+
     def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
         if not callback_query_id:
             raise TelegramAPIError("Telegram callback query ID cannot be empty")

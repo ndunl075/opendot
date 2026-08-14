@@ -16,6 +16,7 @@ class FakeTelegram:
         self.offsets: list[int | None] = []
         self.sent: list[tuple[int, str, dict | None]] = []
         self.chat_actions: list[tuple[int, str]] = []
+        self.reactions: list[tuple[int, int, str]] = []
         self.callback_answers: list[tuple[str, str]] = []
 
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
@@ -28,6 +29,9 @@ class FakeTelegram:
 
     def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
         self.chat_actions.append((chat_id, action))
+
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        self.reactions.append((chat_id, message_id, emoji))
 
     def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
         self.callback_answers.append((callback_query_id, text))

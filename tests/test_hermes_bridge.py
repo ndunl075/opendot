@@ -89,6 +89,19 @@ def _replies(database_path: Path) -> list[tuple[str, str, str]]:
     return [(row["idempotency_key"], row["destination"], json.loads(row["payload_json"])["text"]) for row in rows]
 
 
+class FakeReactingTelegram:
+    def __init__(self) -> None:
+        self.reactions: list[tuple[int, int, str]] = []
+
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        self.reactions.append((chat_id, message_id, emoji))
+
+
+class BrokenReactingTelegram:
+    def set_message_reaction(self, *, chat_id: int, message_id: int, emoji: str) -> None:
+        raise RuntimeError("emoji rejected")
+
+
 def test_todays_agenda_is_answered_locally_without_starting_the_agent(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     database = Database(database_path)
@@ -184,6 +197,117 @@ def test_pending_chat_ids_disappear_as_soon_as_the_reply_is_stored(tmp_path: Pat
     bridge.run_once()
 
     assert bridge.pending_chat_ids() == frozenset()
+
+
+def test_reacts_to_the_original_message_on_a_successful_tool_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(5, "what's on my calendar tomorrow"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,  # deterministic: always roll True in this test
+        random_emoji=lambda: "\U0001f44d",  # deterministic: always pick 👍 in this test
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == [(20, 105, "\U0001f44d")]  # message_id = update_id + 100
+
+
+def test_never_reacts_when_the_dice_dont_land(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(6, "what's on my calendar tomorrow"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        telegram_transport=telegram,
+        reaction_chance=0.0,  # deterministic: never roll True
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_never_reacts_on_a_casual_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(7, "yo"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        RoutedFakeAgent(AgentRunResult(text="yo.", ok=True, tool_count=5)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_never_reacts_when_the_turn_used_no_tools(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(8, "what's on my calendar next month"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="here's next month.", ok=True, tool_count=0)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_never_reacts_on_a_failed_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(9, "what's on my calendar next month"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="", ok=False, tool_count=3, detail="agent timed out")),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == []
+
+
+def test_a_rejected_reaction_never_breaks_the_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(10, "what's on my calendar tomorrow"))
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        telegram_transport=BrokenReactingTelegram(),
+        reaction_chance=1.0,
+    )
+
+    result = bridge.run_once()
+
+    assert result.answered == 1
+    assert _replies(database_path)[0][2] == "tomorrow's clear."
+
+
+def test_no_reaction_without_a_configured_transport(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(11, "what's on my calendar tomorrow"))
+    bridge = HermesBridge(
+        Database(database_path),
+        ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
+        reaction_chance=1.0,
+    )
+
+    result = bridge.run_once()  # must not raise for lack of a transport
+
+    assert result.answered == 1
 
 
 def test_bridge_scopes_a_task_turn_before_calling_a_scoped_agent(tmp_path: Path) -> None:
