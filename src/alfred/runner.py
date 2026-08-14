@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from threading import Lock, Thread
 from typing import Callable, TypeVar
 
 from .audit import AuditEvent, AuditLog
@@ -66,6 +67,7 @@ class AlfredRunner:
         slack_pairs: frozenset[SlackPair] = frozenset(),
         slack_channel_ids: frozenset[str] = frozenset(),
         connectors: tuple[ConnectorSync, ...] = (),
+        background_connectors: bool = False,
         poll_timeout_seconds: int = 20,
         idle_sleep_seconds: float = 5.0,
         sleep: Callable[[float], None] = time.sleep,
@@ -82,6 +84,7 @@ class AlfredRunner:
         self.slack_pairs = slack_pairs
         self.slack_channel_ids = slack_channel_ids
         self.connectors = connectors
+        self.background_connectors = background_connectors
         self.poll_timeout_seconds = poll_timeout_seconds
         self.idle_sleep_seconds = idle_sleep_seconds
         self.sleep = sleep
@@ -89,6 +92,9 @@ class AlfredRunner:
         self._last_synced: dict[str, float] = {}
         self._next_sync_attempt: dict[str, float] = {}
         self._sync_failures: dict[str, int] = {}
+        self._connector_thread: Thread | None = None
+        self._connector_result: tuple[list[str], list[str]] | None = None
+        self._connector_result_lock = Lock()
 
     def run_forever(
         self, *, iterations: int | None = None, stop_check: Callable[[], bool] = lambda: False
@@ -104,10 +110,15 @@ class AlfredRunner:
         """
         count = 0
         while (iterations is None or count < iterations) and not stop_check():
-            self.run_once()
+            report = self.run_once()
             count += 1
             if (iterations is None or count < iterations) and not stop_check():
-                self.sleep(self.idle_sleep_seconds)
+                poll_failed = any(error.startswith("telegram_poll:") for error in report.errors)
+                # A failed long poll has already spent its timeout waiting.
+                # Retry quickly, but retain a one-second floor so a provider
+                # outage cannot turn into a tight request loop.
+                delay = min(self.idle_sleep_seconds, 1.0) if poll_failed else self.idle_sleep_seconds
+                self.sleep(delay)
 
     def run_once(self) -> RunOnceReport:
         errors: list[str] = []
@@ -178,8 +189,30 @@ class AlfredRunner:
             )
             slack_delivered = len(delivered) if delivered_ok and delivered is not None else 0
 
+        if self.background_connectors:
+            synced, connector_errors = self._advance_connector_worker()
+            errors.extend(connector_errors)
+        else:
+            synced = self._sync_connectors(self.connectors, errors)
+
+        return RunOnceReport(
+            telegram_polled=telegram_polled,
+            jobs_executed=jobs_executed,
+            telegram_delivered=telegram_delivered,
+            slack_delivered=slack_delivered,
+            connectors_synced=synced,
+            agent_replies=agent_replies,
+            memories_learned=memories_learned,
+            actions_executed=actions_executed,
+            errors=errors,
+        )
+
+    def _sync_connectors(
+        self, connectors: tuple[ConnectorSync, ...], errors: list[str]
+    ) -> list[str]:
+        """Run a connector batch sequentially and apply its pacing state."""
         synced: list[str] = []
-        for connector in self.connectors:
+        for connector in connectors:
             if not self._due(connector):
                 continue
             ok, _ = self._safe(f"connector_sync:{connector.name}", connector.run, errors)
@@ -196,18 +229,48 @@ class AlfredRunner:
                 # hammered every five-second runner cycle.
                 delay = min(connector.interval_seconds, 30.0 * (2 ** (failures - 1)))
                 self._next_sync_attempt[connector.name] = self.now() + delay
+        return synced
 
-        return RunOnceReport(
-            telegram_polled=telegram_polled,
-            jobs_executed=jobs_executed,
-            telegram_delivered=telegram_delivered,
-            slack_delivered=slack_delivered,
-            connectors_synced=synced,
-            agent_replies=agent_replies,
-            memories_learned=memories_learned,
-            actions_executed=actions_executed,
-            errors=errors,
-        )
+    def _advance_connector_worker(self) -> tuple[list[str], list[str]]:
+        """Collect one finished batch and start the next without blocking chat.
+
+        There is exactly one daemon worker and connectors remain sequential.
+        The only concurrency is between that bounded batch and the
+        latency-sensitive intake/answer/delivery path.
+        """
+        completed: tuple[list[str], list[str]] = ([], [])
+        thread = self._connector_thread
+        if thread is not None:
+            if thread.is_alive():
+                return completed
+            thread.join()
+            with self._connector_result_lock:
+                if self._connector_result is not None:
+                    completed = self._connector_result
+                self._connector_result = None
+            self._connector_thread = None
+
+        due = tuple(connector for connector in self.connectors if self._due(connector))
+        if due:
+            worker = Thread(
+                target=self._run_connector_worker,
+                args=(due,),
+                name="alfred-connectors",
+                daemon=True,
+            )
+            self._connector_thread = worker
+            worker.start()
+        return completed
+
+    def _run_connector_worker(self, connectors: tuple[ConnectorSync, ...]) -> None:
+        errors: list[str] = []
+        synced: list[str] = []
+        try:
+            synced = self._sync_connectors(connectors, errors)
+        except Exception as error:  # pragma: no cover - last-resort thread containment
+            errors.append(f"connector_worker: {error.__class__.__name__}: {error}")
+        with self._connector_result_lock:
+            self._connector_result = (synced, errors)
 
     def _deliver_telegram(self, transport: TelegramTransport | None, errors: list[str]) -> int:
         """Flush the Telegram outbox once; a no-op when Telegram isn't configured."""

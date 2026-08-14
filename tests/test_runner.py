@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Event
 
 from alfred.audit import AuditLog
 from alfred.db import Database
@@ -11,8 +12,10 @@ class FakeTelegram:
     def __init__(self, updates: list[dict] | None = None) -> None:
         self.updates = updates or []
         self.sent: list[tuple[int, str]] = []
+        self.polls = 0
 
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
+        self.polls += 1
         return [update for update in self.updates if offset is None or update.get("update_id", -1) >= offset]
 
     def send_message(self, *, chat_id: int, text: str, reply_markup: dict | None = None) -> int:
@@ -195,6 +198,41 @@ def test_connector_sync_runs_once_per_configured_interval(tmp_path: Path) -> Non
     assert len(calls) == 2
 
 
+def test_background_connector_batch_does_not_block_telegram_cycles(tmp_path: Path) -> None:
+    started = Event()
+    release = Event()
+    completed = Event()
+
+    def slow_sync() -> None:
+        started.set()
+        release.wait(timeout=2)
+        completed.set()
+
+    fake = FakeTelegram()
+    runner = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        telegram_transport=fake,
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        telegram_chat_ids=frozenset({20}),
+        connectors=(ConnectorSync(name="slow", interval_seconds=900, run=slow_sync),),
+        background_connectors=True,
+    )
+
+    first = runner.run_once()
+    assert started.wait(timeout=1)
+    second = runner.run_once()
+
+    assert first.connectors_synced == []
+    assert second.connectors_synced == []
+    assert fake.polls == 2
+
+    release.set()
+    assert completed.wait(timeout=1)
+    third = runner.run_once()
+
+    assert third.connectors_synced == ["slow"]
+
+
 def test_a_failing_connector_does_not_stop_the_loop_or_other_connectors(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     calls: list[str] = []
@@ -259,6 +297,25 @@ def test_run_forever_stops_after_the_configured_iteration_count(tmp_path: Path) 
 
     # Slept between cycles but not after the final one.
     assert sleeps == [7, 7]
+
+
+def test_run_forever_retries_a_failed_telegram_poll_after_one_second(tmp_path: Path) -> None:
+    class OfflineTelegram(FakeTelegram):
+        def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
+            raise TimeoutError("offline")
+
+    sleeps: list[float] = []
+    runner = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        telegram_transport=OfflineTelegram(),
+        telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
+        idle_sleep_seconds=5.0,
+        sleep=sleeps.append,
+    )
+
+    runner.run_forever(iterations=2)
+
+    assert sleeps == [1.0]
 
 
 def test_run_forever_stops_when_stop_check_reports_true(tmp_path: Path) -> None:

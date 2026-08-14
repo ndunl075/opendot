@@ -118,6 +118,22 @@ def test_bot_client_uses_https_api_contract_without_exposing_token() -> None:
         client.close()
 
 
+def test_bot_client_bounds_long_poll_read_timeout_close_to_server_wait() -> None:
+    observed: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    client = TelegramBotClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        assert client.get_updates(offset=None, timeout_seconds=10) == []
+    finally:
+        client.close()
+
+    assert observed == [12.0]
+
+
 def test_bot_client_sends_feedback_keyboard_and_answers_callback() -> None:
     calls: list[tuple[str, dict]] = []
 

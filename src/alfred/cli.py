@@ -249,6 +249,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         slack_pairs=slack_pairs,
         slack_channel_ids=slack_channel_ids,
         connectors=tuple(connectors),
+        background_connectors=telegram_transport is not None or slack_bot is not None,
         poll_timeout_seconds=args.poll_timeout,
         idle_sleep_seconds=args.idle_sleep,
     )
@@ -678,8 +679,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="hard monthly cap on external Hermes turns; local direct answers do not count",
     )
     run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
-    run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")
-    run.add_argument("--idle-sleep", type=float, default=5.0, help="seconds to rest between cycles")
+    run.add_argument("--poll-timeout", type=int, default=10, help="seconds per Telegram long-poll cycle")
+    run.add_argument("--idle-sleep", type=float, default=1.0, help="seconds to rest between cycles")
     run.add_argument("--connector-interval", type=float, default=900.0, help="minimum seconds between each connector sync")
     run.add_argument("--iterations", type=int, help="stop after N cycles instead of running forever (mainly for testing)")
     service_configure = subcommands.add_parser(

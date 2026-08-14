@@ -410,10 +410,13 @@ LLM-backed ingestion and additional runtime/database surface are unnecessary
 for deterministic Calendar/Canvas facts. It can be evaluated later as an
 optional retrieval backend against the same source-linked memory tests.
 
-The agent step runs between intake and delivery, not as a connector.
-Connectors sync on a 15-minute interval and run *after* delivery, which
-stranded every answer in the outbox for an extra cycle; measured against a
-real round trip that was 26s of pure latency on top of the model call.
+The agent step runs between intake and delivery, not as a connector. When a
+chat transport is configured, periodic connectors run sequentially on one
+bounded background worker, so a long Calendar/Gmail/Canvas batch cannot stop
+Telegram from polling. Telegram's server long-poll is ten seconds by default;
+the HTTP read budget is only two seconds longer, and a failed poll retries
+after one second. This bounds the failure mode where a stuck 60-second poll
+previously hid a message even though the model itself answered in 4.7 seconds.
 
 `--hermes-command` sets which executable to run (default `hermes`; use a
 full path when PATH differs, as it can under the Windows service) and

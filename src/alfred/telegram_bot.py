@@ -24,8 +24,14 @@ class TelegramBotClient:
         if not token.strip():
             raise TelegramAPIError("Telegram token cannot be empty")
         self._token = token
-        # Telegram long polling can wait up to 50 seconds, so leave transport headroom.
-        self._client = httpx.Client(base_url=api_base, timeout=httpx.Timeout(60.0), transport=transport)
+        # Ordinary sends should fail promptly. Long polling supplies its own
+        # server-timeout-aware read budget below rather than inheriting one
+        # blanket 60-second timeout for every Telegram request.
+        self._client = httpx.Client(
+            base_url=api_base,
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0),
+            transport=transport,
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -39,7 +45,16 @@ class TelegramBotClient:
         }
         if offset is not None:
             payload["offset"] = offset
-        result = self._request("getUpdates", payload)
+        result = self._request(
+            "getUpdates",
+            payload,
+            timeout=httpx.Timeout(
+                connect=5.0,
+                read=float(timeout_seconds + 2),
+                write=5.0,
+                pool=5.0,
+            ),
+        )
         if not isinstance(result, list):
             raise TelegramAPIError("Telegram getUpdates response did not contain an update list")
         return result
@@ -67,9 +82,19 @@ class TelegramBotClient:
             {"callback_query_id": callback_query_id, "text": text[:200]},
         )
 
-    def _request(self, method: str, payload: dict[str, Any]) -> Any:
+    def _request(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        *,
+        timeout: httpx.Timeout | None = None,
+    ) -> Any:
         try:
-            response = self._client.post(f"/bot{self._token}/{method}", json=payload)
+            response = self._client.post(
+                f"/bot{self._token}/{method}",
+                json=payload,
+                **({"timeout": timeout} if timeout is not None else {}),
+            )
         except httpx.HTTPError as error:
             raise TelegramAPIError(f"Telegram request failed: {error.__class__.__name__}") from error
         if response.status_code >= 400:
