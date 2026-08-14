@@ -22,6 +22,8 @@ class TelegramTransport(Protocol):
         self, *, chat_id: int, text: str, reply_markup: dict | None = None
     ) -> int: ...
 
+    def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None: ...
+
     def answer_callback_query(self, *, callback_query_id: str, text: str) -> None: ...
 
 
@@ -80,6 +82,25 @@ class TelegramLongPoller:
             try:
                 update = TelegramUpdate.model_validate(raw_update)
                 receipt = self.gateway.handle(update)
+                # Casual deferred messages deliberately have no synthetic
+                # text acknowledgement. Telegram's native typing indicator is
+                # the lightweight receipt instead; it expires on its own and
+                # the eventual reply clears it immediately. This is best
+                # effort so a cosmetic Bot API failure can never lose or
+                # delay the actual queued answer.
+                if (
+                    receipt.agent_deferred
+                    and not receipt.duplicate
+                    and not receipt.text.strip()
+                    and update.message is not None
+                ):
+                    try:
+                        self.transport.send_chat_action(
+                            chat_id=update.message.chat.id,
+                            action="typing",
+                        )
+                    except Exception:
+                        pass
                 if update.callback_query is not None:
                     try:
                         self.transport.answer_callback_query(

@@ -74,6 +74,17 @@ class TelegramBotClient:
             raise TelegramAPIError("Telegram sendMessage response did not contain a message ID")
         return result["message_id"]
 
+    def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+        if action != "typing":
+            raise TelegramAPIError("unsupported Telegram chat action")
+        result = self._request(
+            "sendChatAction",
+            {"chat_id": chat_id, "action": action},
+            timeout=httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=2.0),
+        )
+        if result is not True:
+            raise TelegramAPIError("Telegram sendChatAction response was not successful")
+
     def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
         if not callback_query_id:
             raise TelegramAPIError("Telegram callback query ID cannot be empty")

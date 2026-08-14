@@ -15,6 +15,7 @@ class FakeTelegram:
         self.updates = updates or []
         self.offsets: list[int | None] = []
         self.sent: list[tuple[int, str, dict | None]] = []
+        self.chat_actions: list[tuple[int, str]] = []
         self.callback_answers: list[tuple[str, str]] = []
 
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
@@ -24,6 +25,9 @@ class FakeTelegram:
     def send_message(self, *, chat_id: int, text: str, reply_markup: dict | None = None) -> int:
         self.sent.append((chat_id, text, reply_markup))
         return 123
+
+    def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+        self.chat_actions.append((chat_id, action))
 
     def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
         self.callback_answers.append((callback_query_id, text))
@@ -56,6 +60,41 @@ def test_long_poller_persists_cursor_and_uses_idempotent_gateway(tmp_path: Path)
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 1
         assert connection.execute("SELECT cursor FROM sync_state WHERE connector = 'telegram'").fetchone()[0] == "41"
+
+
+def test_typing_indicator_failure_never_loses_a_deferred_message(tmp_path: Path) -> None:
+    class BrokenTypingTelegram(FakeTelegram):
+        def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+            raise TimeoutError("cosmetic request failed")
+
+    fake = BrokenTypingTelegram(
+        [
+            {
+                "update_id": 42,
+                "message": {
+                    "message_id": 2,
+                    "date": 1_786_198_400,
+                    "chat": {"id": 20},
+                    "from": {"id": 10},
+                    "text": "yo",
+                },
+            }
+        ]
+    )
+
+    result = TelegramLongPoller(
+        Database(tmp_path / "alfred.db"),
+        fake,
+        {TelegramPair(chat_id=20, user_id=10)},
+        defer_unparsed_to_agent=True,
+    ).poll_once(timeout_seconds=1)
+
+    assert result.handled == 1
+    with Database(tmp_path / "alfred.db").connect() as connection:
+        row = connection.execute(
+            "SELECT metadata_json FROM events WHERE source = 'telegram' AND external_id = '42'"
+        ).fetchone()
+    assert json.loads(row["metadata_json"])["agent_deferred"] is True
 
 
 def test_outbox_worker_sends_only_allowed_chat_once(tmp_path: Path) -> None:
@@ -162,6 +201,28 @@ def test_bot_client_sends_feedback_keyboard_and_answers_callback() -> None:
             {"callback_query_id": "callback-1", "text": "thanks"},
         ),
     ]
+
+
+def test_bot_client_sends_a_short_bounded_typing_action() -> None:
+    calls: list[tuple[str, dict, float]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(
+            (
+                request.url.path,
+                json.loads(request.content),
+                request.extensions["timeout"]["read"],
+            )
+        )
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    client = TelegramBotClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        client.send_chat_action(chat_id=20)
+    finally:
+        client.close()
+
+    assert calls == [("/botTOKEN/sendChatAction", {"chat_id": 20, "action": "typing"}, 2.0)]
 
 
 def test_bubbles_enqueued_in_one_second_deliver_in_order(tmp_path: Path) -> None:

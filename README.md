@@ -302,7 +302,10 @@ Hermes's own Telegram gateway does not currently work on this platform.
 Explicit work gets a quick acknowledgement first, naming what Alfred is
 looking at (`checking your agenda...`, `checking your inbox...`), then the
 answer. Casual conversation gets no synthetic acknowledgement and goes
-straight to the real reply. Work acknowledgements are keyword matches rather
+straight to the real reply; Telegram's native `typing...` status appears as
+soon as Alfred accepts it and clears automatically when the reply arrives.
+The typing hint is best effort and never blocks the durable answer path. Work
+acknowledgements are keyword matches rather
 than model calls because they're produced inside the intake write transaction.
 That's structural, not cosmetic: Telegram intake runs inside a write
 transaction, and an agent turn takes seconds and opens its own connection to

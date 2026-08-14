@@ -12,6 +12,7 @@ class FakeTelegram:
     def __init__(self, updates: list[dict] | None = None) -> None:
         self.updates = updates or []
         self.sent: list[tuple[int, str]] = []
+        self.chat_actions: list[tuple[int, str]] = []
         self.polls = 0
 
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
@@ -21,6 +22,9 @@ class FakeTelegram:
     def send_message(self, *, chat_id: int, text: str, reply_markup: dict | None = None) -> int:
         self.sent.append((chat_id, text))
         return 1
+
+    def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+        self.chat_actions.append((chat_id, action))
 
     def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
         return None
@@ -113,6 +117,7 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
         ),
         (20, "want me to check the calendar connection?"),
     ]
+    assert fake.chat_actions == []
 
 
 def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path: Path) -> None:
@@ -148,6 +153,7 @@ def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path:
     assert report.errors == []
     assert report.agent_replies == 1
     assert fake.sent == [(20, "yo. what's good?")]
+    assert fake.chat_actions == [(20, "typing")]
 
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
