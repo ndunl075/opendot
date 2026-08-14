@@ -481,6 +481,34 @@ def test_subprocess_runner_builds_the_documented_hermes_invocation() -> None:
     assert kwargs["check"] is False
 
 
+def test_subprocess_runner_can_bypass_the_windows_console_launcher() -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompleted(0, stdout="the answer")
+
+    runner = SubprocessAgentRunner(
+        command=r"C:\Hermes\venv\Scripts\python.exe",
+        command_prefix=("-m", "hermes_cli.main"),
+        profile="alfred",
+        runner=fake_run,
+    )
+
+    assert runner("hi").ok is True
+    assert calls == [
+        [
+            r"C:\Hermes\venv\Scripts\python.exe",
+            "-m",
+            "hermes_cli.main",
+            "-p",
+            "alfred",
+            "-z",
+            "hi",
+        ]
+    ]
+
+
 def test_subprocess_runner_passes_a_turn_local_tool_allowlist_to_hermes() -> None:
     calls: list[dict] = []
 

@@ -408,6 +408,12 @@ exits non-zero, or produces nothing still gets a reply saying so, and is not
 retried — an unanswered `Thinking…` and an endlessly re-run model call are
 both worse than one honest failure message.
 
+On Windows, `--hermes-python <Hermes venv>\Scripts\python.exe` bypasses
+Hermes's small console launcher and invokes `-m hermes_cli.main` directly.
+Use it when the launcher intermittently exits with `0xC000013A` under a
+windowless scheduled task. Redaction, timeout, per-turn MCP narrowing, and
+the one-shot process boundary are unchanged.
+
 `--embedding-model nomic-embed-text` enables local hybrid memory recall and
 background vector backfill. `--hermes-monthly-call-limit` is a hard external-turn
 cap (default 1000). Bridge context is bounded before launch and common PII is
