@@ -17,6 +17,7 @@ from alfred.hermes_bridge import (
 from alfred.hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
     MAX_HERMES_TOOLS_PER_TURN,
+    is_casual_conversation,
     select_hermes_tools,
 )
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -41,6 +42,16 @@ class ScopedFakeAgent(FakeAgent):
 
     def run_scoped(self, prompt: str, *, allowed_tools: frozenset[str]) -> AgentRunResult:
         self.tool_scopes.append(allowed_tools)
+        return self(prompt)
+
+
+class RoutedFakeAgent(ScopedFakeAgent):
+    def __init__(self, result: AgentRunResult) -> None:
+        super().__init__(result)
+        self.conversation_prompts: list[str] = []
+
+    def run_conversation(self, prompt: str) -> AgentRunResult:
+        self.conversation_prompts.append(prompt)
         return self(prompt)
 
 
@@ -282,7 +293,7 @@ def test_confirmed_memory_is_prefetched_but_candidates_are_quarantined(tmp_path:
     assert confirmed.id in prompt
     assert "prefers concise status updates" in prompt
     assert "pirate voice" not in prompt
-    assert "do not call memory_search again" in prompt
+    assert "ongoing private text conversation" in prompt
 
 
 def test_running_twice_answers_once(tmp_path: Path) -> None:
@@ -551,8 +562,24 @@ def test_subprocess_runner_passes_a_turn_local_tool_allowlist_to_hermes() -> Non
     assert HERMES_MCP_TOOL_FILTER_ENV not in __import__("os").environ
 
 
+def test_subprocess_runner_uses_no_reasoning_and_no_mcp_tools_for_conversation() -> None:
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _FakeCompleted(0, stdout="yo what's good")
+
+    result = SubprocessAgentRunner(command="hermes", profile="alfred", runner=fake_run).run_conversation("yo")
+
+    assert result.ok is True
+    argv, kwargs = calls[0]
+    assert argv == ["hermes", "-p", "alfred", "--reasoning", "none", "-z", "yo"]
+    assert kwargs["env"][HERMES_MCP_TOOL_FILTER_ENV] == ""
+
+
 def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
     assert select_hermes_tools("what's going on with my inbox and github today?") == frozenset()
+    assert select_hermes_tools("what should i work on today?") == {"agenda_get", "brief_get"}
     assert select_hermes_tools("draft a reply to that email") == {
         "message_draft",
     }
@@ -569,6 +596,26 @@ def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
     assert "action_commit" not in broad
     assert "calendar_event_propose" in broad
     assert "message_send_propose" in broad
+
+
+def test_casual_routing_separates_chat_from_work_and_inherits_short_followups() -> None:
+    assert is_casual_conversation("yo") is True
+    assert is_casual_conversation("how are you today?") is True
+    assert is_casual_conversation("what do you think about that movie?") is True
+    assert is_casual_conversation("what should i work on today?") is False
+    assert is_casual_conversation("check my calendar") is False
+    assert is_casual_conversation("yeah do that", recent_topic_text="draft the email") is False
+
+
+def test_casual_turn_uses_the_conversation_lane(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(71, "yo"))
+    agent = RoutedFakeAgent(AgentRunResult(text="yo. what's good?", ok=True))
+
+    HermesBridge(Database(database_path), agent).run_once()
+
+    assert len(agent.conversation_prompts) == 1
+    assert agent.tool_scopes == []
 
 
 def test_subprocess_runner_redacts_pii_at_the_final_hermes_boundary() -> None:

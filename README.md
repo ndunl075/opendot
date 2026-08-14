@@ -299,15 +299,14 @@ transport; Hermes is invoked as a one-shot subprocess (`hermes -p <profile>
 -z <message>`) and never touches Telegram itself — deliberately, since
 Hermes's own Telegram gateway does not currently work on this platform.
 
-You get a quick acknowledgement first, naming what it's looking at
-(`checking your agenda...`, `checking your inbox...`, falling back to
-`one sec`), then the answer. That ack is a keyword match rather than a
-model call, because it's produced inside the intake write transaction. That's structural, not
-cosmetic: Telegram intake runs inside a write transaction, and an agent turn
-takes seconds and opens its own connection to this same database, so it has
-to happen after that transaction closes. The acknowledgement is flushed
-before the agent runs, so it lands while the answer is still being written
-rather than arriving alongside it.
+Explicit work gets a quick acknowledgement first, naming what Alfred is
+looking at (`checking your agenda...`, `checking your inbox...`), then the
+answer. Casual conversation gets no synthetic acknowledgement and goes
+straight to the real reply. Work acknowledgements are keyword matches rather
+than model calls because they're produced inside the intake write transaction.
+That's structural, not cosmetic: Telegram intake runs inside a write
+transaction, and an agent turn takes seconds and opens its own connection to
+this same database, so it has to happen after that transaction closes.
 
 The answer itself arrives as two to four consecutive messages rather than one
 block — `SOUL.md` asks the agent for short paragraphs and the bridge sends
@@ -317,8 +316,10 @@ For inbox/GitHub questions, the bridge assembles a bounded context pack from
 the already-synced local records before starting Hermes. That avoids a second
 MCP discovery/tool-call loop on the cold path. Gmail's Promotions, Social,
 and Forums categories are counted but omitted from the pack by default, and
-two recent completed chat exchanges are included so a precise follow-up such
-as `yes, flag that` keeps its referent. Synced message content remains
+two recent completed chat exchanges are included for work turns so a precise
+follow-up such as `yes, flag that` keeps its referent. Casual turns use up to
+eight completed exchanges from the last week, the free fast model with
+reasoning disabled, and an empty Alfred MCP tool surface. Synced message content remains
 untrusted data, and Gmail context is still headers/snippets only, never a full
 message body.
 
