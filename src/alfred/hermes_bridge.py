@@ -357,6 +357,12 @@ class HermesBridge:
                 failed += 1
         return HermesBridgeResult(pending=len(pending), answered=answered, failed=failed)
 
+    def pending_chat_ids(self) -> frozenset[int]:
+        """Return only chats whose recent deferred turns still need an answer."""
+
+        self.database.migrate()
+        return frozenset(int(event["chat_id"]) for event in self._pending())
+
     def _pending(self) -> list[dict[str, Any]]:
         """Deferred messages still missing a reply, newest-eligible first.
 

@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 from datetime import UTC, datetime
+from threading import Event, Thread
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -39,6 +40,60 @@ class DeliveryResult(BaseModel):
     state: str
     telegram_message_id: int | None = None
     error: str | None = None
+
+
+class TelegramTypingHeartbeat:
+    """Refresh Telegram's short-lived typing status until a response is ready.
+
+    Chat actions are cosmetic and deliberately best effort. They run on one
+    daemon thread so a slow Bot API call cannot hold up the agent, then stop
+    before durable outbox delivery so a late refresh cannot outlive the reply.
+    """
+
+    def __init__(
+        self,
+        transport: TelegramTransport | None,
+        chat_ids: set[int] | frozenset[int],
+        *,
+        interval_seconds: float = 4.0,
+        join_timeout_seconds: float = 2.5,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("typing heartbeat interval must be positive")
+        self.transport = transport
+        self.chat_ids = tuple(sorted(chat_ids))
+        self.interval_seconds = interval_seconds
+        self.join_timeout_seconds = join_timeout_seconds
+        self._stop = Event()
+        self._thread: Thread | None = None
+
+    def __enter__(self) -> TelegramTypingHeartbeat:
+        if self.transport is not None and self.chat_ids:
+            self._thread = Thread(
+                target=self._run,
+                name="alfred-telegram-typing",
+                daemon=True,
+            )
+            self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.join_timeout_seconds)
+
+    def _run(self) -> None:
+        assert self.transport is not None
+        while not self._stop.is_set():
+            for chat_id in self.chat_ids:
+                if self._stop.is_set():
+                    return
+                try:
+                    self.transport.send_chat_action(chat_id=chat_id, action="typing")
+                except Exception:
+                    pass
+            if self._stop.wait(self.interval_seconds):
+                return
 
 
 class TelegramLongPoller:

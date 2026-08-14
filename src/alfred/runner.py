@@ -23,7 +23,12 @@ from .db import Database
 from .jobs import JobRunner
 from .telegram import TelegramPair
 from .telegram_actions import TelegramActionWorker
-from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker, TelegramTransport
+from .telegram_runtime import (
+    TelegramLongPoller,
+    TelegramOutboxWorker,
+    TelegramTransport,
+    TelegramTypingHeartbeat,
+)
 from .slack import SlackOutboxWorker, SlackPair, SlackTransport
 
 
@@ -62,6 +67,8 @@ class AlfredRunner:
         telegram_chat_ids: frozenset[int] = frozenset(),
         defer_unparsed_to_agent: bool = False,
         agent_bridge: Callable[[], object] | None = None,
+        agent_typing_chat_ids: Callable[[], frozenset[int]] | None = None,
+        typing_heartbeat_interval_seconds: float = 4.0,
         memory_learning: Callable[[], object] | None = None,
         slack_transport: SlackTransport | None = None,
         slack_pairs: frozenset[SlackPair] = frozenset(),
@@ -79,6 +86,8 @@ class AlfredRunner:
         self.telegram_chat_ids = telegram_chat_ids
         self.defer_unparsed_to_agent = defer_unparsed_to_agent
         self.agent_bridge = agent_bridge
+        self.agent_typing_chat_ids = agent_typing_chat_ids
+        self.typing_heartbeat_interval_seconds = typing_heartbeat_interval_seconds
         self.memory_learning = memory_learning
         self.slack_transport = slack_transport
         self.slack_pairs = slack_pairs
@@ -165,7 +174,18 @@ class AlfredRunner:
         # which stranded every answer in the outbox for an extra cycle.
         agent_replies = 0
         if self.agent_bridge is not None:
-            answered, result = self._safe("hermes_bridge", self.agent_bridge, errors)
+            typing_chat_ids: frozenset[int] = frozenset()
+            if transport is not None and self.agent_typing_chat_ids is not None:
+                try:
+                    typing_chat_ids = self.agent_typing_chat_ids()
+                except Exception:
+                    pass
+            with TelegramTypingHeartbeat(
+                transport,
+                typing_chat_ids,
+                interval_seconds=self.typing_heartbeat_interval_seconds,
+            ):
+                answered, result = self._safe("hermes_bridge", self.agent_bridge, errors)
             if answered and result is not None:
                 agent_replies = int(getattr(result, "answered", 0))
             telegram_delivered += self._deliver_telegram(transport, errors)

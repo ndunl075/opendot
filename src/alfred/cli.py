@@ -216,6 +216,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             )
         )
     agent_bridge = None
+    agent_typing_chat_ids = None
     if args.hermes_profile:
         hermes_command = args.hermes_python or args.hermes_command
         hermes_command_prefix = ("-m", "hermes_cli.main") if args.hermes_python else ()
@@ -224,7 +225,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             if embedding_provider is not None
             else MemoryGraph(database)
         )
-        agent_bridge = HermesBridge(
+        hermes_bridge = HermesBridge(
             database,
             SubprocessAgentRunner(
                 command=hermes_command,
@@ -236,7 +237,9 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 monthly_call_limit=args.hermes_monthly_call_limit,
             ),
             memory_graph=memory_graph,
-        ).run_once
+        )
+        agent_bridge = hermes_bridge.run_once
+        agent_typing_chat_ids = hermes_bridge.pending_chat_ids
     runner = AlfredRunner(
         database,
         telegram_transport=telegram_transport,
@@ -244,6 +247,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         telegram_chat_ids=chat_ids,
         defer_unparsed_to_agent=bool(args.hermes_profile),
         agent_bridge=agent_bridge,
+        agent_typing_chat_ids=agent_typing_chat_ids,
         memory_learning=MemoryLearningService(database).run_once if args.hermes_profile else None,
         slack_transport=slack_bot,
         slack_pairs=slack_pairs,

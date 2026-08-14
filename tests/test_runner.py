@@ -1,5 +1,6 @@
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
+import time
 
 from alfred.audit import AuditLog
 from alfred.db import Database
@@ -154,6 +155,64 @@ def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path:
     assert report.agent_replies == 1
     assert fake.sent == [(20, "yo. what's good?")]
     assert fake.chat_actions == [(20, "typing")]
+
+
+def test_typing_status_is_refreshed_until_the_agent_finishes(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    fake = FakeTelegram()
+    agent_started = Event()
+    release_agent = Event()
+    reports: list[object] = []
+
+    def slow_agent_bridge():
+        agent_started.set()
+        assert release_agent.wait(timeout=2.0)
+        return type("Answer", (), {"answered": 1})()
+
+    runner = AlfredRunner(
+        database,
+        telegram_transport=fake,
+        telegram_chat_ids=frozenset({20}),
+        agent_bridge=slow_agent_bridge,
+        agent_typing_chat_ids=lambda: frozenset({20}),
+        typing_heartbeat_interval_seconds=0.01,
+    )
+    worker = Thread(target=lambda: reports.append(runner.run_once()))
+
+    worker.start()
+    assert agent_started.wait(timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while len(fake.chat_actions) < 3 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    release_agent.set()
+    worker.join(timeout=2.0)
+
+    assert not worker.is_alive()
+    assert len(fake.chat_actions) >= 3
+    assert set(fake.chat_actions) == {(20, "typing")}
+    stopped_count = len(fake.chat_actions)
+    time.sleep(0.03)
+    assert len(fake.chat_actions) == stopped_count
+    assert reports[0].errors == []
+
+
+def test_typing_heartbeat_failure_never_blocks_the_agent(tmp_path: Path) -> None:
+    class BrokenTypingTelegram(FakeTelegram):
+        def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
+            raise TimeoutError("cosmetic request failed")
+
+    called: list[str] = []
+    report = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        telegram_transport=BrokenTypingTelegram(),
+        agent_bridge=lambda: called.append("agent") or type("Answer", (), {"answered": 1})(),
+        agent_typing_chat_ids=lambda: frozenset({20}),
+        typing_heartbeat_interval_seconds=0.01,
+    ).run_once()
+
+    assert called == ["agent"]
+    assert report.agent_replies == 1
+    assert report.errors == []
 
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:

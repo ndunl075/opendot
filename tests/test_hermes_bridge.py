@@ -171,6 +171,21 @@ def test_non_today_calendar_question_still_uses_the_agent(tmp_path: Path) -> Non
     ]
 
 
+def test_pending_chat_ids_disappear_as_soon_as_the_reply_is_stored(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(20, "tell me something useful"))
+    bridge = HermesBridge(
+        Database(database_path),
+        FakeAgent(AgentRunResult(text="here you go", ok=True)),
+    )
+
+    assert bridge.pending_chat_ids() == frozenset({20})
+
+    bridge.run_once()
+
+    assert bridge.pending_chat_ids() == frozenset()
+
+
 def test_bridge_scopes_a_task_turn_before_calling_a_scoped_agent(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     _defer(database_path, _update(3, "create a task to rotate the Canvas feed URL"))
