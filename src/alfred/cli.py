@@ -217,6 +217,8 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         )
     agent_bridge = None
     if args.hermes_profile:
+        hermes_command = args.hermes_python or args.hermes_command
+        hermes_command_prefix = ("-m", "hermes_cli.main") if args.hermes_python else ()
         memory_graph = (
             MemoryGraph(database, embedding_provider=embedding_provider)
             if embedding_provider is not None
@@ -225,7 +227,8 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         agent_bridge = HermesBridge(
             database,
             SubprocessAgentRunner(
-                command=args.hermes_command,
+                command=hermes_command,
+                command_prefix=hermes_command_prefix,
                 profile=args.hermes_profile,
                 timeout_seconds=args.hermes_timeout,
                 database=database,
@@ -641,6 +644,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--hermes-command",
         default="hermes",
         help="hermes executable to invoke; use a full path when PATH differs (e.g. under the Windows service)",
+    )
+    run.add_argument(
+        "--hermes-python",
+        help=(
+            "Python executable from Hermes's own venv; runs `-m hermes_cli.main` and bypasses "
+            "the Windows console launcher when it exits with 0xC000013A"
+        ),
     )
     run.add_argument(
         "--hermes-timeout",

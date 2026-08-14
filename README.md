@@ -408,6 +408,12 @@ exits non-zero, or produces nothing still gets a reply saying so, and is not
 retried — an unanswered `Thinking…` and an endlessly re-run model call are
 both worse than one honest failure message.
 
+On Windows, Hermes child processes are created with `CREATE_NO_WINDOW`, so a
+Telegram question never opens a terminal. `--hermes-python <Hermes
+venv>\Scripts\python.exe` can also invoke `-m hermes_cli.main` directly instead
+of its small console launcher. Redaction, timeout, per-turn MCP narrowing, and
+the one-shot process boundary are unchanged.
+
 `--embedding-model nomic-embed-text` enables local hybrid memory recall and
 background vector backfill. `--hermes-monthly-call-limit` is a hard external-turn
 cap (default 1000). Bridge context is bounded before launch and common PII is

@@ -64,6 +64,14 @@ def test_cli_exposes_opt_in_canvas_ical_sync_without_a_url_argument() -> None:
     assert continuous.canvas_ical_interval == 900.0
 
 
+def test_cli_exposes_windows_safe_hermes_python_launch() -> None:
+    args = build_parser().parse_args(
+        ["run", "--hermes-profile", "alfred", "--hermes-python", r"C:\Hermes\python.exe"]
+    )
+
+    assert args.hermes_python == r"C:\Hermes\python.exe"
+
+
 def test_cli_imports_a_vault_note_as_a_confirmed_memory(tmp_path: Path, capsys) -> None:
     database_path = tmp_path / "alfred.db"
     vault = tmp_path / "vault"

@@ -170,6 +170,7 @@ class SubprocessAgentRunner:
         self,
         *,
         command: str = "hermes",
+        command_prefix: tuple[str, ...] = (),
         profile: str,
         timeout_seconds: float = 60.0,
         redact_outbound: bool = True,
@@ -179,6 +180,7 @@ class SubprocessAgentRunner:
         monotonic: Callable[[], float] = time.perf_counter,
     ) -> None:
         self.command = command
+        self.command_prefix = command_prefix
         self.profile = profile
         self.timeout_seconds = timeout_seconds
         self.redact_outbound = redact_outbound
@@ -218,7 +220,7 @@ class SubprocessAgentRunner:
         # this final process boundary, after every local context pack is built.
         if self.redact_outbound:
             prompt = self._redactor.redact(prompt)
-        argv = [self.command, "-p", self.profile, "-z", prompt]
+        argv = [self.command, *self.command_prefix, "-p", self.profile, "-z", prompt]
         run_arguments: dict[str, Any] = {
             "capture_output": True,
             "text": True,
@@ -227,6 +229,11 @@ class SubprocessAgentRunner:
             "timeout": self.timeout_seconds,
             "check": False,
         }
+        if os.name == "nt":
+            # Alfred normally runs without a console under Task Scheduler.
+            # A console child would otherwise open a terminal for every turn;
+            # closing that window terminates Hermes with 0xC000013A.
+            run_arguments["creationflags"] = subprocess.CREATE_NO_WINDOW
         if allowed_tools is not None:
             environment = os.environ.copy()
             environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))
@@ -282,7 +289,7 @@ class HermesBridge:
     """Answer messages that intake deferred, one agent turn at a time."""
 
     connector_name = "hermes_bridge"
-    failure_reply = "I hit a temporary problem before I could answer. Please try that again."
+    failure_reply = "i hit a snag before i could answer. try that again?"
 
     def __init__(
         self,
