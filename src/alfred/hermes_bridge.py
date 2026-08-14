@@ -33,6 +33,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable, Protocol
 
@@ -132,6 +133,9 @@ class AgentRunResult(BaseModel):
     text: str
     ok: bool
     detail: str = ""
+    duration_ms: int | None = None
+    runtime: str = "unknown"
+    tool_count: int | None = None
 
 
 class AgentRunner(Protocol):
@@ -172,6 +176,7 @@ class SubprocessAgentRunner:
         database: Database | None = None,
         monthly_call_limit: int | None = None,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        monotonic: Callable[[], float] = time.perf_counter,
     ) -> None:
         self.command = command
         self.profile = profile
@@ -181,6 +186,7 @@ class SubprocessAgentRunner:
         self.database = database
         self.monthly_call_limit = monthly_call_limit
         self._runner = runner
+        self._monotonic = monotonic
 
     def __call__(self, prompt: str) -> AgentRunResult:
         return self._run(prompt, allowed_tools=None)
@@ -191,9 +197,22 @@ class SubprocessAgentRunner:
         return self._run(prompt, allowed_tools=allowed_tools)
 
     def _run(self, prompt: str, *, allowed_tools: frozenset[str] | None) -> AgentRunResult:
+        started = self._monotonic()
+        tool_count = len(allowed_tools) if allowed_tools is not None else None
+
+        def result(text: str, ok: bool, detail: str = "") -> AgentRunResult:
+            return AgentRunResult(
+                text=text,
+                ok=ok,
+                detail=detail,
+                duration_ms=max(0, round((self._monotonic() - started) * 1000)),
+                runtime="oneshot",
+                tool_count=tool_count,
+            )
+
         if self.database is not None and self.monthly_call_limit is not None:
             if self._month_to_date_calls() >= self.monthly_call_limit:
-                return AgentRunResult(text="", ok=False, detail="monthly Hermes call limit reached")
+                return result("", False, "monthly Hermes call limit reached")
         # Hermes owns its provider connection, so Alfred cannot wrap that HTTP
         # call with GuardedCloudProvider. Redaction must therefore happen at
         # this final process boundary, after every local context pack is built.
@@ -215,22 +234,19 @@ class SubprocessAgentRunner:
         try:
             completed = self._runner(argv, **run_arguments)
         except subprocess.TimeoutExpired:
-            return AgentRunResult(
-                text="", ok=False, detail=f"agent timed out after {self.timeout_seconds:.0f}s"
-            )
+            return result("", False, f"agent timed out after {self.timeout_seconds:.0f}s")
         except OSError as error:
             # Most often the binary is not on PATH -- a real possibility when
             # the run loop is the Windows service rather than a login shell.
-            return AgentRunResult(text="", ok=False, detail=f"{error.__class__.__name__}: {error}")
+            return result("", False, f"{error.__class__.__name__}: {error}")
 
         stdout = (completed.stdout or "").strip()
         if completed.returncode != 0:
             stderr = (completed.stderr or "").strip()
-            return AgentRunResult(
-                text="", ok=False, detail=f"exit {completed.returncode}: {stderr[-300:]}"
-            )
+            return result("", False, f"exit {completed.returncode}: {stderr[-300:]}")
         if not stdout:
-            return AgentRunResult(text="", ok=False, detail="agent produced no output")
+            return result("", False, "agent produced no output")
+        completed_result = result(stdout, True)
         if self.database is not None:
             AuditLog(self.database).append(
                 AuditEvent(
@@ -240,12 +256,14 @@ class SubprocessAgentRunner:
                     outcome="ok",
                     result={
                         "profile": self.profile,
-                        "tool_count": len(allowed_tools) if allowed_tools is not None else None,
+                        "tool_count": tool_count,
                         "tools": sorted(allowed_tools) if allowed_tools is not None else None,
+                        "duration_ms": completed_result.duration_ms,
+                        "runtime": completed_result.runtime,
                     },
                 )
             )
-        return AgentRunResult(text=stdout, ok=True)
+        return completed_result
 
     def _month_to_date_calls(self) -> int:
         assert self.database is not None
@@ -276,6 +294,7 @@ class HermesBridge:
         max_bubbles: int = DEFAULT_MAX_BUBBLES,
         context_char_budget: int = DEFAULT_CONTEXT_CHAR_BUDGET,
         memory_graph: MemoryGraph | None = None,
+        monotonic: Callable[[], float] = time.perf_counter,
     ) -> None:
         self.database = database
         self.agent = agent
@@ -284,6 +303,7 @@ class HermesBridge:
         self.max_bubbles = max_bubbles
         self.context_char_budget = context_char_budget
         self.memory_graph = memory_graph or MemoryGraph(database)
+        self._monotonic = monotonic
 
     def run_once(self) -> HermesBridgeResult:
         """Answer up to ``max_per_run`` deferred messages; never raises for one bad turn."""
@@ -351,18 +371,48 @@ class HermesBridge:
         return pending
 
     def _answer(self, event: dict[str, Any]) -> HermesBridgeReceipt:
+        bridge_started_at = datetime.now(UTC).isoformat()
+        bridge_started = self._monotonic()
         external_id = str(event["external_id"])
         request = str(event["content"])
         direct_answer = self._direct_answer(request)
         if direct_answer is not None:
-            result = AgentRunResult(text=direct_answer, ok=True, detail="local calendar fast path")
+            result = AgentRunResult(
+                text=direct_answer,
+                ok=True,
+                detail="local calendar fast path",
+                duration_ms=0,
+                runtime="local",
+                tool_count=0,
+            )
+            context_ms = 0
+            agent_ms = 0
         else:
+            context_started = self._monotonic()
             history = self._recent_conversation(event)
             prompt = self._agent_prompt(event, history=history)
+            context_ms = max(0, round((self._monotonic() - context_started) * 1000))
+            agent_started = self._monotonic()
             result = self._run_agent_scoped(prompt, request=request, history=history)
+            agent_ms = max(0, round((self._monotonic() - agent_started) * 1000))
         text = result.text if result.ok else self.failure_reply
+        telemetry = {
+            "timing_version": 1,
+            "bridge_started_at": bridge_started_at,
+            "context_ms": context_ms,
+            "agent_ms": agent_ms,
+            "agent_reported_ms": result.duration_ms,
+            "response_ready_ms": max(0, round((self._monotonic() - bridge_started) * 1000)),
+            "runtime": result.runtime,
+            "tool_count": result.tool_count,
+        }
         return self._store(
-            external_id, chat_id=event["chat_id"], text=text, ok=result.ok, detail=result.detail
+            external_id,
+            chat_id=event["chat_id"],
+            text=text,
+            ok=result.ok,
+            detail=result.detail,
+            telemetry=telemetry,
         )
 
     def _direct_answer(self, request: str) -> str | None:
@@ -782,7 +832,14 @@ class HermesBridge:
         )
 
     def _store(
-        self, external_id: str, *, chat_id: int, text: str, ok: bool, detail: str
+        self,
+        external_id: str,
+        *,
+        chat_id: int,
+        text: str,
+        ok: bool,
+        detail: str,
+        telemetry: dict[str, Any] | None = None,
     ) -> HermesBridgeReceipt:
         bubbles = split_into_bubbles(text, max_bubbles=self.max_bubbles)
         with self.database.connect() as connection:
@@ -808,6 +865,7 @@ class HermesBridge:
                             "bubbles": str(len(bubbles)),
                             "reply_chars": str(sum(len(bubble) for bubble in bubbles)),
                             "detail": detail,
+                            **(telemetry or {}),
                         },
                     ),
                 )

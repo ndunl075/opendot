@@ -41,6 +41,17 @@ def test_cli_reports_connector_status_without_any_configured_connector(tmp_path:
     assert json.loads(capsys.readouterr().out) == []
 
 
+def test_cli_reports_empty_latency_status_without_message_content(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "alfred.db"
+
+    assert main(["--db", str(database_path), "latency-status", "--limit", "5"]) == 0
+    report = json.loads(capsys.readouterr().out)
+
+    assert report["instrumented_turns"] == 0
+    assert report["delivered_turns"] == 0
+    assert report["recent"] == []
+
+
 def test_cli_exposes_opt_in_canvas_ical_sync_without_a_url_argument() -> None:
     one_shot = build_parser().parse_args(["canvas-ical-sync"])
     setup = build_parser().parse_args(["canvas-ical-setup"])
