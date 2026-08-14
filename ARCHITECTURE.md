@@ -180,6 +180,22 @@ Feedback can make a bounded ordering adjustment within existing Gmail/GitHub
 priority tiers; it cannot select a new source, bypass low-priority-mail filters,
 or authorize any action.
 
+**Built (read side):** every bullet above records evaluation data, but until
+now nothing read it back, so the data could not answer the question it was
+collected for. `evaluation.py` (`alfred evaluation-status`, plus an admin-UI
+page) summarizes all four signals over a window: response-feedback outcomes,
+memory retrieval outcomes, workflow proposal acceptance, and implicit-candidate
+promotion — plus which context sources were present when a vote landed, which
+is the join `response_context` and `response_feedback` were designed for.
+Deliberately association rather than attribution: a turn packs several sources
+at once, so a source appearing beside `wrong_context` is where to start
+looking, never proof it caused the miss. The report runs no model, writes
+nothing, and changes no ranking; deciding what to do about a bad number stays
+a human judgment. It is content-free like the tables it reads (outcomes,
+counts, source names, opaque record IDs), so it is safe to paste into an
+issue. A metric with no votes yet reports null rather than zero — an unmeasured
+system must not read as a failing one.
+
 ## 5. Knowledge graph and Obsidian
 
 ### One memory, four views

@@ -50,6 +50,7 @@ from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_inbound import GmailInboundGateway
 from .hermes_bridge import HermesBridge, SubprocessAgentRunner
+from .evaluation import EvaluationService
 from .latency import LatencyService
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
@@ -295,6 +296,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="show content-free Telegram acknowledgement and agent response latency",
     )
     latency_status.add_argument("--limit", type=int, default=20, help="number of recent instrumented turns")
+    evaluation_status = subcommands.add_parser(
+        "evaluation-status",
+        help="summarize content-free response, retrieval, workflow, and memory-learning signals",
+    )
+    evaluation_status.add_argument(
+        "--window-days", type=int, default=30, help="how far back to summarize (default: 30)"
+    )
     vault_sync_status = subcommands.add_parser(
         "vault-sync-status", help="check whether the self-hosted CouchDB behind optional mobile vault sync is reachable"
     )
@@ -767,6 +775,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "latency-status":
         print(LatencyService(database).report(limit=args.limit).model_dump_json())
+        return 0
+    if args.command == "evaluation-status":
+        print(EvaluationService(database).report(window_days=args.window_days).model_dump_json())
         return 0
     if args.command == "vault-sync-status":
         print(check_couchdb(args.url).model_dump_json())
