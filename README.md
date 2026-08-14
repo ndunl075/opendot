@@ -330,6 +330,25 @@ an inbox/GitHub read already satisfied by the context pack exposes no tools.
 This is defense in depth on top of the existing per-client policy checks and
 does not narrow Claude, Cursor, HTTP, or other MCP clients.
 
+`alfred latency-status --limit 20` reports content-free p50/p95 timing for the
+Telegram acknowledgement, local context assembly, Hermes call, response-ready
+point, and first delivered reply. Recent samples contain only an update ID,
+runtime/tool count, outcome, and timings; message and connector content never
+enters the report. Telegram's source timestamp has one-second resolution, so
+acknowledgement and delivered totals are best treated as operator-facing
+end-to-end measurements rather than a microbenchmark.
+
+Hermes ACP and `serve` were evaluated as ways to remove the one-shot process
+start. ACP passes its compatibility check, but its tool surface is fixed when
+a session is created, while Alfred narrows MCP tools for every turn. Creating
+a fresh zero-tool session preserved that boundary but exceeded 30 seconds in
+two bounded trials before a prompt even ran because Hermes constructs a fresh
+agent per session. Reusing one session would be faster only by retaining an
+unbounded hidden transcript and a fixed tool surface. Production therefore
+stays on the bounded, redacted one-shot runner until upstream exposes a
+per-prompt tool override or cheap isolated sessions; failures and timeouts
+continue to produce one honest reply without retrying.
+
 ### Persistent learning
 
 When conversational replies are enabled, Alfred also runs a local learning
