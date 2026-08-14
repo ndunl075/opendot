@@ -32,6 +32,10 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 # screen, so Calendar and Gmail share a single refresh token.
 DEFAULT_SCOPES = (
     "https://www.googleapis.com/auth/calendar.events",
+    # Required to discover the subscribed calendars whose events are merged
+    # in Google Calendar's UI. Without it, "primary is clear" can be mistaken
+    # for "your calendar is clear" while shared/selected calendars are absent.
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.compose",
 )

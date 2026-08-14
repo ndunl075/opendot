@@ -101,6 +101,31 @@ def test_remember_and_forget_round_trip_through_mcp(tmp_path: Path) -> None:
     assert after_forget["memories"] == []
 
 
+def test_memory_correction_and_feedback_round_trip_through_mcp(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(
+        database_path,
+        allowed_tools={"remember", "memory_search", "memory_correct", "memory_feedback"},
+    )
+    server = create_server(database_path)
+    original = _call(server, "remember", {"statement": "Nico prefers long answers."})
+
+    corrected = _call(
+        server,
+        "memory_correct",
+        {"memory_id": original["id"], "replacement_statement": "Nico prefers concise answers."},
+    )
+    feedback = _call(
+        server,
+        "memory_feedback",
+        {"memory_id": corrected["id"], "query": "response style", "outcome": "relevant"},
+    )
+
+    assert corrected["supersedes_memory_id"] == original["id"]
+    assert feedback["outcome"] == "relevant"
+    assert _call(server, "memory_search", {"query": "concise answers"})["memories"][0]["id"] == corrected["id"]
+
+
 def test_action_commit_requires_its_own_grant_even_with_a_valid_token(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     _grant(database_path, allowed_tools={"remember", "forget", "memory_search"})  # no action_commit
@@ -276,6 +301,55 @@ def test_connector_records_get_rejects_a_client_without_the_tool_grant(tmp_path:
 
     with pytest.raises(Exception, match="not allowed"):
         asyncio.run(server.call_tool("connector_records_get", {"connector": "gmail"}))
+
+
+def test_connector_records_get_enforces_connector_sensitivity(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            ConnectorRecordStore.replace_snapshot(
+                connection,
+                connector="google_health",
+                account="self",
+                record_type="sleep",
+                records={"one": {"stage": "deep"}},
+            )
+    _grant(database_path, allowed_tools={"connector_records_get"})
+    server = create_server(database_path)
+
+    with pytest.raises(Exception, match="not scoped to read sensitive"):
+        asyncio.run(server.call_tool("connector_records_get", {"connector": "google_health"}))
+
+
+def test_hermes_raw_connector_results_use_the_same_pii_redaction_floor(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            ConnectorRecordStore.replace_snapshot(
+                connection,
+                connector="gmail",
+                account="self",
+                record_type="unread_message",
+                records={"one": {"from": "person@example.com", "snippet": "call 513-555-1212"}},
+            )
+    PolicyStore(database).grant(
+        client_id="hermes",
+        allowed_sensitivities={"public", "personal"},
+        allowed_tools={"connector_records_get"},
+        allow_write=False,
+    )
+    server = create_server(database_path, client_id="hermes")
+
+    records = _call(server, "connector_records_get", {"connector": "gmail"})
+
+    serialized = json.dumps(records)
+    assert "person@example.com" not in serialized
+    assert "513-555-1212" not in serialized
+    assert "[REDACTED:email]" in serialized
 
 
 def test_task_upsert_creates_then_updates_without_clearing_the_due_date(tmp_path: Path) -> None:

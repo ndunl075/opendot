@@ -82,7 +82,7 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
         },
     }
     fake = FakeTelegram([free_form])
-    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="nothing due today.", ok=True))
+    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="should not be called", ok=True))
     runner = AlfredRunner(
         database,
         telegram_transport=fake,
@@ -98,7 +98,14 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
     assert report.agent_replies == 1
     # Both the acknowledgement and the real answer leave in this same cycle.
     # The ack names the topic, matched by keyword at intake (no model call).
-    assert fake.sent == [(20, "checking your agenda..."), (20, "nothing due today.")]
+    assert fake.sent == [
+        (20, "checking your agenda..."),
+        (
+            20,
+            "I only have your primary calendar synced right now, so I can't reliably say "
+            "whether your full Google Calendar is clear.",
+        ),
+    ]
 
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
@@ -110,6 +117,24 @@ def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) ->
     assert report.telegram_polled is False
     assert report.telegram_delivered == 0
     assert report.errors == []
+
+
+def test_memory_learning_runs_after_the_agent_reply(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    class Learned:
+        promoted = 1
+
+    runner = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        agent_bridge=lambda: calls.append("answer") or type("Answer", (), {"answered": 1})(),
+        memory_learning=lambda: calls.append("learn") or Learned(),
+    )
+
+    report = runner.run_once()
+
+    assert calls == ["answer", "learn"]
+    assert report.memories_learned == 1
 
 
 def test_connector_sync_runs_once_per_configured_interval(tmp_path: Path) -> None:
@@ -157,6 +182,33 @@ def test_a_failing_connector_does_not_stop_the_loop_or_other_connectors(tmp_path
     assert "broken" in report.errors[0]
     assert "boom" in report.errors[0]
     assert AuditLog(database).verify() is True
+
+
+def test_failing_connector_uses_exponential_backoff_instead_of_every_cycle(tmp_path: Path) -> None:
+    clock = {"now": 0.0}
+    calls: list[float] = []
+
+    def failing() -> None:
+        calls.append(clock["now"])
+        raise RuntimeError("offline")
+
+    runner = AlfredRunner(
+        Database(tmp_path / "alfred.db"),
+        connectors=(ConnectorSync(name="offline", interval_seconds=900, run=failing),),
+        now=lambda: clock["now"],
+    )
+
+    runner.run_once()
+    clock["now"] = 5
+    runner.run_once()
+    clock["now"] = 30
+    runner.run_once()
+    clock["now"] = 60
+    runner.run_once()
+    clock["now"] = 90
+    runner.run_once()
+
+    assert calls == [0.0, 30, 90]
 
 
 def test_run_forever_stops_after_the_configured_iteration_count(tmp_path: Path) -> None:

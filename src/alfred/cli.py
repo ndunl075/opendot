@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Iterator, Sequence
 
 from .audit import AuditEvent, AuditLog
+from .academic_memory import AcademicMemoryService
+from .historical_memory import HistoricalMemoryService
+from .embeddings import EmbeddingBackfill, OllamaEmbeddingProvider
 from .backup import EncryptedBackupService
 from .config import Settings
 from .connector_health import connector_health
@@ -19,12 +22,20 @@ from .briefing import BriefingService
 from .events import EventStore
 from .jobs import JobRunner
 from .memory_graph import MemoryActions, MemoryGraph
+from .memory_learning import MemoryLearningService
 from .reminders import ReminderStore
 from .tasks import UNSET, TaskStore
 from .vault import VaultImporter, VaultProjector
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
-from .google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, default_sync_window
+from .google_calendar import (
+    CalendarCatalogSync,
+    GoogleCalendarActions,
+    GoogleCalendarClient,
+    GoogleCalendarHistorySync,
+    GoogleCalendarSync,
+    default_sync_window,
+)
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
 from .google_health import GoogleHealthClient, GoogleHealthSync
@@ -64,6 +75,9 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
     chat_ids = frozenset(args.chat_id)
     slack_pairs = frozenset(_parse_slack_pair(value) for value in args.slack_pair)
     slack_channel_ids = frozenset(args.slack_channel_id)
+    embedding_provider = (
+        OllamaEmbeddingProvider(model_name=args.embedding_model) if args.embedding_model else None
+    )
     telegram_transport = (
         TelegramBotClient(SystemKeyringSecretStore().get_required(args.telegram_secret_name))
         if pairs or chat_ids
@@ -94,7 +108,11 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             interval_seconds=args.connector_interval,
             run=lambda: _github_sync_once(database, args.github_secret_name),
         ),
-        ConnectorSync(name="gmail", interval_seconds=args.connector_interval, run=lambda: _gmail_sync_once(database)),
+        ConnectorSync(
+            name="gmail",
+            interval_seconds=args.connector_interval,
+            run=lambda: _gmail_sync_once(database, args.gmail_unread_limit),
+        ),
     ]
     if args.gmail_inbound_sender:
         gmail_inbound_senders = set(args.gmail_inbound_sender)
@@ -103,7 +121,9 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             ConnectorSync(
                 name="gmail_inbound",
                 interval_seconds=args.connector_interval,
-                run=lambda: _gmail_inbound_poll_once(database, gmail_inbound_senders, gmail_inbound_destination),
+                run=lambda: _gmail_inbound_poll_once(
+                    database, gmail_inbound_senders, gmail_inbound_destination, args.gmail_unread_limit
+                ),
             )
         )
     if args.canvas_base_url:
@@ -111,7 +131,18 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             ConnectorSync(
                 name="canvas",
                 interval_seconds=args.connector_interval,
-                run=lambda: _canvas_sync_once(database, args.canvas_base_url, args.canvas_secret_name),
+                run=lambda: _canvas_sync_once(
+                    database, args.canvas_base_url, args.canvas_secret_name, include_history=False
+                ),
+            )
+        )
+        connectors.append(
+            ConnectorSync(
+                name="canvas_history",
+                interval_seconds=args.canvas_history_interval,
+                run=lambda: _canvas_sync_once(
+                    database, args.canvas_base_url, args.canvas_secret_name, include_history=True
+                ),
             )
         )
     if args.google_health:
@@ -130,15 +161,61 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 run=lambda: VaultImporter(database, args.vault).sync(),
             )
         )
+    if args.calendar_history_days:
+        connectors.append(
+            ConnectorSync(
+                name="google_calendar_history",
+                interval_seconds=args.calendar_history_interval,
+                run=lambda: _calendar_history_sync_once(
+                    database,
+                    args.calendar_id,
+                    days=args.calendar_history_days,
+                    minimum_age_seconds=args.calendar_history_interval,
+                ),
+            )
+        )
+    # Derived history is always last: connector reads land first, then this
+    # cheap idempotent pass precomputes context for future agent turns. It is
+    # never part of the Telegram response path.
+    connectors.append(
+        ConnectorSync(
+            name="academic_memory",
+            interval_seconds=args.connector_interval,
+            run=AcademicMemoryService(database).rebuild_if_changed,
+        )
+    )
+    connectors.append(
+        ConnectorSync(
+            name="historical_memory",
+            interval_seconds=args.connector_interval,
+            run=HistoricalMemoryService(database).rebuild_if_changed,
+        )
+    )
+    if embedding_provider is not None:
+        connectors.append(
+            ConnectorSync(
+                name="memory_embeddings",
+                interval_seconds=args.connector_interval,
+                run=lambda: EmbeddingBackfill(database, embedding_provider).run(limit=128),
+            )
+        )
     agent_bridge = None
     if args.hermes_profile:
+        memory_graph = (
+            MemoryGraph(database, embedding_provider=embedding_provider)
+            if embedding_provider is not None
+            else MemoryGraph(database)
+        )
         agent_bridge = HermesBridge(
             database,
             SubprocessAgentRunner(
                 command=args.hermes_command,
                 profile=args.hermes_profile,
                 timeout_seconds=args.hermes_timeout,
+                database=database,
+                monthly_call_limit=args.hermes_monthly_call_limit,
             ),
+            memory_graph=memory_graph,
         ).run_once
     runner = AlfredRunner(
         database,
@@ -147,6 +224,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         telegram_chat_ids=chat_ids,
         defer_unparsed_to_agent=bool(args.hermes_profile),
         agent_bridge=agent_bridge,
+        memory_learning=MemoryLearningService(database).run_once if args.hermes_profile else None,
         slack_transport=slack_bot,
         slack_pairs=slack_pairs,
         slack_channel_ids=slack_channel_ids,
@@ -172,6 +250,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
+    subcommands.add_parser(
+        "academic-memory-rebuild",
+        help="rebuild local Calendar/Canvas rollups and their provenance-linked semantic memories",
+    )
     subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
     vault_sync_status = subcommands.add_parser(
         "vault-sync-status", help="check whether the self-hosted CouchDB behind optional mobile vault sync is reachable"
@@ -250,6 +332,12 @@ def build_parser() -> argparse.ArgumentParser:
     remember.add_argument("--kind", default="note")
     search = subcommands.add_parser("memory-search", help="search local memories and graph anchors")
     search.add_argument("query")
+    embed_backfill = subcommands.add_parser(
+        "memory-embed-backfill", help="build missing memory embeddings with a local Ollama model"
+    )
+    embed_backfill.add_argument("--model", default="nomic-embed-text")
+    embed_backfill.add_argument("--base-url", default="http://127.0.0.1:11434")
+    embed_backfill.add_argument("--limit", type=int)
     correct = subcommands.add_parser("memory-correct", help="supersede a memory with a corrected statement")
     correct.add_argument("--memory-id", required=True)
     correct.add_argument("statement")
@@ -351,7 +439,18 @@ def build_parser() -> argparse.ArgumentParser:
     calendar_sync = subcommands.add_parser("calendar-sync", help="read-sync Google Calendar into local source events")
     calendar_sync.add_argument("--calendar-id", default="primary")
     calendar_sync.add_argument("--days", type=int, default=14, help="initial sync window length (1-90 days)")
-    canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync Canvas upcoming and missing assignments")
+    calendar_history_sync = subcommands.add_parser(
+        "calendar-history-sync",
+        help="read-sync past Google Calendar events without changing the live incremental cursor",
+    )
+    calendar_history_sync.add_argument("--calendar-id", default="primary")
+    calendar_history_sync.add_argument("--days", type=int, default=1095, help="past days to backfill (1-3650)")
+    calendar_history_sync.add_argument(
+        "--all-selected",
+        action="store_true",
+        help="backfill every calendar selected in the Google Calendar UI",
+    )
+    canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync current and historical Canvas assignments")
     canvas_sync.add_argument("--base-url", required=True, help="your school Canvas HTTPS URL")
     canvas_sync.add_argument("--secret-name", default="canvas-api-token")
     health_sync = subcommands.add_parser(
@@ -441,8 +540,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--slack-app-secret-name", default="slack-app-token")
     run.add_argument("--slack-bot-secret-name", default="slack-bot-token")
     run.add_argument("--calendar-id", default="primary")
+    run.add_argument(
+        "--calendar-history-days",
+        type=int,
+        default=1095,
+        help="past Calendar days to retain for memory; use 0 to disable (default: 1095)",
+    )
+    run.add_argument(
+        "--calendar-history-interval",
+        type=float,
+        default=604800.0,
+        help="minimum seconds between full Calendar history refreshes (default: weekly)",
+    )
     run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
     run.add_argument("--canvas-secret-name", default="canvas-api-token")
+    run.add_argument(
+        "--canvas-history-interval",
+        type=float,
+        default=86400.0,
+        help="minimum seconds between full Canvas course-history reads (default: daily)",
+    )
     run.add_argument("--github-secret-name", default="github-token")
     run.add_argument(
         "--google-health",
@@ -461,6 +578,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="channel:recipient to deliver 'Remind:' email reminders to; omit to create the task without one",
     )
     run.add_argument(
+        "--gmail-unread-limit",
+        type=int,
+        default=50,
+        help=(
+            "max unread Gmail messages per sync in the run loop (default 50, lower than the "
+            "one-shot gmail-sync command's 500): each sync blocks this single-threaded loop, "
+            "and 500 measured at 45s against 7s for 50"
+        ),
+    )
+    run.add_argument(
         "--hermes-profile",
         help=(
             "Hermes profile name; enables answering free-form Telegram messages with the agent "
@@ -475,8 +602,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--hermes-timeout",
         type=float,
-        default=180.0,
+        default=60.0,
         help="seconds to allow one agent turn before giving up on it",
+    )
+    run.add_argument(
+        "--embedding-model",
+        help="local Ollama embedding model for hybrid memory recall (for example nomic-embed-text)",
+    )
+    run.add_argument(
+        "--hermes-monthly-call-limit",
+        type=int,
+        default=1000,
+        help="hard monthly cap on external Hermes turns; local direct answers do not count",
     )
     run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
     run.add_argument("--poll-timeout", type=int, default=20, help="seconds per Telegram long-poll cycle")
@@ -503,6 +640,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "status":
         print(json.dumps(database.status()))
+        return 0
+    if args.command == "academic-memory-rebuild":
+        rollup = AcademicMemoryService(database).rebuild_if_changed()
+        history = HistoricalMemoryService(database).rebuild_if_changed()
+        print(
+            json.dumps(
+                {
+                    "rollup": rollup.model_dump(mode="json"),
+                    "history": history.model_dump(mode="json"),
+                }
+            )
+        )
         return 0
     if args.command == "connector-status":
         print(json.dumps([health.model_dump(mode="json") for health in connector_health(database)]))
@@ -650,6 +799,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     idempotency_key=f"reminder:{task_id}:{run_at.isoformat()}",
                 )
         print(job.model_dump_json())
+        return 0
+    if args.command == "memory-embed-backfill":
+        provider = OllamaEmbeddingProvider(model_name=args.model, base_url=args.base_url)
+        count = EmbeddingBackfill(database, provider).run(limit=args.limit)
+        print(json.dumps({"model": args.model, "embedded": count}))
         return 0
     graph = MemoryGraph(database)
     if args.command == "memory-self":
@@ -814,10 +968,49 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
+    if args.command == "calendar-history-sync":
+        if not 1 <= args.days <= 3650:
+            raise SystemExit("--days must be between 1 and 3650")
+        end = datetime.now(UTC)
+        client = GoogleCalendarClient(_google_access_token())
+        try:
+            if args.all_selected:
+                calendars = CalendarCatalogSync(database, client).sync()
+                calendar_ids = ["primary" if item["primary"] else str(item["id"]) for item in calendars]
+            else:
+                calendar_ids = [args.calendar_id]
+            results = []
+            skipped = 0
+            for calendar_id in calendar_ids:
+                try:
+                    results.append(
+                        GoogleCalendarHistorySync(database, client).sync(
+                            calendar_id=calendar_id,
+                            time_min=end - timedelta(days=args.days),
+                            time_max=end,
+                        )
+                    )
+                except Exception:
+                    if not args.all_selected:
+                        raise
+                    skipped += 1
+        finally:
+            client.close()
+        print(
+            json.dumps(
+                {
+                    "calendars_synced": len(results),
+                    "calendars_skipped": skipped,
+                    "received": sum(result.received for result in results),
+                    "stored": sum(result.stored for result in results),
+                }
+            )
+        )
+        return 0
     if args.command == "canvas-sync":
         client = CanvasClient(args.base_url, SystemKeyringSecretStore().get_required(args.secret_name))
         try:
-            result = CanvasSync(database, client).sync()
+            result = CanvasSync(database, client, include_history=True).sync()
         finally:
             client.close()
         print(result.model_dump_json())
@@ -958,15 +1151,91 @@ def _google_access_token() -> str:
 def _calendar_sync_once(database: Database, calendar_id: str) -> None:
     client = GoogleCalendarClient(_google_access_token())
     try:
-        GoogleCalendarSync(database, client).sync(calendar_id=calendar_id)
+        # The bounds are ignored by Google when a valid incremental cursor is
+        # present. If Google does not issue one (or invalidates it), they keep
+        # the fallback sync useful and fast instead of downloading the user's
+        # entire calendar history every cycle.
+        start, end = default_sync_window()
+        if calendar_id != "primary":
+            calendar_ids = [calendar_id]
+        else:
+            calendars = CalendarCatalogSync(database, client).sync()
+            calendar_ids = [
+                "primary" if item["primary"] else str(item["id"])
+                for item in calendars
+            ]
+        for selected_id in calendar_ids:
+            try:
+                GoogleCalendarSync(database, client).sync(
+                    calendar_id=selected_id, time_min=start, time_max=end
+                )
+            except Exception:
+                # Calendar subscriptions are independent. A public holiday or
+                # stale shared calendar can remain visible in CalendarList but
+                # reject events.list. GoogleCalendarSync has already recorded
+                # that account's error; continue so it cannot prevent the
+                # user's other selected calendars from becoming current.
+                continue
     finally:
         client.close()
 
 
-def _canvas_sync_once(database: Database, base_url: str, secret_name: str) -> None:
+def _calendar_history_sync_once(
+    database: Database,
+    calendar_id: str,
+    *,
+    days: int,
+    minimum_age_seconds: float,
+) -> None:
+    if not 1 <= days <= 3650:
+        raise ValueError("calendar history days must be between 1 and 3650")
+    client = GoogleCalendarClient(_google_access_token())
+    try:
+        if calendar_id != "primary":
+            calendar_ids = [calendar_id]
+        else:
+            calendars = CalendarCatalogSync(database, client).sync()
+            calendar_ids = ["primary" if item["primary"] else str(item["id"]) for item in calendars]
+        end = datetime.now(UTC)
+        start = end - timedelta(days=days)
+        for selected_id in calendar_ids:
+            if _sync_state_is_fresh(
+                database,
+                connector="google_calendar_history",
+                account=selected_id,
+                minimum_age_seconds=minimum_age_seconds,
+            ):
+                continue
+            try:
+                GoogleCalendarHistorySync(database, client).sync(
+                    calendar_id=selected_id, time_min=start, time_max=end
+                )
+            except Exception:
+                continue
+    finally:
+        client.close()
+
+
+def _sync_state_is_fresh(
+    database: Database, *, connector: str, account: str, minimum_age_seconds: float
+) -> bool:
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT last_success_at FROM sync_state WHERE connector = ? AND account = ?",
+            (connector, account),
+        ).fetchone()
+    if row is None or not row["last_success_at"]:
+        return False
+    last_success = datetime.fromisoformat(str(row["last_success_at"]).replace("Z", "+00:00"))
+    return datetime.now(UTC) - last_success.astimezone(UTC) < timedelta(seconds=minimum_age_seconds)
+
+
+def _canvas_sync_once(
+    database: Database, base_url: str, secret_name: str, *, include_history: bool = False
+) -> None:
     client = CanvasClient(base_url, SystemKeyringSecretStore().get_required(secret_name))
     try:
-        CanvasSync(database, client).sync()
+        CanvasSync(database, client, include_history=include_history).sync()
     finally:
         client.close()
 
@@ -987,18 +1256,22 @@ def _github_sync_once(database: Database, secret_name: str) -> None:
         client.close()
 
 
-def _gmail_sync_once(database: Database) -> None:
+def _gmail_sync_once(database: Database, limit: int = DEFAULT_UNREAD_LIMIT) -> None:
     client = GmailClient(_google_access_token())
     try:
-        GmailSync(database, client).sync()
+        GmailSync(database, client, limit=limit).sync()
     finally:
         client.close()
 
 
-def _gmail_inbound_poll_once(database: Database, senders: set[str], destination: str | None) -> None:
+def _gmail_inbound_poll_once(
+    database: Database, senders: set[str], destination: str | None, limit: int = DEFAULT_UNREAD_LIMIT
+) -> None:
     client = GmailClient(_google_access_token())
     try:
-        GmailInboundGateway(database, client, senders, default_reminder_destination=destination).poll()
+        GmailInboundGateway(
+            database, client, senders, default_reminder_destination=destination, limit=limit
+        ).poll()
     finally:
         client.close()
 

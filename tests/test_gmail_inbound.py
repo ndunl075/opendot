@@ -153,3 +153,23 @@ def test_allowed_senders_are_matched_case_insensitively(tmp_path: Path) -> None:
     result = gateway.poll()
 
     assert result.handled == 1
+
+
+def test_inbound_poll_bounds_its_unread_fetch_like_the_read_sync_does(tmp_path: Path) -> None:
+    """Both Gmail connectors fetch the same unread inbox and both block the
+    single-threaded run loop. GmailSync was bounded first and this one was
+    missed, which left an unbounded 83s fetch in the cycle -- long enough
+    that an incoming Telegram message wasn't polled for."""
+
+    class RecordingGmail:
+        def __init__(self) -> None:
+            self.limits: list[int] = []
+
+        def list_unread_inbox(self, *, limit=500):
+            self.limits.append(limit)
+            return []
+
+    fake = RecordingGmail()
+    GmailInboundGateway(Database(tmp_path / "alfred.db"), fake, {"nico@example.com"}, limit=50).poll()
+
+    assert fake.limits == [50]

@@ -55,12 +55,14 @@ class JobRunner:
                         next_run_at = None
                         state = "completed"
                     elif job["kind"] in {"morning_brief", "telegram_morning_brief"}:
+                        schedule = json.loads(job["schedule_json"])
                         brief_service = BriefingService(self.database)
                         text = brief_service.morning_brief(
-                            run_at, scheduled_at=scheduled_at if late else None
+                            run_at,
+                            scheduled_at=scheduled_at if late else None,
+                            timezone_name=schedule["timezone"],
                         ).render()
                         destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
-                        schedule = json.loads(job["schedule_json"])
                         next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                         state = "active"
                     else:

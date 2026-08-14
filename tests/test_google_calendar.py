@@ -6,7 +6,14 @@ import httpx
 import pytest
 
 from alfred.db import Database
-from alfred.google_calendar import GoogleCalendarActions, GoogleCalendarClient, GoogleCalendarSync, SyncTokenExpired
+from alfred.google_calendar import (
+    CalendarCatalogSync,
+    GoogleCalendarActions,
+    GoogleCalendarClient,
+    GoogleCalendarHistorySync,
+    GoogleCalendarSync,
+    SyncTokenExpired,
+)
 from alfred.policy import ApprovalService, PolicyError
 
 
@@ -18,6 +25,8 @@ def _event(event_id: str, updated: str, summary: str = "Study group") -> dict:
         "status": "confirmed",
         "start": {"dateTime": "2026-08-15T10:00:00-04:00"},
         "end": {"dateTime": "2026-08-15T11:00:00-04:00"},
+        "creator": {"displayName": "Professor Example", "email": "prof@example.edu", "self": False},
+        "organizer": {"email": "course@example.edu", "self": False},
         "description": "This intentionally must not be stored.",
         "attendees": [{"email": "private@example.com"}],
     }
@@ -52,6 +61,12 @@ def test_sync_stores_minimized_immutable_calendar_events_and_cursor(tmp_path: Pa
         assert "description" not in event["metadata_json"]
         assert "private@example.com" not in event["metadata_json"]
         assert metadata["calendar_event_id"] == "event-1"
+        assert metadata["creator"] == {
+            "displayName": "Professor Example",
+            "email": "prof@example.edu",
+            "self": False,
+        }
+        assert metadata["organizer"] == {"email": "course@example.edu", "self": False}
         assert connection.execute("SELECT cursor FROM sync_state WHERE connector = 'google_calendar'").fetchone()[0] == "cursor-1"
         assert connection.execute(
             "SELECT active FROM connector_records WHERE connector = 'google_calendar' AND record_id = 'event-1'"
@@ -102,6 +117,28 @@ def test_expired_cursor_resets_to_full_sync(tmp_path: Path) -> None:
     assert result.next_cursor == "fresh-cursor"
 
 
+def test_history_backfill_does_not_create_or_replace_live_cursor(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    fake = FakeCalendar()
+    result = GoogleCalendarHistorySync(database, fake).sync(
+        calendar_id="primary",
+        time_min=datetime(2024, 1, 1, tzinfo=UTC),
+        time_max=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert (result.received, result.stored) == (1, 1)
+    assert fake.calls == [None]
+    with database.connect() as connection:
+        history = connection.execute(
+            "SELECT last_success_at FROM sync_state WHERE connector = 'google_calendar_history' AND account = 'primary'"
+        ).fetchone()
+        live = connection.execute(
+            "SELECT cursor FROM sync_state WHERE connector = 'google_calendar' AND account = 'primary'"
+        ).fetchone()
+    assert history["last_success_at"] is not None
+    assert live is None
+
+
 def test_http_client_uses_read_only_events_list_contract() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer TOKEN"
@@ -120,6 +157,63 @@ def test_http_client_uses_read_only_events_list_contract() -> None:
         client.close()
     assert events[0]["id"] == "event-3"
     assert cursor == "next"
+
+
+def test_http_client_lists_calendars_selected_in_the_google_ui() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/calendar/v3/users/me/calendarList"
+        assert request.url.params["showHidden"] == "false"
+        assert request.url.params["minAccessRole"] == "reader"
+        return httpx.Response(
+            200,
+            json={"items": [{"id": "school@example.com", "summary": "School", "selected": True}]},
+        )
+
+    client = GoogleCalendarClient("TOKEN", transport=httpx.MockTransport(handler))
+    try:
+        calendars = client.list_calendars()
+    finally:
+        client.close()
+    assert calendars[0]["id"] == "school@example.com"
+
+
+def test_catalog_sync_keeps_primary_and_selected_calendars_only(tmp_path: Path) -> None:
+    class Catalog:
+        def list_calendars(self):
+            return [
+                {"id": "owner@example.com", "summary": "Personal", "primary": True},
+                {
+                    "id": "school@example.com",
+                    "summary": "School",
+                    "selected": True,
+                    "dataOwner": "school-owner@example.com",
+                    "accessRole": "reader",
+                },
+                {"id": "hidden@example.com", "summary": "Hidden", "selected": False},
+            ]
+
+    database = Database(tmp_path / "alfred.db")
+    selected = CalendarCatalogSync(database, Catalog()).sync()
+
+    assert [item["title"] for item in selected] == ["Personal", "School"]
+    assert selected[1]["data_owner"] == "school-owner@example.com"
+    assert selected[1]["access_role"] == "reader"
+    with database.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT record_id FROM connector_records
+            WHERE connector='google_calendar' AND record_type='calendar' AND active=1
+            ORDER BY record_id
+            """
+        ).fetchall()
+        state = connection.execute(
+            """
+            SELECT last_success_at FROM sync_state
+            WHERE connector='google_calendar_catalog' AND account='self'
+            """
+        ).fetchone()
+    assert [row["record_id"] for row in rows] == ["owner@example.com", "school@example.com"]
+    assert state["last_success_at"] is not None
 
 
 class FakeWriteTransport:

@@ -14,6 +14,7 @@ def _message(message_id: str, internal_date: str, *, subject: str = "Re: capston
     return {
         "id": message_id,
         "internalDate": internal_date,
+        "labelIds": ["INBOX", "UNREAD", "CATEGORY_PRIMARY"],
         "snippet": "Quick question about the milestone due next week...",
         "payload": {
             "headers": [
@@ -25,8 +26,29 @@ def _message(message_id: str, internal_date: str, *, subject: str = "Re: capston
 
 
 class FakeGmail:
+    def __init__(self) -> None:
+        self.limits: list[int] = []
+
     def list_unread_inbox(self, *, limit=500):
+        self.limits.append(limit)
         return [_message("1", "1786190400000")]
+
+
+def test_the_run_loop_bounds_the_unread_limit_below_the_one_shot_default() -> None:
+    """Each sync blocks the single-threaded run loop, and against a real
+    account 500 unread measured at 45s versus 7s for 50. The one-shot
+    gmail-sync command keeps its larger default; only `alfred run` bounds it."""
+    from alfred.cli import build_parser
+
+    assert build_parser().parse_args(["run"]).gmail_unread_limit == 50
+
+
+def test_gmail_sync_passes_its_configured_limit_to_the_transport(tmp_path: Path) -> None:
+    fake = FakeGmail()
+
+    GmailSync(Database(tmp_path / "alfred.db"), fake, limit=50).sync()
+
+    assert fake.limits == [50]
 
 
 def test_gmail_sync_stores_only_headers_and_snippet(tmp_path: Path) -> None:
@@ -40,11 +62,13 @@ def test_gmail_sync_stores_only_headers_and_snippet(tmp_path: Path) -> None:
         assert row["content"] == "Re: capstone review"
         assert "advisor@school.example" in row["metadata_json"]
         assert "milestone" in row["metadata_json"]
+        assert "CATEGORY_PRIMARY" in row["metadata_json"]
         record = connection.execute(
             "SELECT payload_json, active FROM connector_records WHERE connector = 'gmail' AND record_id = '1'"
         ).fetchone()
         assert record["active"] == 1
         assert "https://mail.google.com/mail/u/0/#inbox/1" in record["payload_json"]
+        assert "CATEGORY_PRIMARY" in record["payload_json"]
         assert connection.execute("SELECT last_success_at FROM sync_state WHERE connector = 'gmail'").fetchone()[0]
 
 

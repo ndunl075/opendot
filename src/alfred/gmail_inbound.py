@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .events import EventStore
-from .gmail import GmailTransport, parse_message_headers
+from .gmail import DEFAULT_UNREAD_LIMIT, GmailTransport, parse_message_headers
 from .reminders import ReminderStore
 from .tasks import TaskStore
 
@@ -61,11 +61,17 @@ class GmailInboundGateway:
         allowed_senders: set[str],
         *,
         default_reminder_destination: str | None = None,
+        limit: int = DEFAULT_UNREAD_LIMIT,
     ) -> None:
         self.database = database
         self.transport = transport
         self.allowed_senders = {address.strip().lower() for address in allowed_senders}
         self.default_reminder_destination = default_reminder_destination
+        # Bounded for the same reason GmailSync is: this fetch blocks the
+        # single-threaded run loop, and an unbounded one measured at 83s
+        # against a real inbox, which is dead time where an incoming message
+        # isn't polled for.
+        self.limit = limit
 
     def poll(self) -> GmailInboundResult:
         """Fetch the current unread inbox and process each message once.
@@ -76,7 +82,7 @@ class GmailInboundGateway:
         need to know about the other's transport call.
         """
         self.database.migrate()
-        messages = self.transport.list_unread_inbox()
+        messages = self.transport.list_unread_inbox(limit=self.limit)
         counts = {"handled": 0, "duplicate": 0, "rejected": 0, "ignored": 0}
         for item in messages:
             receipt = self.handle(item)

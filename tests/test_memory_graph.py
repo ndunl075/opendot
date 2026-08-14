@@ -7,6 +7,7 @@ from alfred.audit import AuditLog
 from alfred.db import Database
 from alfred.events import EventStore
 from alfred.memory_graph import GraphError, MemoryActions, MemoryGraph
+from alfred.memory_learning import MemoryFeedbackStore
 from alfred.policy import ApprovalService, PolicyError
 
 
@@ -74,6 +75,25 @@ def test_fts_search_returns_memory_and_one_hop_relationship_context(tmp_path: Pa
     assert [item.id for item in result.memories] == [memory.id]
     assert [relationship.predicate for relationship in result.relationships] == ["works_on"]
     assert AuditLog(database).verify() is True
+
+
+def test_explicit_feedback_reorders_only_the_retrieved_candidate_set(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    first = graph.remember("Calculus exam review on Friday")
+    preferred = graph.remember("Calculus exam room and schedule")
+    before = [memory.id for memory in graph.search("Calculus exam").memories]
+    assert set(before) == {first.id, preferred.id}
+
+    MemoryFeedbackStore(database).record(
+        preferred.id, query="Calculus exam", outcome="relevant", actor="user:test"
+    )
+    MemoryFeedbackStore(database).record(
+        first.id, query="Calculus exam", outcome="irrelevant", actor="user:test"
+    )
+
+    after = [memory.id for memory in graph.search("Calculus exam").memories]
+    assert after == [preferred.id, first.id]
 
 
 def test_forget_tombstones_a_memory_and_removes_it_from_search(tmp_path: Path) -> None:

@@ -55,6 +55,7 @@ def test_approval_is_actor_bound_expiring_hash_backed_and_single_use(tmp_path: P
     with pytest.raises(PolicyError, match="only the requesting"):
         approvals.approve(proposed.id, actor="other", now=now)
     issued = approvals.approve(proposed.id, actor="nico", now=now)
+    assert issued.token.startswith("alf_")
     consumed = approvals.consume(issued.approval.id, actor="nico", token=issued.token, now=now)
 
     assert consumed.state == "consumed"

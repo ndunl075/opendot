@@ -190,8 +190,13 @@ class TelegramOutboxWorker:
     def _claim_next(self) -> tuple[str, str, dict] | None:
         with self.database.connect() as connection:
             with self.database.transaction(connection):
+                # Tie-broken by rowid (insertion order), never by id: id is a
+                # random uuid4, and created_at only has second granularity, so
+                # ordering by it scrambled any set of messages enqueued in the
+                # same second. That shipped: a four-part agent answer arrived
+                # with its closing question first and the details after.
                 row = connection.execute(
-                    "SELECT id, destination, payload_json FROM outbox WHERE state = 'pending' AND destination LIKE 'telegram:%' ORDER BY created_at, id LIMIT 1"
+                    "SELECT id, destination, payload_json FROM outbox WHERE state = 'pending' AND destination LIKE 'telegram:%' ORDER BY created_at, rowid LIMIT 1"
                 ).fetchone()
                 if row is None:
                     return None

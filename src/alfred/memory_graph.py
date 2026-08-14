@@ -431,10 +431,36 @@ class MemoryGraph:
             for subject_id in vector_memory_ids:
                 if subject_id not in memory_ids and len(memory_ids) < limit:
                     memory_ids.append(subject_id)
+            memory_ids = self._rank_with_feedback(connection, memory_ids)
             entities = self._entities_by_ids(connection, entity_ids, sensitivities)
             memories = self._memories_by_ids(connection, memory_ids, sensitivities)
             relationships = self._active_relationship_hop(connection, [entity.id for entity in entities], limit, sensitivities=sensitivities)
         return SearchResult(entities=entities, memories=memories, relationships=relationships)
+
+    @staticmethod
+    def _rank_with_feedback(connection: sqlite3.Connection, memory_ids: list[str]) -> list[str]:
+        """Let explicit retrieval feedback improve future ordering.
+
+        Keyword/vector relevance still chooses candidates. Feedback only
+        reorders that bounded set, so an unrelated frequently-liked memory can
+        never enter a query on popularity alone.
+        """
+        if not memory_ids:
+            return []
+        placeholders = ",".join("?" for _ in memory_ids)
+        rows = connection.execute(
+            f"""
+            SELECT memory_id,
+                   SUM(CASE outcome WHEN 'relevant' THEN 2 WHEN 'irrelevant' THEN -1 WHEN 'incorrect' THEN -5 ELSE 0 END) AS score
+            FROM memory_retrieval_feedback
+            WHERE memory_id IN ({placeholders})
+            GROUP BY memory_id
+            """,
+            memory_ids,
+        ).fetchall()
+        scores = {str(row["memory_id"]): int(row["score"] or 0) for row in rows}
+        original = {memory_id: index for index, memory_id in enumerate(memory_ids)}
+        return sorted(memory_ids, key=lambda memory_id: (-scores.get(memory_id, 0), original[memory_id]))
 
     def get_entity(self, entity_id: str) -> Entity | None:
         """Load one entity for a controlled projection or client response."""
@@ -631,8 +657,23 @@ class MemoryGraph:
 
     @staticmethod
     def _fts_query(query: str) -> str:
-        terms = re.findall(r"[\w]+", query, flags=re.UNICODE)
-        return " AND ".join(f'"{term}"' for term in terms)
+        # Natural questions contain glue words and generic request verbs that
+        # should not make every memory term mandatory ("how should you write
+        # status updates" should anchor on "status updates"). Meaningful terms
+        # remain conjunctive to avoid returning "Before backup" for an exact
+        # query about "After backup".
+        stop_words = {
+            "a", "about", "an", "and", "are", "do", "for", "how", "i", "in", "is",
+            "it", "me", "my", "of", "on", "or", "should", "the", "to", "what",
+            "answer", "respond", "say", "tell", "use", "when", "where", "who",
+            "why", "write", "you", "your",
+        }
+        terms = [
+            term
+            for term in re.findall(r"[\w]+", query.casefold(), flags=re.UNICODE)
+            if term not in stop_words and len(term) > 1
+        ]
+        return " AND ".join(f'"{term}"' for term in dict.fromkeys(terms))
 
     def _entities_by_ids(self, connection: sqlite3.Connection, ids: list[str], sensitivities: set[str]) -> list[Entity]:
         if not ids:
@@ -652,7 +693,9 @@ class MemoryGraph:
         placeholders = ",".join("?" for _ in ids)
         sensitivity_placeholders = ",".join("?" for _ in sensitivities)
         rows = connection.execute(
-            f"SELECT * FROM memories WHERE id IN ({placeholders}) AND sensitivity IN ({sensitivity_placeholders}) AND status NOT IN ('deleted', 'rejected')",
+            # Candidates are deliberately quarantined until explicit user
+            # confirmation or independent corroboration promotes them.
+            f"SELECT * FROM memories WHERE id IN ({placeholders}) AND sensitivity IN ({sensitivity_placeholders}) AND status = 'confirmed'",
             [*ids, *sorted(sensitivities)],
         ).fetchall()
         by_id = {row["id"]: self._memory_from_row(row) for row in rows}

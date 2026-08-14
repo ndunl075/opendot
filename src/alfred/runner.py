@@ -45,6 +45,7 @@ class RunOnceReport:
     slack_delivered: int
     connectors_synced: list[str]
     agent_replies: int = 0
+    memories_learned: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -58,6 +59,7 @@ class AlfredRunner:
         telegram_chat_ids: frozenset[int] = frozenset(),
         defer_unparsed_to_agent: bool = False,
         agent_bridge: Callable[[], object] | None = None,
+        memory_learning: Callable[[], object] | None = None,
         slack_transport: SlackTransport | None = None,
         slack_pairs: frozenset[SlackPair] = frozenset(),
         slack_channel_ids: frozenset[str] = frozenset(),
@@ -73,6 +75,7 @@ class AlfredRunner:
         self.telegram_chat_ids = telegram_chat_ids
         self.defer_unparsed_to_agent = defer_unparsed_to_agent
         self.agent_bridge = agent_bridge
+        self.memory_learning = memory_learning
         self.slack_transport = slack_transport
         self.slack_pairs = slack_pairs
         self.slack_channel_ids = slack_channel_ids
@@ -82,6 +85,8 @@ class AlfredRunner:
         self.sleep = sleep
         self.now = now
         self._last_synced: dict[str, float] = {}
+        self._next_sync_attempt: dict[str, float] = {}
+        self._sync_failures: dict[str, int] = {}
 
     def run_forever(
         self, *, iterations: int | None = None, stop_check: Callable[[], bool] = lambda: False
@@ -142,6 +147,15 @@ class AlfredRunner:
                 agent_replies = int(getattr(result, "answered", 0))
             telegram_delivered += self._deliver_telegram(transport, errors)
 
+        # Learning happens only after the user-facing answer is delivered.
+        # The default rules extractor is local and fast; model-backed
+        # extractors can use this same hook without delaying the reply itself.
+        memories_learned = 0
+        if self.memory_learning is not None:
+            learned_ok, learned = self._safe("memory_learning", self.memory_learning, errors)
+            if learned_ok and learned is not None:
+                memories_learned = int(getattr(learned, "promoted", 0))
+
         slack_delivered = 0
         if self.slack_transport is not None and self.slack_channel_ids:
             channel_ids = set(self.slack_channel_ids)
@@ -159,7 +173,17 @@ class AlfredRunner:
             ok, _ = self._safe(f"connector_sync:{connector.name}", connector.run, errors)
             if ok:
                 self._last_synced[connector.name] = self.now()
+                self._next_sync_attempt.pop(connector.name, None)
+                self._sync_failures.pop(connector.name, None)
                 synced.append(connector.name)
+            else:
+                failures = self._sync_failures.get(connector.name, 0) + 1
+                self._sync_failures[connector.name] = failures
+                # Retry quickly once, then back off to at most the connector's
+                # normal interval. This prevents a dead provider from being
+                # hammered every five-second runner cycle.
+                delay = min(connector.interval_seconds, 30.0 * (2 ** (failures - 1)))
+                self._next_sync_attempt[connector.name] = self.now() + delay
 
         return RunOnceReport(
             telegram_polled=telegram_polled,
@@ -168,6 +192,7 @@ class AlfredRunner:
             slack_delivered=slack_delivered,
             connectors_synced=synced,
             agent_replies=agent_replies,
+            memories_learned=memories_learned,
             errors=errors,
         )
 
@@ -184,6 +209,9 @@ class AlfredRunner:
         return len(delivered) if delivered_ok and delivered is not None else 0
 
     def _due(self, connector: ConnectorSync) -> bool:
+        next_attempt = self._next_sync_attempt.get(connector.name)
+        if next_attempt is not None and self.now() < next_attempt:
+            return False
         last = self._last_synced.get(connector.name)
         return last is None or (self.now() - last) >= connector.interval_seconds
 

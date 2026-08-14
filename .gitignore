@@ -1,4 +1,5 @@
 .alfred/
+.claude/
 alfred-vault/
 .venv/
 __pycache__/

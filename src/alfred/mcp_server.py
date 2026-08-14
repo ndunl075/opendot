@@ -33,6 +33,8 @@ from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
 from .http_auth import generate_token as generate_http_token
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
+from .memory_learning import MemoryFeedbackStore
+from .models import Redactor
 from .policy import ApprovalService, PolicyError, PolicyStore
 from .reminders import ReminderStore
 from .secret_store import SystemKeyringSecretStore
@@ -73,6 +75,7 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
     @server.tool()
     def agenda_get() -> str:
         """Return Alfred's deterministic local task agenda with freshness."""
+        policy.require_read(client_id, "agenda_get")
         return BriefingService(database).morning_brief().render()
 
     @server.tool()
@@ -103,6 +106,27 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             statement, kind=kind, sensitivity=cast(Sensitivity, sensitivity), actor=f"mcp:{client_id}"
         )
         return memory.model_dump(mode="json")
+
+    @server.tool()
+    def memory_correct(memory_id: str, replacement_statement: str) -> dict:
+        """Correct one recalled memory while preserving its superseded history and evidence."""
+        policy.require_write(client_id, "memory_correct")
+        return MemoryGraph(database).supersede_memory(
+            memory_id,
+            replacement_statement,
+            actor=f"mcp:{client_id}",
+        ).model_dump(mode="json")
+
+    @server.tool()
+    def memory_feedback(memory_id: str, query: str, outcome: str) -> dict:
+        """Record whether a recalled memory was relevant, irrelevant, or incorrect."""
+        policy.require_write(client_id, "memory_feedback")
+        return MemoryFeedbackStore(database).record(
+            memory_id,
+            query=query,
+            outcome=outcome,
+            actor=f"mcp:{client_id}",
+        )
 
     @server.tool()
     def forget(memory_id: str, reason: str = "user requested deletion") -> dict:
@@ -228,7 +252,12 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
         connector_records table every sync already writes to
         (ConnectorRecordStore), so it needs no new storage or sync logic.
         """
-        policy.require_read(client_id, "connector_records_get")
+        scope = policy.require_read(client_id, "connector_records_get")
+        connector_sensitivity = "sensitive" if connector == "google_health" else "personal"
+        if connector_sensitivity not in scope.allowed_sensitivities:
+            raise PolicyError(
+                f"client is not scoped to read {connector_sensitivity} connector records: {connector}"
+            )
         database.migrate()
         with database.connect() as connection:
             rows = connection.execute(
@@ -240,7 +269,7 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
                 """,
                 (connector, record_type, record_type, limit),
             ).fetchall()
-        return [
+        records = [
             {
                 "record_type": row["record_type"],
                 "record_id": row["record_id"],
@@ -249,6 +278,12 @@ def create_server(database_path: Path | str | None = None, *, client_id: str = "
             }
             for row in rows
         ]
+        if client_id == "hermes":
+            # Tool results leave Alfred through Hermes's provider connection,
+            # outside the bridge prompt boundary. Apply the same PII floor
+            # here so a raw connector read cannot bypass bridge redaction.
+            return json.loads(Redactor().redact(json.dumps(records)))
+        return records
 
     @server.tool()
     def task_upsert(title: str, task_id: str | None = None, due_at: str | None = None) -> dict:

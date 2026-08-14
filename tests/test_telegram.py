@@ -125,13 +125,32 @@ def test_the_acknowledgement_names_the_topic_that_was_asked_about() -> None:
     assert ack("what's the agenda like today?") == "checking your agenda..."
     assert ack("anything important in my email?") == "checking your inbox..."
     assert ack("any CI failures on github?") == "checking github..."
-    assert ack("how was my week") == "pulling up your week..."
+    assert ack("how was my week") == "checking your week..."
     assert ack("what do you remember about the trip") == "checking what i know..."
-    assert ack("any assignments due for class") == "checking canvas..."
+    # "assignments due for class" genuinely spans both, and saying so is
+    # more honest than suppressing one to keep the ack short.
+    assert ack("any assignments due for class") == "checking canvas and your agenda..."
+    assert ack("check my notes on that") == "checking your notes..."
     assert ack("how did i sleep last night") == "checking your health data..."
     assert ack("anything in slack") == "checking slack..."
-    assert ack("check my notes on that") == "checking your notes..."
-    assert ack("is everything still connected") == "checking connections..."
+    assert ack("is everything still connected") == "checking your connections..."
+
+
+def test_a_message_about_two_topics_names_both_in_the_order_asked() -> None:
+    """Naming only the first match read as if half the question was missed:
+    "inbox and github today" answered "checking github..." on its own."""
+    ack = TelegramGateway.acknowledgement_for
+
+    assert ack("what's going on with my inbox and github today?") == "checking your inbox and github..."
+    assert ack("how's github and my inbox looking") == "checking github and your inbox..."
+
+
+def test_no_more_than_two_topics_are_named() -> None:
+    """"checking a, b and c..." stops sounding like a person."""
+    ack = TelegramGateway.acknowledgement_for("inbox, github, canvas and slack?")
+
+    assert ack.count(" and ") == 1
+    assert ack.startswith("checking ") and ack.endswith("...")
 
 
 def test_action_phrasing_wins_over_the_read_topic_it_overlaps_with() -> None:
@@ -191,3 +210,28 @@ def test_a_recognized_command_is_never_deferred_even_with_the_agent_enabled(tmp_
             connection.execute("SELECT metadata_json FROM events WHERE external_id = '8'").fetchone()["metadata_json"]
         )
         assert "agent_deferred" not in metadata
+
+
+def test_natural_due_date_and_reminder_create_one_sourced_task_and_job(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    receipt = _gateway(database_path, defer_unparsed_to_agent=True).handle(
+        _update(10, "my paper is due Friday; remind me Thursday")
+    )
+
+    assert receipt.agent_deferred is False
+    assert receipt.task_id and receipt.reminder_job_id
+    with Database(database_path).connect() as connection:
+        task = connection.execute(
+            "SELECT title, due_at, source_event_id FROM tasks WHERE id = ?", (receipt.task_id,)
+        ).fetchone()
+        job = connection.execute(
+            "SELECT next_run_at FROM jobs WHERE id = ?", (receipt.reminder_job_id,)
+        ).fetchone()
+        event = connection.execute("SELECT id FROM events WHERE external_id = '10'").fetchone()
+    due_at = datetime.fromisoformat(task["due_at"])
+    remind_at = datetime.fromisoformat(job["next_run_at"])
+    assert task["title"] == "paper"
+    assert task["source_event_id"] == event["id"]
+    assert due_at.weekday() == 4 and due_at.hour == 23
+    assert remind_at.weekday() == 3
+    assert remind_at < due_at

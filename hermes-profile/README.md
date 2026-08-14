@@ -54,13 +54,12 @@ Portal)."** That's a free OAuth login (Nous Portal has a real $0/mo tier: no
 credits needed, capped at 50 RPM/500K TPM, limited to Hermes's free-model
 catalog per [its docs](https://hermes-agent.nousresearch.com/docs/integrations/nous-portal)).
 Picking it here only bootstraps Hermes's own base setup with a working free
-model out of the box -- it does not lock out Ollama or OpenRouter below.
-Providers aren't exclusive in Hermes's config: `config.yaml` lists all three
-(`ollama-local`, `nous`, `openrouter`), one marked primary and the rest as a
-fallback chain, and you can switch which one's active for a session with
+model out of the box -- it does not lock out local Ollama below. Providers
+aren't exclusive in Hermes's config: `config.yaml` lists Nous and
+`ollama-local`, one primary and one fallback, and you can switch with
 `/model <name> --provider <provider>`.
 
-## 2. Model setup: Nous Portal primary, Ollama and OpenRouter as fallback
+## 2. Model setup: Nous Portal primary, Ollama as the local fallback
 
 `config.yaml` defaults to **Nous Portal** (`upstage/solar-pro4:free`) as the
 primary provider, not local Ollama. That's a deliberate change from Alfred
@@ -75,14 +74,13 @@ responded fast and is already authenticated from step 1's "Quick Setup."
 native tool/function calling -- important since Hermes needs reliable
 function calls to actually use Alfred Core's MCP tools, not just chat.
 
-Ollama and OpenRouter both stay configured as fallbacks (`fallback_providers`
-in `config.yaml`), so a Nous Portal outage or rate limit degrades to
-slow-but-working rather than nothing. If you'd rather run local-first anyway
+Ollama stays configured as the only fallback (`fallback_providers` in
+`config.yaml`), so a Nous Portal outage or rate limit degrades to
+private, slow-but-working local inference rather than a paid provider. This
+also keeps Alfred's operational cloud-spend ceiling at $0. If you'd rather run local-first anyway
 (privacy, no rate limit, willing to accept the latency) run `ollama list`,
 pick a model that reports at least 64K context, and swap `model.provider`/
-`model.default` back to `ollama-local`. The OpenRouter key is optional --
-`distribution.yaml` declares it as a not-required `env_requires` entry, so
-`hermes profile install` will prompt for it without failing if you skip it.
+`model.default` back to `ollama-local`.
 
 ## 3. Install this profile
 
@@ -105,6 +103,7 @@ gets what it's explicitly scoped for:
 ```powershell
 alfred client-grant --client-id hermes --sensitivity public --sensitivity personal `
   --tool agenda_get --tool brief_get --tool memory_search --tool remember `
+  --tool memory_correct --tool memory_feedback `
   --tool connector_status --tool connector_records_get `
   --tool task_upsert --tool task_complete --tool reminder_set `
   --tool calendar_event_propose --tool message_draft --tool message_send_propose `
