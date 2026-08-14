@@ -62,6 +62,29 @@ def test_morning_brief_includes_only_current_canvas_missing_assignments(tmp_path
     assert "Canvas missing:\n- Missing essay" in brief.render()
 
 
+def test_morning_brief_includes_native_canvas_ical_assignments(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (
+                    connector, account, record_type, record_id,
+                    payload_json, observed_at, active
+                ) VALUES ('canvas_ical', 'self', 'assignment', '1', ?, ?, 1)
+                """,
+                (
+                    '{"title":"Project 1","due_at":"2026-08-16T23:59:00-04:00","course_name":"CSE 2231","html_url":null}',
+                    "2026-08-14T07:00:00+00:00",
+                ),
+            )
+
+    brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    assert [item.title for item in brief.upcoming] == ["Project 1"]
+
+
 def test_morning_brief_includes_current_calendar_events_today(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     database.migrate()

@@ -105,7 +105,7 @@ class AcademicMemoryService:
         # Connector events are versioned. Keep the newest known version for
         # each provider item before grouping, while retaining its source-event
         # id in the rollup as provenance.
-        latest: dict[str, tuple[tuple[str, int], dict[str, Any]]] = {}
+        latest: dict[str, tuple[tuple[str, int, int], dict[str, Any]]] = {}
         for row in rows:
             metadata = json.loads(row["metadata_json"])
             if row["source"] == "google_calendar":
@@ -120,6 +120,7 @@ class AcademicMemoryService:
                 continue
             version_key = (
                 str(row["occurred_at"]),
+                int(metadata.get("source_revision") or 0),
                 int(str(row["external_id"] or "").endswith(":calendar-v2")),
             )
             existing = latest.get(stable_key)
@@ -285,6 +286,8 @@ class AcademicMemoryService:
             added_by = _identity_label(metadata.get("creator"))
             organizer = _identity_label(metadata.get("organizer"))
         else:
+            if metadata.get("status") == "cancelled":
+                return None
             value = metadata.get("due_at")
             group_label = str(metadata.get("course_name") or "Canvas")
             group_key = f"canvas:{group_label.casefold()}"

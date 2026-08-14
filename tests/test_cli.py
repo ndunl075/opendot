@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from alfred.cli import main
+from alfred.cli import build_parser, main
 from alfred.db import Database
 
 
@@ -39,6 +39,16 @@ def test_cli_reports_connector_status_without_any_configured_connector(tmp_path:
 
     assert main(["--db", str(database_path), "connector-status"]) == 0
     assert json.loads(capsys.readouterr().out) == []
+
+
+def test_cli_exposes_opt_in_canvas_ical_sync_without_a_url_argument() -> None:
+    one_shot = build_parser().parse_args(["canvas-ical-sync"])
+    continuous = build_parser().parse_args(["run", "--canvas-ical"])
+
+    assert one_shot.secret_name == "canvas-ical-feed-url"
+    assert continuous.canvas_ical is True
+    assert continuous.canvas_ical_secret_name == "canvas-ical-feed-url"
+    assert continuous.canvas_ical_interval == 900.0
 
 
 def test_cli_imports_a_vault_note_as_a_confirmed_memory(tmp_path: Path, capsys) -> None:

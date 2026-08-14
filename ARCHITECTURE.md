@@ -33,7 +33,7 @@ flowchart LR
   AI[ChatGPT / Claude / Cursor] -->|MCP| AC
   AC --> MEM[(SQLite + FTS5 + vectors)]
   OBS[Obsidian / Markdown] <-->|selected notes| AC
-  AC --> API[Calendar / Canvas / GitHub / Gmail / Health]
+  AC --> API[Calendar / Canvas API or private iCal / GitHub / Gmail / Health]
   AC --> MODELS[Ollama; optional cloud fallback]
   AC --> OUT[Scheduler + approval outbox]
   OUT --> HG
@@ -104,6 +104,14 @@ health() -> status
 Each connector declares read/write capabilities, OAuth scopes, sensitivity, polling/webhook support, and rate limits. A normalized event always retains `source`, `account`, `external_id`, timestamps, and a deep link to the original.
 
 Prefer official APIs for reliable sync. Third-party MCP servers are acceptable for optional/ad-hoc tools, but must be allowlisted and cannot receive Alfred secrets other than their own scoped credential.
+
+When an institution disables student-generated Canvas API tokens, Alfred may
+use Canvas's official private iCalendar feed as a degraded read-only source.
+The feed URL is a bearer secret held only in the operating-system keyring.
+Sync uses bounded full snapshots plus ETag/Last-Modified validators; SQLite and
+audit records retain no feed URL, query token, or event description. This path
+provides dated assignments and events, not grades, submissions, To Do state, or
+complete history, and must not be mistaken for full Canvas API parity.
 
 ## 4. Memory: what “remember everything” means
 

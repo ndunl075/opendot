@@ -98,7 +98,9 @@ class BriefingService:
             canvas_rows = connection.execute(
                 """
                 SELECT record_type, payload_json FROM connector_records
-                WHERE connector = 'canvas' AND account = 'self' AND active = 1
+                WHERE connector IN ('canvas', 'canvas_ical')
+                  AND account = 'self'
+                  AND active = 1
                 """
             ).fetchall()
             calendar_rows = connection.execute(
@@ -117,7 +119,7 @@ class BriefingService:
                 """
                 SELECT connector, MAX(last_success_at) AS last_success_at
                 FROM sync_state
-                WHERE connector IN ('canvas', 'google_calendar', 'github', 'google_health')
+                WHERE connector IN ('canvas', 'canvas_ical', 'google_calendar', 'github', 'google_health')
                   AND last_success_at IS NOT NULL
                 GROUP BY connector
                 """

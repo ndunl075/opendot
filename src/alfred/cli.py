@@ -38,6 +38,7 @@ from .google_calendar import (
 )
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
+from .canvas_ical import CanvasICalClient, CanvasICalSync, CanvasICalSyncResult
 from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
@@ -143,6 +144,14 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 run=lambda: _canvas_sync_once(
                     database, args.canvas_base_url, args.canvas_secret_name, include_history=True
                 ),
+            )
+        )
+    if args.canvas_ical:
+        connectors.append(
+            ConnectorSync(
+                name="canvas_ical",
+                interval_seconds=args.canvas_ical_interval,
+                run=lambda: _canvas_ical_sync_once(database, args.canvas_ical_secret_name),
             )
         )
     if args.google_health:
@@ -453,6 +462,11 @@ def build_parser() -> argparse.ArgumentParser:
     canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync current and historical Canvas assignments")
     canvas_sync.add_argument("--base-url", required=True, help="your school Canvas HTTPS URL")
     canvas_sync.add_argument("--secret-name", default="canvas-api-token")
+    canvas_ical_sync = subcommands.add_parser(
+        "canvas-ical-sync",
+        help="read-sync a private Canvas Calendar Feed URL from the operating-system keyring",
+    )
+    canvas_ical_sync.add_argument("--secret-name", default="canvas-ical-feed-url")
     health_sync = subcommands.add_parser(
         "health-sync", help="read-sync Google Health steps/sleep/heart-rate; reuses the google-auth grant"
     )
@@ -559,6 +573,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=86400.0,
         help="minimum seconds between full Canvas course-history reads (default: daily)",
+    )
+    run.add_argument(
+        "--canvas-ical",
+        action="store_true",
+        help="enables direct read-only Canvas Calendar Feed sync from the operating-system keyring",
+    )
+    run.add_argument("--canvas-ical-secret-name", default="canvas-ical-feed-url")
+    run.add_argument(
+        "--canvas-ical-interval",
+        type=float,
+        default=900.0,
+        help="minimum seconds between direct Canvas Calendar Feed refreshes (default: 900)",
     )
     run.add_argument("--github-secret-name", default="github-token")
     run.add_argument(
@@ -1015,6 +1041,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
+    if args.command == "canvas-ical-sync":
+        result = _canvas_ical_sync_once(database, args.secret_name)
+        print(result.model_dump_json())
+        return 0
     if args.command == "health-sync":
         client = GoogleHealthClient(_google_access_token())
         try:
@@ -1236,6 +1266,14 @@ def _canvas_sync_once(
     client = CanvasClient(base_url, SystemKeyringSecretStore().get_required(secret_name))
     try:
         CanvasSync(database, client, include_history=include_history).sync()
+    finally:
+        client.close()
+
+
+def _canvas_ical_sync_once(database: Database, secret_name: str) -> CanvasICalSyncResult:
+    client = CanvasICalClient(SystemKeyringSecretStore().get_required(secret_name))
+    try:
+        return CanvasICalSync(database, client).sync()
     finally:
         client.close()
 
