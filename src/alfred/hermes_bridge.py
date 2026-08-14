@@ -229,6 +229,11 @@ class SubprocessAgentRunner:
             "timeout": self.timeout_seconds,
             "check": False,
         }
+        if os.name == "nt":
+            # Alfred normally runs without a console under Task Scheduler.
+            # A console child would otherwise open a terminal for every turn;
+            # closing that window terminates Hermes with 0xC000013A.
+            run_arguments["creationflags"] = subprocess.CREATE_NO_WINDOW
         if allowed_tools is not None:
             environment = os.environ.copy()
             environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))

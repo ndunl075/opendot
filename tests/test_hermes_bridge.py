@@ -479,6 +479,10 @@ def test_subprocess_runner_builds_the_documented_hermes_invocation() -> None:
     # Windows would otherwise decode Hermes's em dashes and emoji with the ANSI codepage.
     assert kwargs["encoding"] == "utf-8"
     assert kwargs["check"] is False
+    if __import__("os").name == "nt":
+        assert kwargs["creationflags"] == subprocess.CREATE_NO_WINDOW
+    else:
+        assert "creationflags" not in kwargs
 
 
 def test_subprocess_runner_can_bypass_the_windows_console_launcher() -> None:
