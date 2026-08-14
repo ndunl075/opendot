@@ -93,6 +93,30 @@ upcoming/missing plus accessible current/completed-course assignment history:
 title, deadline, course label, source link, and compact submission workflow
 state. Grades, submission contents, files, and assignment body text stay out.
 
+If the school disables personal API tokens, use Canvas's private Calendar Feed
+instead. Treat that URL like a password and enter it directly into Windows
+Credential Manager; never put it in Git, a command argument, a log, or chat:
+
+```powershell
+.\.venv\Scripts\alfred.exe canvas-ical-setup
+```
+
+The setup command says when it is ready for the URL, hides the pasted text,
+repairs an exact accidental double-paste, validates the feed before replacing
+the saved credential, and performs the first sync. The native reader
+checks the feed every 15 minutes when `alfred run` includes `--canvas-ical`,
+uses ETag/Last-Modified conditional requests, and stores only assignment title,
+deadline, course label when present, a query-free source link, status, and
+versioned evidence. It never stores the feed URL or event description. If the
+same item also arrives through a Google Calendar subscription, exact matches
+on title and time are shown once in briefs and academic memory, with the native
+Canvas evidence preferred. Canvas's
+iCal export is less complete than the API: it omits To Do/submission state and
+is limited by Canvas to 30 past days, 366 future days, and 1,000 items. Remove
+the same Canvas subscription from Google Calendar later if you do not want the
+redundant raw calendar evidence; it is no longer required to prevent duplicate
+briefing or memory entries.
+
 Google Health is also read-only and opt-in—and, unlike Calendar/Gmail/Canvas/
 GitHub above, it has not been exercised against a real wearable-linked account.
 It's built the same way every other connector is (same client/sync shape, same
@@ -233,7 +257,7 @@ failed connector is logged to the audit trail and skipped; it never stops the
 loop or any other connector.
 
 ```powershell
-.\.venv\Scripts\alfred run --pair 123:456 --chat-id 123 --canvas-base-url https://your-school.instructure.com
+.\.venv\Scripts\alfred run --pair 123:456 --chat-id 123 --canvas-ical
 ```
 
 `alfred run` bounds Gmail to the 50 most recent unread messages
@@ -244,9 +268,10 @@ Telegram message isn't even polled for. Raise it if you'd rather have the
 wider window than the responsiveness.
 
 Calendar, GitHub, and Gmail sync are always attempted and simply skip
-themselves if their credential isn't configured yet; Canvas needs
-`--canvas-base-url` to be included at all, inbound Gmail commands need at
-least one `--gmail-inbound-sender`, and Google Health needs `--google-health`.
+themselves if their credential isn't configured yet; Canvas API sync needs
+`--canvas-base-url`, native Canvas Calendar Feed sync needs `--canvas-ical`,
+inbound Gmail commands need at least one `--gmail-inbound-sender`, and Google
+Health needs `--google-health`.
 Omit `--pair`/`--chat-id` to run with Telegram disabled. Stop it with Ctrl+C.
 
 `alfred run` also works as a foreground process kept alive by Windows Task

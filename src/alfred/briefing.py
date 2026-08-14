@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
+from .academic_dedup import academic_item_signature
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .models import TextGenerationProvider
@@ -98,7 +99,9 @@ class BriefingService:
             canvas_rows = connection.execute(
                 """
                 SELECT record_type, payload_json FROM connector_records
-                WHERE connector = 'canvas' AND account = 'self' AND active = 1
+                WHERE connector IN ('canvas', 'canvas_ical')
+                  AND account = 'self'
+                  AND active = 1
                 """
             ).fetchall()
             calendar_rows = connection.execute(
@@ -117,7 +120,7 @@ class BriefingService:
                 """
                 SELECT connector, MAX(last_success_at) AS last_success_at
                 FROM sync_state
-                WHERE connector IN ('canvas', 'google_calendar', 'github', 'google_health')
+                WHERE connector IN ('canvas', 'canvas_ical', 'google_calendar', 'github', 'google_health')
                   AND last_success_at IS NOT NULL
                 GROUP BY connector
                 """
@@ -129,6 +132,7 @@ class BriefingService:
             source_freshness={str(row["connector"]): str(row["last_success_at"]) for row in freshness_rows},
         )
         end_of_window = generated_at.date() + timedelta(days=7)
+        canvas_signatures: set[tuple[str, int]] = set()
         for row in rows:
             due_at = datetime.fromisoformat(row["due_at"]).astimezone(timezone) if row["due_at"] else None
             item = BriefItem(title=row["title"], due_at=due_at)
@@ -142,6 +146,9 @@ class BriefingService:
                 brief.upcoming.append(item)
         for row in canvas_rows:
             payload = json.loads(row["payload_json"])
+            signature = academic_item_signature(payload.get("title"), payload.get("due_at"))
+            if signature is not None:
+                canvas_signatures.add(signature)
             due_at = _parse_optional_timestamp(payload.get("due_at"))
             if due_at:
                 due_at = due_at.astimezone(timezone)
@@ -163,6 +170,8 @@ class BriefingService:
                 brief.upcoming.append(item)
         for row in calendar_rows:
             payload = json.loads(row["payload_json"])
+            if academic_item_signature(payload.get("title"), payload.get("start")) in canvas_signatures:
+                continue
             start = _parse_optional_timestamp(payload.get("start"))
             end = _parse_optional_timestamp(payload.get("end"))
             if start:

@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .academic_dedup import academic_item_signature
 from .audit import AuditEvent, AuditLog
 from .db import Database
 
@@ -57,7 +58,7 @@ _TERM_ALIASES: dict[str, tuple[str, ...]] = {
 class AcademicMemoryService:
     """Build compact daily and course/calendar rollups when source data changes."""
 
-    version = "academic-rollups-v3"
+    version = "academic-rollups-v4"
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -105,7 +106,7 @@ class AcademicMemoryService:
         # Connector events are versioned. Keep the newest known version for
         # each provider item before grouping, while retaining its source-event
         # id in the rollup as provenance.
-        latest: dict[str, tuple[tuple[str, int], dict[str, Any]]] = {}
+        latest: dict[str, tuple[tuple[str, int, int], dict[str, Any]]] = {}
         for row in rows:
             metadata = json.loads(row["metadata_json"])
             if row["source"] == "google_calendar":
@@ -120,16 +121,32 @@ class AcademicMemoryService:
                 continue
             version_key = (
                 str(row["occurred_at"]),
+                int(metadata.get("source_revision") or 0),
                 int(str(row["external_id"] or "").endswith(":calendar-v2")),
             )
             existing = latest.get(stable_key)
             if existing is None or version_key >= existing[0]:
                 latest[stable_key] = (version_key, {**dict(row), "metadata": metadata})
 
-        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        normalized: list[tuple[str, dict[str, Any]]] = []
         for stable_key, (_version, row) in latest.items():
             item = self._normalize({**row, "stable_key": stable_key}, calendar_labels)
             if item is None:
+                continue
+            normalized.append((str(row["source"]), item))
+
+        canvas_signatures = {
+            signature
+            for source, item in normalized
+            if source == "canvas"
+            and (signature := academic_item_signature(item["title"], item["at"])) is not None
+        }
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for source, item in normalized:
+            if (
+                source == "google_calendar"
+                and academic_item_signature(item["title"], item["at"]) in canvas_signatures
+            ):
                 continue
             grouped[(item["day"], item["group_key"])].append(item)
 
@@ -285,6 +302,8 @@ class AcademicMemoryService:
             added_by = _identity_label(metadata.get("creator"))
             organizer = _identity_label(metadata.get("organizer"))
         else:
+            if metadata.get("status") == "cancelled":
+                return None
             value = metadata.get("due_at")
             group_label = str(metadata.get("course_name") or "Canvas")
             group_key = f"canvas:{group_label.casefold()}"
