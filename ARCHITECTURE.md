@@ -160,6 +160,19 @@ stored append-only for evaluation. The extraction interface remains pluggable
 so a stronger local structured-output model can be evaluated later without
 changing Alfred's authoritative schema or promotion policy.
 
+**Built (proposal-only):** each Hermes tool subprocess inherits a private turn
+correlation ID. Successful MCP calls append only tool names, supplied argument
+names, and a very small allowlist of non-content routing values; prompts,
+message bodies, titles, people, addresses, dates, identifiers, and arbitrary
+argument values are never workflow evidence. A local daily scan requires at
+least three matching successful turns across two UTC days. Failed turns and
+any turn containing a control/consequential tool such as `action_commit` are
+discarded wholesale. Eligible patterns become versioned, inert `SKILL.md`
+proposals with unified diffs and expiring approval records. Rejection is
+audited and requires two more examples before Alfred asks again. This slice
+deliberately has no activation or execution path: review can never change the
+Hermes profile while unattended.
+
 **Built:** successful Telegram responses expose explicit helpful, missing-context,
 and wrong-context feedback. Alfred stores one vote per response with only source
 names, freshness, and opaque ranked record IDs, never prompt or answer text.

@@ -53,6 +53,7 @@ from .memory_graph import MemoryGraph
 from .models import Redactor
 from .response_feedback import ResponseFeedbackService, feedback_keyboard
 from .telegram_actions import action_keyboard
+from .workflow_learning import WORKFLOW_TURN_ID_ENV, WorkflowObservationStore
 
 #: Telegram rejects a sendMessage payload over 4096 characters outright, so a
 #: long agent answer is truncated rather than lost to a failed delivery.
@@ -230,10 +231,20 @@ class SubprocessAgentRunner:
     def __call__(self, prompt: str) -> AgentRunResult:
         return self._run(prompt, allowed_tools=None)
 
-    def run_scoped(self, prompt: str, *, allowed_tools: frozenset[str]) -> AgentRunResult:
+    def run_scoped(
+        self,
+        prompt: str,
+        *,
+        allowed_tools: frozenset[str],
+        correlation_id: str | None = None,
+    ) -> AgentRunResult:
         """Run one turn whose inherited MCP server exposes only ``allowed_tools``."""
 
-        return self._run(prompt, allowed_tools=allowed_tools)
+        return self._run(
+            prompt,
+            allowed_tools=allowed_tools,
+            correlation_id=correlation_id,
+        )
 
     def run_conversation(self, prompt: str) -> AgentRunResult:
         """Use the free fast model as a plain conversational model."""
@@ -251,6 +262,7 @@ class SubprocessAgentRunner:
         allowed_tools: frozenset[str] | None,
         reasoning: str | None = None,
         model: str | None = None,
+        correlation_id: str | None = None,
     ) -> AgentRunResult:
         started = self._monotonic()
         tool_count = len(allowed_tools) if allowed_tools is not None else None
@@ -292,9 +304,12 @@ class SubprocessAgentRunner:
             # A console child would otherwise open a terminal for every turn;
             # closing that window terminates Hermes with 0xC000013A.
             run_arguments["creationflags"] = subprocess.CREATE_NO_WINDOW
-        if allowed_tools is not None:
+        if allowed_tools is not None or correlation_id is not None:
             environment = os.environ.copy()
-            environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))
+            if allowed_tools is not None:
+                environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))
+            if correlation_id is not None:
+                environment[WORKFLOW_TURN_ID_ENV] = correlation_id
             run_arguments["env"] = environment
         try:
             completed = self._runner(argv, **run_arguments)
@@ -492,7 +507,11 @@ class HermesBridge:
             context_ms = max(0, round((self._monotonic() - context_started) * 1000))
             agent_started = self._monotonic()
             result = self._run_agent_scoped(
-                prompt, request=request, history=history, casual=casual
+                prompt,
+                request=request,
+                history=history,
+                casual=casual,
+                correlation_id=external_id,
             )
             agent_ms = max(0, round((self._monotonic() - agent_started) * 1000))
         self._maybe_react(event, result=result, casual=casual)
@@ -716,6 +735,7 @@ class HermesBridge:
         request: str,
         history: list[dict[str, str]],
         casual: bool = False,
+        correlation_id: str | None = None,
     ) -> AgentRunResult:
         topic_text = "\n".join(
             [
@@ -730,7 +750,14 @@ class HermesBridge:
                 return run_conversation(prompt)
         run_scoped = getattr(self.agent, "run_scoped", None)
         if callable(run_scoped):
-            return run_scoped(prompt, allowed_tools=select_hermes_tools(topic_text))
+            allowed_tools = select_hermes_tools(topic_text)
+            if isinstance(self.agent, SubprocessAgentRunner):
+                return run_scoped(
+                    prompt,
+                    allowed_tools=allowed_tools,
+                    correlation_id=correlation_id,
+                )
+            return run_scoped(prompt, allowed_tools=allowed_tools)
         return self.agent(prompt)
 
     def _agent_prompt(
@@ -1101,6 +1128,11 @@ class HermesBridge:
         bubbles = split_into_bubbles(text, max_bubbles=self.max_bubbles)
         with self.database.connect() as connection:
             with self.database.transaction(connection):
+                WorkflowObservationStore.complete_turn_in_transaction(
+                    connection,
+                    external_id,
+                    outcome="ok" if ok else "error",
+                )
                 approvals: list[tuple[str, str]] = []
                 if ok:
                     trace = context_trace or {"sources": [], "freshness": {}, "items": []}

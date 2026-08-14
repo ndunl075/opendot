@@ -585,6 +585,33 @@ the same way the corresponding CLI commands do; nothing is cached. Gmail sends
 remain explicit, one-time approval-gated actions and never run from sync or a
 scheduled job.
 
+### Repeated-workflow proposals
+
+When Hermes is enabled, Alfred performs a local workflow scan once per day.
+It looks for the same successful two-to-eight-tool sequence at least three
+times across two days. It stores only structural metadata: tool names,
+argument names, and allowlisted routing labels such as connector type. It
+does not store prompts, email bodies, task or event titles, people, addresses,
+dates, identifiers, or arbitrary argument values. Failed turns and turns that
+contain `action_commit` are ineligible rather than partially learned.
+
+```powershell
+.\.venv\Scripts\alfred workflow-scan
+.\.venv\Scripts\alfred workflow-list --state pending
+.\.venv\Scripts\alfred workflow-show --version-id <ID>
+.\.venv\Scripts\alfred workflow-accept --version-id <ID>
+.\.venv\Scripts\alfred workflow-reject --version-id <ID>
+```
+
+Each suggestion is an inert, versioned `SKILL.md` plus a unified diff and an
+expiring review record. Accepting the diff records that decision but this
+first slice intentionally cannot activate or execute a generated skill;
+unattended learning can therefore produce review material but cannot modify
+the Hermes profile. Raw daily Calendar/Canvas JSON snapshots are not used here: their
+normalized source records already preserve provenance and change history,
+while duplicate snapshots would retain more private content without improving
+workflow detection.
+
 ### Streamable HTTP (remote/private clients)
 
 `alfred-mcp` is stdio-only. For a client that can't spawn a local process—or

@@ -62,6 +62,7 @@ from .mcp_server import generate_http_token, run_streamable_http
 from .admin_ui import run_admin_ui
 from .winservice import configure as configure_windows_service
 from .vault_sync import check_couchdb
+from .workflow_learning import WorkflowLearningService
 
 
 def database_from_args(args: argparse.Namespace) -> Database:
@@ -207,6 +208,14 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             run=HistoricalMemoryService(database).rebuild_if_changed,
         )
     )
+    if args.hermes_profile:
+        connectors.append(
+            ConnectorSync(
+                name="workflow_learning",
+                interval_seconds=args.workflow_learning_interval,
+                run=WorkflowLearningService(database).scan,
+            )
+        )
     if embedding_provider is not None:
         connectors.append(
             ConnectorSync(
@@ -451,6 +460,32 @@ def build_parser() -> argparse.ArgumentParser:
     consume.add_argument("--approval-id", required=True)
     consume.add_argument("--actor", required=True)
     consume.add_argument("--token", required=True)
+    workflow_scan = subcommands.add_parser(
+        "workflow-scan",
+        help="find repeated successful tool workflows and create inert approval proposals",
+    )
+    workflow_scan.add_argument("--actor", default="owner:workflow-learning")
+    workflow_list = subcommands.add_parser(
+        "workflow-list", help="list learned workflow proposals without activating them"
+    )
+    workflow_list.add_argument(
+        "--state", choices=("draft", "pending", "accepted", "active", "rejected", "superseded")
+    )
+    workflow_show = subcommands.add_parser(
+        "workflow-show", help="show one proposed skill version and its human-readable diff"
+    )
+    workflow_show.add_argument("--version-id", required=True)
+    workflow_reject = subcommands.add_parser(
+        "workflow-reject", help="reject a pending learned workflow proposal"
+    )
+    workflow_reject.add_argument("--version-id", required=True)
+    workflow_reject.add_argument("--actor", default="owner:workflow-learning")
+    workflow_accept = subcommands.add_parser(
+        "workflow-accept",
+        help="accept a reviewed workflow diff without activating or executing it",
+    )
+    workflow_accept.add_argument("--version-id", required=True)
+    workflow_accept.add_argument("--actor", default="owner:workflow-learning")
     poll = subcommands.add_parser("telegram-poll", help="long-poll Telegram locally once")
     poll.add_argument("--pair", action="append", required=True, help="locally paired CHAT_ID:USER_ID")
     poll.add_argument("--secret-name", default="telegram-bot-token")
@@ -682,6 +717,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1000,
         help="hard monthly cap on external Hermes turns; local direct answers do not count",
+    )
+    run.add_argument(
+        "--workflow-learning-interval",
+        type=float,
+        default=86400.0,
+        help="seconds between privacy-safe repeated-workflow scans (default: daily)",
     )
     run.add_argument("--vault", type=Path, help="enables periodic vault import when set")
     run.add_argument("--poll-timeout", type=int, default=10, help="seconds per Telegram long-poll cycle")
@@ -972,6 +1013,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "approval-consume":
         print(approvals.consume(args.approval_id, actor=args.actor, token=args.token).model_dump_json())
+        return 0
+    workflow_learning = WorkflowLearningService(database)
+    if args.command == "workflow-scan":
+        print(workflow_learning.scan(actor=args.actor).model_dump_json())
+        return 0
+    if args.command == "workflow-list":
+        print(
+            json.dumps(
+                [item.model_dump(mode="json") for item in workflow_learning.list_versions(state=args.state)]
+            )
+        )
+        return 0
+    if args.command == "workflow-show":
+        print(workflow_learning.get(args.version_id).model_dump_json())
+        return 0
+    if args.command == "workflow-reject":
+        print(workflow_learning.reject(args.version_id, actor=args.actor).model_dump_json())
+        return 0
+    if args.command == "workflow-accept":
+        print(workflow_learning.accept(args.version_id, actor=args.actor).model_dump_json())
         return 0
     if args.command == "telegram-poll":
         client = TelegramBotClient(SystemKeyringSecretStore().get_required(args.secret_name))
