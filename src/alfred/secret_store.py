@@ -29,12 +29,7 @@ class SystemKeyringSecretStore:
         return value
 
     def store(self, name: str, value: str) -> None:
-        """Write a secret the local flow just obtained, e.g. an OAuth refresh token.
-
-        Never used for secrets the user pastes in themselves (those go
-        through the OS keyring's own tooling directly); only for values
-        Alfred derives locally and cannot ask the user to type twice.
-        """
+        """Write a secret obtained by a local flow directly to the OS keyring."""
         if not value.strip():
             raise ValueError("cannot store an empty secret")
         try:

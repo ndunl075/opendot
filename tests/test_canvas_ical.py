@@ -10,7 +10,9 @@ from alfred.canvas_ical import (
     CanvasICalError,
     CanvasICalResponse,
     CanvasICalSync,
+    normalize_canvas_ical_feed_url,
     parse_canvas_ical,
+    setup_canvas_ical_feed,
 )
 from alfred.db import Database
 
@@ -42,6 +44,14 @@ class FeedTransport:
         return self.response
 
 
+class MemoryCredentialStore:
+    def __init__(self) -> None:
+        self.saved: dict[str, str] = {}
+
+    def store(self, name: str, value: str) -> None:
+        self.saved[name] = value
+
+
 def test_client_uses_conditional_headers_and_never_exposes_the_feed_url() -> None:
     secret_url = "https://osu.instructure.com/feeds/calendars/user_super-secret.ics"
 
@@ -60,6 +70,50 @@ def test_client_uses_conditional_headers_and_never_exposes_the_feed_url() -> Non
 
     assert secret_url not in str(caught.value)
     assert "super-secret" not in str(caught.value)
+
+
+def test_setup_repairs_an_exact_double_paste_and_ingests_without_exposing_it(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    store = MemoryCredentialStore()
+    secret_url = "https://osu.instructure.com/feeds/calendars/user_super-secret.ics"
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, text=FEED, headers={"ETag": '"setup-v1"'}, request=request)
+
+    result = setup_canvas_ical_feed(
+        database,
+        store,
+        secret_url + secret_url,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.configured and result.repaired_duplicate
+    assert result.received == result.active == 1
+    assert requests == [secret_url]
+    assert store.saved == {"canvas-ical-feed-url": secret_url}
+
+
+def test_setup_does_not_replace_the_credential_when_validation_fails(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    store = MemoryCredentialStore()
+    secret_url = "https://osu.instructure.com/feeds/calendars/user_super-secret.ics"
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="login", request=request))
+
+    with pytest.raises(CanvasICalError) as caught:
+        setup_canvas_ical_feed(database, store, secret_url, transport=transport)
+
+    assert not store.saved
+    assert secret_url not in str(caught.value)
+
+
+def test_normalization_leaves_ambiguous_multiple_urls_for_validation() -> None:
+    first = "https://canvas.example/feeds/calendars/one.ics"
+    second = "https://canvas.example/feeds/calendars/two.ics"
+
+    assert normalize_canvas_ical_feed_url(f"  {first}{first}  ") == (first, True)
+    assert normalize_canvas_ical_feed_url(first + second) == (first + second, False)
 
 
 def test_parser_minimizes_canvas_event_and_strips_link_queries() -> None:

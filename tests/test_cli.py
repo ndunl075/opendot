@@ -43,9 +43,11 @@ def test_cli_reports_connector_status_without_any_configured_connector(tmp_path:
 
 def test_cli_exposes_opt_in_canvas_ical_sync_without_a_url_argument() -> None:
     one_shot = build_parser().parse_args(["canvas-ical-sync"])
+    setup = build_parser().parse_args(["canvas-ical-setup"])
     continuous = build_parser().parse_args(["run", "--canvas-ical"])
 
     assert one_shot.secret_name == "canvas-ical-feed-url"
+    assert setup.secret_name == "canvas-ical-feed-url"
     assert continuous.canvas_ical is True
     assert continuous.canvas_ical_secret_name == "canvas-ical-feed-url"
     assert continuous.canvas_ical_interval == 900.0

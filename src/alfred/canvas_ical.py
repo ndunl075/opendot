@@ -39,6 +39,10 @@ class CanvasICalTransport(Protocol):
     def fetch(self, *, etag: str | None, last_modified: str | None) -> CanvasICalResponse | None: ...
 
 
+class CanvasICalCredentialStore(Protocol):
+    def store(self, name: str, value: str) -> None: ...
+
+
 class CanvasICalClient:
     """Fetch one private ICS URL while keeping it out of every exception."""
 
@@ -87,6 +91,72 @@ class CanvasICalSyncResult(BaseModel):
     stored: int = 0
     active: int = 0
     unchanged: bool = False
+
+
+class CanvasICalSetupResult(BaseModel):
+    configured: bool = True
+    repaired_duplicate: bool = False
+    received: int = 0
+    active: int = 0
+
+
+def normalize_canvas_ical_feed_url(raw_feed_url: str) -> tuple[str, bool]:
+    """Trim a pasted feed URL and safely repair one exact double-paste.
+
+    The repair is intentionally narrow: Alfred only removes the second half
+    when both HTTPS URLs are byte-for-byte identical. Anything ambiguous is
+    left alone for normal URL validation to reject.
+    """
+
+    candidate = raw_feed_url.strip()
+    duplicate_at = candidate.find("https://", len("https://"))
+    if duplicate_at > 0:
+        first = candidate[:duplicate_at].strip()
+        second = candidate[duplicate_at:].strip()
+        if first == second:
+            return first, True
+    return candidate, False
+
+
+def setup_canvas_ical_feed(
+    database: Database,
+    credential_store: CanvasICalCredentialStore,
+    raw_feed_url: str,
+    *,
+    secret_name: str = "canvas-ical-feed-url",
+    transport: httpx.BaseTransport | None = None,
+) -> CanvasICalSetupResult:
+    """Validate, store, and ingest a private Canvas feed in one safe flow."""
+
+    feed_url, repaired_duplicate = normalize_canvas_ical_feed_url(raw_feed_url)
+    client = CanvasICalClient(feed_url, transport=transport)
+    try:
+        response = client.fetch(etag=None, last_modified=None)
+    finally:
+        client.close()
+    if response is None:
+        raise CanvasICalError("Canvas calendar feed returned no setup response")
+
+    # Validate before changing the saved credential. The sync parses again so
+    # its normal persistence and health bookkeeping stay on one code path.
+    parsed = parse_canvas_ical(response.body)
+    credential_store.store(secret_name, feed_url)
+    result = CanvasICalSync(database, _SetupTransport(response)).sync()
+    return CanvasICalSetupResult(
+        repaired_duplicate=repaired_duplicate,
+        received=len(parsed),
+        active=result.active,
+    )
+
+
+class _SetupTransport:
+    """Return the response already validated by the interactive setup flow."""
+
+    def __init__(self, response: CanvasICalResponse) -> None:
+        self.response = response
+
+    def fetch(self, *, etag: str | None, last_modified: str | None) -> CanvasICalResponse:
+        return self.response
 
 
 class CanvasICalSync:

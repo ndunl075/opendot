@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 from contextlib import contextmanager
 from uuid import uuid4
@@ -38,7 +39,12 @@ from .google_calendar import (
 )
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
-from .canvas_ical import CanvasICalClient, CanvasICalSync, CanvasICalSyncResult
+from .canvas_ical import (
+    CanvasICalClient,
+    CanvasICalSync,
+    CanvasICalSyncResult,
+    setup_canvas_ical_feed,
+)
 from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
@@ -467,6 +473,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="read-sync a private Canvas Calendar Feed URL from the operating-system keyring",
     )
     canvas_ical_sync.add_argument("--secret-name", default="canvas-ical-feed-url")
+    canvas_ical_setup = subcommands.add_parser(
+        "canvas-ical-setup",
+        help="securely prompt for, validate, save, and first-sync a private Canvas Calendar Feed URL",
+    )
+    canvas_ical_setup.add_argument("--secret-name", default="canvas-ical-feed-url")
     health_sync = subcommands.add_parser(
         "health-sync", help="read-sync Google Health steps/sleep/heart-rate; reuses the google-auth grant"
     )
@@ -1043,6 +1054,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "canvas-ical-sync":
         result = _canvas_ical_sync_once(database, args.secret_name)
+        print(result.model_dump_json())
+        return 0
+    if args.command == "canvas-ical-setup":
+        feed_url = getpass.getpass(
+            "Paste the private Canvas Calendar Feed URL, then press Enter "
+            "(input is hidden for security): "
+        )
+        result = setup_canvas_ical_feed(
+            database,
+            SystemKeyringSecretStore(),
+            feed_url,
+            secret_name=args.secret_name,
+        )
         print(result.model_dump_json())
         return 0
     if args.command == "health-sync":

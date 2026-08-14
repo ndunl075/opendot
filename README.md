@@ -98,11 +98,12 @@ instead. Treat that URL like a password and enter it directly into Windows
 Credential Manager; never put it in Git, a command argument, a log, or chat:
 
 ```powershell
-.\.venv\Scripts\python.exe -m keyring set alfred canvas-ical-feed-url
-.\.venv\Scripts\alfred.exe canvas-ical-sync
+.\.venv\Scripts\alfred.exe canvas-ical-setup
 ```
 
-The keyring command prompts for the URL without echoing it. The native reader
+The setup command says when it is ready for the URL, hides the pasted text,
+repairs an exact accidental double-paste, validates the feed before replacing
+the saved credential, and performs the first sync. The native reader
 checks the feed every 15 minutes when `alfred run` includes `--canvas-ical`,
 uses ETag/Last-Modified conditional requests, and stores only assignment title,
 deadline, course label when present, a query-free source link, status, and
