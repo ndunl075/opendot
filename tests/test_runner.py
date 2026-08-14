@@ -15,9 +15,12 @@ class FakeTelegram:
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]:
         return [update for update in self.updates if offset is None or update.get("update_id", -1) >= offset]
 
-    def send_message(self, *, chat_id: int, text: str) -> int:
+    def send_message(self, *, chat_id: int, text: str, reply_markup: dict | None = None) -> int:
         self.sent.append((chat_id, text))
         return 1
+
+    def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
+        return None
 
 
 def _reminder_update() -> dict:

@@ -18,7 +18,11 @@ from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 class TelegramTransport(Protocol):
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict]: ...
 
-    def send_message(self, *, chat_id: int, text: str) -> int: ...
+    def send_message(
+        self, *, chat_id: int, text: str, reply_markup: dict | None = None
+    ) -> int: ...
+
+    def answer_callback_query(self, *, callback_query_id: str, text: str) -> None: ...
 
 
 class PollResult(BaseModel):
@@ -75,7 +79,21 @@ class TelegramLongPoller:
                 continue
             try:
                 update = TelegramUpdate.model_validate(raw_update)
-                self.gateway.handle(update)
+                receipt = self.gateway.handle(update)
+                if update.callback_query is not None:
+                    try:
+                        self.transport.answer_callback_query(
+                            callback_query_id=update.callback_query.id,
+                            text=receipt.text,
+                        )
+                    except Exception as error:
+                        self._audit(
+                            "telegram_callback_ack_failed",
+                            {
+                                "update_id": str(update_id),
+                                "reason": error.__class__.__name__,
+                            },
+                        )
                 handled += 1
             except (ValueError, PermissionError) as error:
                 rejected += 1
@@ -162,7 +180,18 @@ class TelegramOutboxWorker:
                 results.append(self._fail(outbox_id, "outbox payload has no text message"))
                 continue
             try:
-                message_id = self.transport.send_message(chat_id=int(match.group(1)), text=text)
+                reply_markup = payload.get("reply_markup")
+                if reply_markup is not None and not isinstance(reply_markup, dict):
+                    results.append(self._fail(outbox_id, "outbox reply markup is invalid"))
+                    continue
+                if reply_markup is None:
+                    message_id = self.transport.send_message(chat_id=int(match.group(1)), text=text)
+                else:
+                    message_id = self.transport.send_message(
+                        chat_id=int(match.group(1)),
+                        text=text,
+                        reply_markup=reply_markup,
+                    )
             except Exception as error:
                 # A timeout can still have delivered the message. Leave it failed for human review, never auto-retry.
                 results.append(self._fail(outbox_id, f"Telegram send failed: {error.__class__.__name__}"))

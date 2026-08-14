@@ -46,6 +46,7 @@ from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV, select_hermes_tools
 from .outbox import Outbox
 from .memory_graph import MemoryGraph
 from .models import Redactor
+from .response_feedback import ResponseFeedbackService, feedback_keyboard
 
 #: Telegram rejects a sendMessage payload over 4096 characters outright, so a
 #: long agent answer is truncated rather than lost to a failed delivery.
@@ -382,6 +383,7 @@ class HermesBridge:
         bridge_started = self._monotonic()
         external_id = str(event["external_id"])
         request = str(event["content"])
+        context_trace: dict[str, Any] = {"sources": [], "freshness": {}, "items": []}
         direct_answer = self._direct_answer(request)
         if direct_answer is not None:
             result = AgentRunResult(
@@ -394,10 +396,14 @@ class HermesBridge:
             )
             context_ms = 0
             agent_ms = 0
+            context_trace["sources"] = ["google_calendar"]
+            context_trace["freshness"] = {
+                "google_calendar": self._calendar_context_freshness()
+            }
         else:
             context_started = self._monotonic()
             history = self._recent_conversation(event)
-            prompt = self._agent_prompt(event, history=history)
+            prompt = self._agent_prompt(event, history=history, trace=context_trace)
             context_ms = max(0, round((self._monotonic() - context_started) * 1000))
             agent_started = self._monotonic()
             result = self._run_agent_scoped(prompt, request=request, history=history)
@@ -420,6 +426,7 @@ class HermesBridge:
             ok=result.ok,
             detail=result.detail,
             telemetry=telemetry,
+            context_trace=context_trace,
         )
 
     def _direct_answer(self, request: str) -> str | None:
@@ -566,6 +573,17 @@ class HermesBridge:
         lines.append(f"calendar checked {freshness}.")
         return "\n".join(lines)
 
+    def _calendar_context_freshness(self) -> str | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT MAX(last_success_at) AS latest
+                FROM sync_state
+                WHERE connector = 'google_calendar'
+                """
+            ).fetchone()
+        return str(row["latest"]) if row and row["latest"] else None
+
     def _run_agent_scoped(
         self,
         prompt: str,
@@ -590,6 +608,7 @@ class HermesBridge:
         event: dict[str, Any],
         *,
         history: list[dict[str, str]] | None = None,
+        trace: dict[str, Any] | None = None,
     ) -> str:
         """Attach a tiny trusted context pack before starting cold Hermes.
 
@@ -604,15 +623,16 @@ class HermesBridge:
             [request, *(str(exchange["user"]) for exchange in history)]
         )
         context: dict[str, Any] = {}
+        trace_candidates: dict[str, list[str]] = {}
         if history:
             context["recent_conversation"] = history
         memory = self._memory_context(request)
         if memory:
             context["memory"] = memory
         if _INBOX_TERMS.search(topic_text):
-            context["gmail"] = self._gmail_context()
+            context["gmail"] = self._gmail_context(trace_candidates=trace_candidates)
         if _GITHUB_TERMS.search(topic_text):
-            context["github"] = self._github_context()
+            context["github"] = self._github_context(trace_candidates=trace_candidates)
         if _ACADEMIC_TERMS.search(topic_text):
             academic = self._academic_context(request)
             if academic:
@@ -624,6 +644,30 @@ class HermesBridge:
         # manufacture a closing context tag. JSON unicode escapes preserve the
         # text the model sees while keeping the delimiter structurally unique.
         context = _fit_context_budget(context, self.context_char_budget)
+        if trace is not None:
+            sources = list(context)
+            trace["sources"] = sources
+            freshness: dict[str, str | None] = {}
+            items: list[dict[str, str | int]] = []
+            for source in ("gmail", "github"):
+                source_context = context.get(source)
+                if not isinstance(source_context, dict):
+                    continue
+                freshness[source] = source_context.get("freshness")
+                list_key = "relevant" if source == "gmail" else "notifications"
+                included = source_context.get(list_key)
+                included_count = len(included) if isinstance(included, list) else 0
+                for rank, record_id in enumerate(trace_candidates.get(source, [])[:included_count]):
+                    items.append({"source": source, "record_id": record_id, "rank": rank})
+            memory_context = context.get("memory")
+            if isinstance(memory_context, dict):
+                for rank, memory in enumerate(memory_context.get("memories", [])):
+                    if isinstance(memory, dict) and memory.get("id"):
+                        items.append(
+                            {"source": "memory", "record_id": str(memory["id"]), "rank": rank}
+                        )
+            trace["freshness"] = freshness
+            trace["items"] = items
         packed = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         packed = packed.replace("<", r"\u003c").replace(">", r"\u003e")
         return (
@@ -753,7 +797,9 @@ class HermesBridge:
         exchanges.reverse()
         return exchanges
 
-    def _gmail_context(self) -> dict[str, Any]:
+    def _gmail_context(
+        self, *, trace_candidates: dict[str, list[str]] | None = None
+    ) -> dict[str, Any]:
         records, freshness, total = self._connector_records(
             "gmail", "unread_message", limit=50
         )
@@ -765,9 +811,23 @@ class HermesBridge:
             if _low_priority_mail(payload):
                 low_priority += 1
                 continue
-            candidates.append(payload)
-        candidates.sort(key=_mail_rank)
-        for payload in candidates[:8]:
+            candidates.append(record)
+        scores = ResponseFeedbackService(self.database).scores(
+            source="gmail", record_ids={str(record["record_id"]) for record in candidates}
+        )
+        candidates.sort(
+            key=lambda record: (
+                _mail_rank(record["payload"])[0],
+                _mail_rank(record["payload"])[1],
+                -scores.get(str(record["record_id"]), 0),
+                _mail_rank(record["payload"])[2],
+            )
+        )
+        selected = candidates[:8]
+        if trace_candidates is not None:
+            trace_candidates["gmail"] = [str(record["record_id"]) for record in selected]
+        for record in selected:
+            payload = record["payload"]
             relevant.append(
                 {
                     key: payload.get(key)
@@ -785,17 +845,32 @@ class HermesBridge:
             "content_limit": "headers and snippets only; full message bodies are not synced",
         }
 
-    def _github_context(self) -> dict[str, Any]:
+    def _github_context(
+        self, *, trace_candidates: dict[str, list[str]] | None = None
+    ) -> dict[str, Any]:
         records, freshness, total = self._connector_records(
             "github", "notification", limit=20
         )
+        scores = ResponseFeedbackService(self.database).scores(
+            source="github", record_ids={str(record["record_id"]) for record in records}
+        )
+        ranked = [
+            record
+            for _, record in sorted(
+                enumerate(records),
+                key=lambda pair: (-scores.get(str(pair[1]["record_id"]), 0), pair[0]),
+            )
+        ]
+        selected = ranked[:10]
+        if trace_candidates is not None:
+            trace_candidates["github"] = [str(record["record_id"]) for record in selected]
         notifications = [
             {
                 key: record["payload"].get(key)
                 for key in ("title", "repo", "reason", "subject_type", "html_url")
                 if record["payload"].get(key) is not None
             }
-            for record in records[:10]
+            for record in selected
         ]
         return {
             "freshness": freshness,
@@ -811,7 +886,7 @@ class HermesBridge:
         with self.database.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT payload_json FROM connector_records
+                SELECT record_id, payload_json, observed_at FROM connector_records
                 WHERE connector = ? AND record_type = ? AND active = 1
                 ORDER BY observed_at DESC
                 LIMIT ?
@@ -833,7 +908,14 @@ class HermesBridge:
                 (connector, record_type),
             ).fetchone()
         return (
-            [{"payload": json.loads(row["payload_json"])} for row in rows],
+            [
+                {
+                    "record_id": str(row["record_id"]),
+                    "payload": json.loads(row["payload_json"]),
+                    "observed_at": str(row["observed_at"]),
+                }
+                for row in rows
+            ],
             str(state["last_success_at"]) if state and state["last_success_at"] else None,
             int(count["total"]),
         )
@@ -847,6 +929,7 @@ class HermesBridge:
         ok: bool,
         detail: str,
         telemetry: dict[str, Any] | None = None,
+        context_trace: dict[str, Any] | None = None,
     ) -> HermesBridgeReceipt:
         bubbles = split_into_bubbles(text, max_bubbles=self.max_bubbles)
         with self.database.connect() as connection:
@@ -854,11 +937,23 @@ class HermesBridge:
                 for index, bubble in enumerate(bubbles):
                     # Index 0 is what _pending()'s NOT EXISTS checks, so the
                     # whole set is claimed atomically with the first bubble.
+                    payload: dict[str, Any] = {"text": bubble}
+                    if ok and index == len(bubbles) - 1:
+                        payload["reply_markup"] = feedback_keyboard(external_id)
                     Outbox.enqueue(
                         connection,
                         destination=f"telegram:{chat_id}",
-                        payload={"text": bubble},
+                        payload=payload,
                         idempotency_key=f"hermes-reply:{external_id}:{index}",
+                    )
+                if ok:
+                    trace = context_trace or {"sources": [], "freshness": {}, "items": []}
+                    ResponseFeedbackService.record_context_in_transaction(
+                        connection,
+                        response_update_id=external_id,
+                        sources=list(trace.get("sources") or []),
+                        freshness=dict(trace.get("freshness") or {}),
+                        items=list(trace.get("items") or []),
                     )
                 AuditLog.append_in_transaction(
                     connection,
@@ -872,6 +967,8 @@ class HermesBridge:
                             "bubbles": str(len(bubbles)),
                             "reply_chars": str(sum(len(bubble) for bubble in bubbles)),
                             "detail": detail,
+                            "context_sources": list((context_trace or {}).get("sources") or []),
+                            "context_freshness": dict((context_trace or {}).get("freshness") or {}),
                             **(telemetry or {}),
                         },
                     ),

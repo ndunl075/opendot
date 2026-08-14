@@ -368,6 +368,15 @@ incorrect retrievals as append-only evaluation data. That feedback now reorders
 only the memories already selected for a matching query; it cannot inject an
 unrelated popular memory into the candidate set.
 
+Every successful Telegram answer ends with `helpful`, `missing context`, and
+`wrong context` buttons. A tap records one vote for that response plus a
+content-free trace of source names, connector freshness, and opaque ranked
+record IDs; it stores neither the prompt nor the answer. Helpful/wrong signals
+can reorder Gmail or GitHub records only within their existing deterministic
+priority tier, while `missing context` remains an evaluation signal instead of
+guessing what was absent. Feedback callbacks are paired to the original sender,
+accept one vote per response, and never approve or execute an action.
+
 Calendar and Canvas history use a separate derived academic layer. Immutable
 connector events remain authoritative; after connector sync, Alfred
 deduplicates revisions into daily JSON rollups and course/calendar profiles,

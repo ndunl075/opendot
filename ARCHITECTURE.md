@@ -160,6 +160,13 @@ stored append-only for evaluation. The extraction interface remains pluggable
 so a stronger local structured-output model can be evaluated later without
 changing Alfred's authoritative schema or promotion policy.
 
+**Built:** successful Telegram responses expose explicit helpful, missing-context,
+and wrong-context feedback. Alfred stores one vote per response with only source
+names, freshness, and opaque ranked record IDs, never prompt or answer text.
+Feedback can make a bounded ordering adjustment within existing Gmail/GitHub
+priority tiers; it cannot select a new source, bypass low-priority-mail filters,
+or authorize any action.
+
 ## 5. Knowledge graph and Obsidian
 
 ### One memory, four views
@@ -326,6 +333,7 @@ Additional invariants:
 - All mutations use idempotency keys and a transactional outbox; retry only safe/retriable failures.
 - Default-deny channel identity. Pair Telegram/Slack user IDs locally.
 - Every answer based on synced data includes source links and freshness; stale sync is explicit.
+- Response feedback is evaluation data only; no feedback control can approve, execute, or retry an action.
 
 ## 9. Connector order
 
@@ -355,7 +363,7 @@ The morning brief gathers data without an LLM, ranks due/overdue items using tim
 
 The first acceptance path is now deterministic and covered through intake: “my paper is due Friday; remind me Thursday” creates one source-linked task with a Friday deadline, a Thursday reminder, and an explicit provenance-linked deadline memory without spending a model call. Automated tests cover parsing, persistence, memory extraction, missed-run recovery, and briefing after restart. The remaining operator check is the real-time wait for an actual Thursday delivery.
 
-**Current deployment:** the repaired environment passes 357 tests. Alfred runs as a hidden per-user `Alfred` logon task because this session cannot control the installed administrator-owned Windows service; a duplicate runtime was removed and Telegram returned healthy. A separate `Alfred Backup` task creates an encrypted timestamped backup daily at 02:30, with the key in Windows Credential Manager. The first encrypted backup and an isolated restore/integrity drill both completed successfully. The US Holidays subscribed calendar still returns `HTTPStatusError` while all other selected calendars sync; it is isolated and explicitly reported rather than allowed to falsify calendar completeness.
+**Current deployment:** the repaired environment passes 368 tests. Alfred runs as a hidden per-user `Alfred` logon task because this session cannot control the installed administrator-owned Windows service; a duplicate runtime was removed and Telegram returned healthy. A separate `Alfred Backup` task creates an encrypted timestamped backup daily at 02:30, with the key in Windows Credential Manager. The first encrypted backup and an isolated restore/integrity drill both completed successfully. Calendar path IDs are now URL-encoded, so the `#` in Google's US Holidays calendar no longer truncates its REST path; a live current and three-year history refresh completed with all 17 connector-health entries green.
 
 ## 11. Fork rule and escape hatch
 

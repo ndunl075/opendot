@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import re
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 from .db import Database
 from .events import EventStore
 from .outbox import Outbox
+from .response_feedback import ResponseFeedbackService
 from .reminders import ReminderStore
 from .tasks import TaskStore
 
@@ -34,9 +36,22 @@ class TelegramMessage(BaseModel):
     text: str | None = None
 
 
+class TelegramCallbackMessage(BaseModel):
+    message_id: int
+    chat: TelegramChat
+
+
+class TelegramCallbackQuery(BaseModel):
+    id: str
+    sender: TelegramUser = Field(alias="from")
+    message: TelegramCallbackMessage | None = None
+    data: str | None = None
+
+
 class TelegramUpdate(BaseModel):
     update_id: int
     message: TelegramMessage | None = None
+    callback_query: TelegramCallbackQuery | None = None
 
 
 class TelegramReceipt(BaseModel):
@@ -46,6 +61,7 @@ class TelegramReceipt(BaseModel):
     duplicate: bool = False
     ignored: bool = False
     agent_deferred: bool = False
+    feedback_recorded: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,6 +91,12 @@ _WEEKDAYS = {
     "friday": 4,
     "saturday": 5,
     "sunday": 6,
+}
+_FEEDBACK_CALLBACK = re.compile(r"^af:(?P<response_update_id>\d+):(?P<code>[hmw])$")
+_FEEDBACK_OUTCOME = {
+    "h": "helpful",
+    "m": "missing_context",
+    "w": "wrong_context",
 }
 
 
@@ -181,6 +203,8 @@ class TelegramGateway:
 
     def handle(self, update: TelegramUpdate) -> TelegramReceipt:
         """Translate one update atomically; no network message is sent here."""
+        if update.callback_query is not None:
+            return self._handle_feedback_callback(update)
         message = update.message
         if message is None or not message.text:
             return TelegramReceipt(text="Ignored non-text Telegram update.", ignored=True)
@@ -239,6 +263,83 @@ class TelegramGateway:
                     idempotency_key=receipt_key,
                 )
                 return receipt
+
+    def _handle_feedback_callback(self, update: TelegramUpdate) -> TelegramReceipt:
+        callback = update.callback_query
+        if callback is None or callback.message is None or not callback.data:
+            raise ValueError("Telegram feedback callback is incomplete")
+        pair = TelegramPair(
+            chat_id=callback.message.chat.id,
+            user_id=callback.sender.id,
+        )
+        if pair not in self.allowed_pairs:
+            raise PermissionError("Telegram sender is not locally paired with Alfred")
+        match = _FEEDBACK_CALLBACK.fullmatch(callback.data)
+        if match is None:
+            raise ValueError("Telegram callback is not an Alfred feedback action")
+        response_update_id = match.group("response_update_id")
+        outcome = _FEEDBACK_OUTCOME[match.group("code")]
+
+        self.database.migrate()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                target = connection.execute(
+                    """
+                    SELECT metadata_json FROM events
+                    WHERE source = 'telegram' AND external_id = ?
+                    """,
+                    (response_update_id,),
+                ).fetchone()
+                context = connection.execute(
+                    """
+                    SELECT 1 FROM response_context WHERE response_update_id = ?
+                    """,
+                    (response_update_id,),
+                ).fetchone()
+                if target is None or context is None:
+                    raise ValueError("Telegram feedback target is unavailable")
+                target_metadata = json.loads(target["metadata_json"])
+                if (
+                    target_metadata.get("chat_id") != pair.chat_id
+                    or target_metadata.get("user_id") != pair.user_id
+                    or not target_metadata.get("agent_deferred")
+                ):
+                    raise PermissionError("Telegram feedback target does not belong to this paired sender")
+
+                stored_event = EventStore.append(
+                    connection,
+                    source="telegram",
+                    external_id=str(update.update_id),
+                    occurred_at=datetime.now(UTC),
+                    content="response feedback",
+                    metadata={
+                        "chat_id": pair.chat_id,
+                        "user_id": pair.user_id,
+                        "feedback_callback": True,
+                        "response_update_id": response_update_id,
+                        "outcome": outcome,
+                    },
+                )
+                if not stored_event.is_new:
+                    return TelegramReceipt(text="feedback already saved", duplicate=True)
+                feedback = ResponseFeedbackService.record_feedback_in_transaction(
+                    connection,
+                    callback_query_id=callback.id,
+                    feedback_update_id=str(update.update_id),
+                    response_update_id=response_update_id,
+                    outcome=outcome,
+                )
+                if not feedback.recorded:
+                    return TelegramReceipt(text="feedback already saved", duplicate=True)
+                messages = {
+                    "helpful": "thanks, that helps",
+                    "missing_context": "got it. i'll track that as missing context",
+                    "wrong_context": "got it. i'll be more careful with that context",
+                }
+                return TelegramReceipt(
+                    text=messages[outcome],
+                    feedback_recorded=True,
+                )
 
     def _handle_new_event(
         self,

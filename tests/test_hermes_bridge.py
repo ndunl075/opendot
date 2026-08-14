@@ -218,6 +218,24 @@ def test_inbox_and_github_are_prefetched_while_bulk_mail_stays_out_of_the_prompt
     assert "do not call connector_records_get again" in prompt
     assert prompt.count("</alfred_context>") == 1
     assert r"\u003c/alfred_context\u003e" in prompt
+    with database.connect() as connection:
+        context_row = connection.execute(
+            "SELECT sources_json, freshness_json, items_json FROM response_context WHERE response_update_id = '40'"
+        ).fetchone()
+        reply_payload = json.loads(
+            connection.execute(
+                "SELECT payload_json FROM outbox WHERE idempotency_key = 'hermes-reply:40:0'"
+            ).fetchone()[0]
+        )
+    assert json.loads(context_row["sources_json"]) == ["github", "gmail"]
+    assert json.loads(context_row["items_json"]) == [
+        {"rank": 0, "record_id": "important", "source": "gmail"}
+    ]
+    assert "Project Trayce" not in context_row["items_json"]
+    assert reply_payload["reply_markup"]["inline_keyboard"][0][0] == {
+        "callback_data": "af:40:h",
+        "text": "helpful",
+    }
 
 
 def test_a_follow_up_gets_the_recent_exchange_and_requires_a_precise_action(

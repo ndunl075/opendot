@@ -33,7 +33,10 @@ class TelegramBotClient:
     def get_updates(self, *, offset: int | None, timeout_seconds: int = 25) -> list[dict[str, Any]]:
         if timeout_seconds < 1 or timeout_seconds > 50:
             raise TelegramAPIError("Telegram long-poll timeout must be between 1 and 50 seconds")
-        payload: dict[str, Any] = {"timeout": timeout_seconds, "allowed_updates": ["message"]}
+        payload: dict[str, Any] = {
+            "timeout": timeout_seconds,
+            "allowed_updates": ["message", "callback_query"],
+        }
         if offset is not None:
             payload["offset"] = offset
         result = self._request("getUpdates", payload)
@@ -41,15 +44,28 @@ class TelegramBotClient:
             raise TelegramAPIError("Telegram getUpdates response did not contain an update list")
         return result
 
-    def send_message(self, *, chat_id: int, text: str) -> int:
+    def send_message(
+        self, *, chat_id: int, text: str, reply_markup: dict[str, Any] | None = None
+    ) -> int:
         if not text.strip():
             raise TelegramAPIError("Telegram message text cannot be empty")
         if len(text) > 4096:
             raise TelegramAPIError("Telegram message text exceeds the 4096-character limit")
-        result = self._request("sendMessage", {"chat_id": chat_id, "text": text})
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        result = self._request("sendMessage", payload)
         if not isinstance(result, dict) or not isinstance(result.get("message_id"), int):
             raise TelegramAPIError("Telegram sendMessage response did not contain a message ID")
         return result["message_id"]
+
+    def answer_callback_query(self, *, callback_query_id: str, text: str) -> None:
+        if not callback_query_id:
+            raise TelegramAPIError("Telegram callback query ID cannot be empty")
+        self._request(
+            "answerCallbackQuery",
+            {"callback_query_id": callback_query_id, "text": text[:200]},
+        )
 
     def _request(self, method: str, payload: dict[str, Any]) -> Any:
         try:
