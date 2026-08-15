@@ -447,6 +447,7 @@ class VaultImporter:
                     payload={"hash": content_hash, "memory_id": memory.id},
                     active=True,
                 )
+        self._ensure_declared_entity(frontmatter, path, source_event_id=event.id, actor=actor)
         link_counts = self._record_links(body, source_event_id=event.id, actor=actor)
         self._audit(
             actor,
@@ -459,6 +460,49 @@ class VaultImporter:
             },
         )
         return outcome, link_counts
+
+    def _ensure_declared_entity(
+        self,
+        frontmatter: dict[str, str],
+        path: Path,
+        *,
+        source_event_id: str,
+        actor: str,
+    ) -> None:
+        """Create the entity a note declares itself to be, if it has no ID yet.
+
+        A note whose frontmatter says ``type: person`` is the owner stating
+        that this person exists -- an explicit statement, so the entity is
+        created ``confirmed``, unlike the unconfirmed ones derived from
+        connector data. The note's filename is the label, which is also what
+        makes ``[[Alex Chen]]`` elsewhere resolve to it.
+
+        Only registry types are accepted and an existing ``alfred_id`` is left
+        alone: a projected note already has its entity, and re-creating one
+        from Alfred's own output would duplicate it.
+        """
+        declared = (frontmatter.get("type") or "").strip().lower()
+        if not declared or frontmatter.get("alfred_id"):
+            return
+        with self.database.connect() as connection:
+            allowed = connection.execute(
+                "SELECT 1 FROM type_registry WHERE name = ? AND enabled = 1 AND confirmed = 1",
+                (declared,),
+            ).fetchone()
+        # "self" is the single owner node, created once by `alfred memory-self`;
+        # a note must not mint a second one.
+        if allowed is None or declared == "self":
+            return
+        label = path.stem.strip()
+        if not label or self.graph.resolve_entity_by_name(label) is not None:
+            return
+        self.graph.create_entity(
+            entity_type=declared,
+            label=label,
+            sensitivity="personal",
+            source_event_id=source_event_id,
+            actor=actor,
+        )
 
     def _record_links(self, body: str, *, source_event_id: str, actor: str) -> tuple[int, int]:
         """Record each ``[[wiki link]]`` that names exactly one known entity.

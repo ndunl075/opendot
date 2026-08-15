@@ -27,6 +27,7 @@ from .memory_learning import MemoryLearningService
 from .reminders import ReminderStore
 from .tasks import UNSET, TaskStore
 from .vault import VaultImporter, VaultProjector
+from .people import PeopleService
 from .policy import ApprovalService, PolicyStore
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .google_calendar import (
@@ -207,6 +208,15 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             name="historical_memory",
             interval_seconds=args.connector_interval,
             run=HistoricalMemoryService(database).rebuild_if_changed,
+        )
+    )
+    # Reads only what Calendar already synced, so it belongs after the
+    # connector reads and is idempotent enough to run every cycle.
+    connectors.append(
+        ConnectorSync(
+            name="people",
+            interval_seconds=args.connector_interval,
+            run=PeopleService(database).sync,
         )
     )
     if args.hermes_profile:
