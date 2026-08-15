@@ -105,6 +105,42 @@ _ACTION_CALLBACK = re.compile(
 )
 
 
+def _phrase_position(haystack: str, phrase: str) -> int | None:
+    """Find ``phrase`` in ``haystack`` at a word start, or return None.
+
+    A plain substring test was wrong here in a way that is easy to miss and
+    embarrassing when it fires: the keyword ``"ci "`` matched the middle of
+    "cin*ci* open", so a question about a tennis tournament was answered
+    "checking github...". The trailing space only guarded the side it was on;
+    any word *ending* in the keyword still matched.
+
+    A match must therefore always start on a word boundary. The end is
+    looser by design: ``"assignment"`` should still match "assignments", so
+    a trailing alphanumeric is allowed *unless* the keyword itself was
+    written with a trailing space -- which is how this table already spells
+    "treat me as a whole word" for the short, collision-prone entries
+    (``" pr "``, ``"ci "``). Boundaries are non-alphanumeric rather than
+    ``\\b`` so an apostrophe or question mark still ends a word.
+    """
+    stripped = phrase.strip()
+    if not stripped:
+        return None
+    whole_word_only = phrase.endswith(" ")
+    for match in re.finditer(re.escape(stripped), haystack):
+        before = haystack[match.start() - 1] if match.start() else " "
+        if before.isalnum():
+            continue
+        after = haystack[match.end()] if match.end() < len(haystack) else " "
+        if whole_word_only and after.isalnum():
+            continue
+        return match.start()
+    return None
+
+
+def _contains_phrase(haystack: str, phrase: str) -> bool:
+    return _phrase_position(haystack, phrase) is not None
+
+
 class TelegramGateway:
     """Accept updates from locally paired identities and create durable intents."""
 
@@ -169,16 +205,18 @@ class TelegramGateway:
     @classmethod
     def acknowledgement_for(cls, text: str) -> str:
         """Name what's being looked at, in the order the message mentions it."""
-        # Padded so " pr " and "ci " match whole words rather than firing on
-        # "prepare" or "specific".
         haystack = f" {text.lower().strip()} "
         for keywords, ack in cls.agent_ack_actions:
-            if any(keyword in haystack for keyword in keywords):
+            if any(_contains_phrase(haystack, keyword) for keyword in keywords):
                 return ack
 
         matched: list[tuple[int, str]] = []
         for keywords, noun in cls.agent_ack_reads:
-            positions = [haystack.find(keyword) for keyword in keywords if keyword in haystack]
+            positions = [
+                position
+                for keyword in keywords
+                if (position := _phrase_position(haystack, keyword)) is not None
+            ]
             if positions:
                 matched.append((min(positions), noun))
         if not matched:
