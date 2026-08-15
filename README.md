@@ -569,6 +569,17 @@ its memory (the old version stays visible as history) and deleting a note from
 disk does not delete the memory it produced—only `forget` does that. Files
 Alfred itself generated (`managed: true`) are never re-imported as testimony.
 
+Import also reads `[[wiki links]]` (including `[[Note|display]]` and
+`[[Note#Heading]]`). When a link names exactly one entity Alfred already
+knows—by label or alias, case-insensitively—it's recorded as evidence that
+this note concerns that entity, since a link you typed is an explicit
+statement of that. It will not invent anything from a link: an unknown name
+creates no entity (a filename isn't proof something exists), an ambiguous
+name resolves to nothing rather than guessing between two "Alex" entities,
+and no relationship edge is created, because what a bare link *means* is a
+typed decision Alfred won't make for you. The result reports `linked` and
+`unresolved_links` so you can see what it declined to guess at.
+
 ### Optional mobile sync
 
 Alfred does not use paid Obsidian Sync. `deploy/couchdb/` sets up the
