@@ -15,7 +15,7 @@ from .audit import AuditEvent, AuditLog
 from .academic_memory import AcademicMemoryService
 from .historical_memory import HistoricalMemoryService
 from .embeddings import EmbeddingBackfill, OllamaEmbeddingProvider
-from .backup import EncryptedBackupService
+from .backup import EncryptedBackupService, latest_backup
 from .config import Settings
 from .connector_health import connector_health
 from .db import Database
@@ -321,6 +321,16 @@ def build_parser() -> argparse.ArgumentParser:
     backup_create = subcommands.add_parser("backup-create", help="create an encrypted local Alfred database backup")
     backup_create.add_argument("--output", type=Path, required=True)
     backup_create.add_argument("--secret-name", default="backup-encryption-key")
+    backup_verify = subcommands.add_parser(
+        "backup-verify",
+        help="rehearse a restore into a throwaway copy; never touches the live database",
+    )
+    backup_verify_target = backup_verify.add_mutually_exclusive_group(required=True)
+    backup_verify_target.add_argument("--backup", type=Path, help="a specific backup file")
+    backup_verify_target.add_argument(
+        "--latest-in", type=Path, help="verify the newest backup in this directory"
+    )
+    backup_verify.add_argument("--secret-name", default="backup-encryption-key")
     backup_key = subcommands.add_parser("backup-key-generate", help="generate and store a new local backup encryption key")
     backup_key.add_argument("--secret-name", default="backup-encryption-key")
     backup_restore_propose = subcommands.add_parser("backup-restore-propose", help="preview restoring an encrypted backup")
@@ -828,6 +838,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(receipt.model_dump_json())
         return 0
+    if args.command == "backup-verify":
+        target = args.backup if args.backup else latest_backup(args.latest_in)
+        report = EncryptedBackupService(database, ApprovalService(database)).verify_restore(
+            target, encoded_key=SystemKeyringSecretStore().get_required(args.secret_name)
+        )
+        print(report.model_dump_json())
+        # Non-zero on failure so a scheduled drill is noticed rather than
+        # logging a cheerful "ok": false into a file nobody reads.
+        return 0 if report.ok else 1
     if args.command == "backup-key-generate":
         secrets = SystemKeyringSecretStore()
         try:

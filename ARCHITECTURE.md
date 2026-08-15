@@ -380,7 +380,7 @@ Transport policy:
 Additional invariants:
 
 - Secrets live in the OS credential store, never SQLite, logs, prompts, Markdown, or git.
-- Require full-disk encryption and encrypted, versioned backups. Test restore monthly.
+- Require full-disk encryption and encrypted, versioned backups. Test restore monthly. **Built:** `alfred backup-verify` (`--backup PATH` or `--latest-in DIR`) rehearses a restore into a throwaway copy and never touches the live database. That distinction is the whole reason it exists: the only previous way to test a restore was `backup-restore-execute`, which is approval-gated and *overwrites the live database* — a test nobody sensible runs on a working system, which is exactly how backups stay unverified until the day they are needed. The drill answers the questions that matter rather than merely parsing the file: does the stored key still open it, is the SQLite intact, do migrations apply, does the audit hash chain still verify, and is the data actually present (row counts for `events`/`tool_runs`/`memories`/`entities`/`tasks`) — a backup that decrypts cleanly into an empty database is worthless. Expected failures are reported rather than raised, so a scheduled drill surfaces a broken backup as a report instead of a crashed job, and the CLI exits non-zero so it is noticed.
 - Tag data `public`, `personal`, `sensitive`, or `secret`; model and client policies filter before retrieval.
 - Treat email, web pages, issues, and documents as untrusted content. They cannot override Alfred rules or authorize tools.
 - All mutations use idempotency keys and a transactional outbox; retry only safe/retriable failures.
