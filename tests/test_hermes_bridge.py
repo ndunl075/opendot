@@ -200,7 +200,7 @@ def test_pending_chat_ids_disappear_as_soon_as_the_reply_is_stored(tmp_path: Pat
     assert bridge.pending_chat_ids() == frozenset()
 
 
-def test_reacts_to_the_original_message_on_a_successful_tool_turn(tmp_path: Path) -> None:
+def test_salutes_a_turn_that_will_go_use_tools(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     _defer(database_path, _update(5, "what's on my calendar tomorrow"))
     telegram = FakeReactingTelegram()
@@ -209,12 +209,28 @@ def test_reacts_to_the_original_message_on_a_successful_tool_turn(tmp_path: Path
         ScopedFakeAgent(AgentRunResult(text="tomorrow's clear.", ok=True, tool_count=2)),
         telegram_transport=telegram,
         reaction_chance=1.0,  # deterministic: always roll True in this test
-        random_emoji=lambda: "\U0001f44d",  # deterministic: always pick 👍 in this test
     )
 
     bridge.run_once()
 
-    assert telegram.reactions == [(20, 105, "\U0001f44d")]  # message_id = update_id + 100
+    # message_id = update_id + 100; salute because this turn uses tools.
+    assert telegram.reactions == [(20, 105, "🫡")]
+
+
+def test_thumbs_up_an_ordinary_conversational_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(7, "yo"))
+    telegram = FakeReactingTelegram()
+    bridge = HermesBridge(
+        Database(database_path),
+        RoutedFakeAgent(AgentRunResult(text="yo.", ok=True, tool_count=0)),
+        telegram_transport=telegram,
+        reaction_chance=1.0,
+    )
+
+    bridge.run_once()
+
+    assert telegram.reactions == [(20, 107, "👍")]
 
 
 def test_never_reacts_when_the_dice_dont_land(tmp_path: Path) -> None:
@@ -233,48 +249,12 @@ def test_never_reacts_when_the_dice_dont_land(tmp_path: Path) -> None:
     assert telegram.reactions == []
 
 
-def test_reacts_on_a_casual_turn_too(tmp_path: Path) -> None:
-    """Casual chat is most of the traffic, so excluding it meant near-never.
+def test_still_reacts_when_the_turn_later_fails(tmp_path: Path) -> None:
+    """The reaction means "I saw this", which stays true when the answer fails.
 
-    Measured over 28 consecutive real turns, 19 were casual and 5 failed,
-    leaving 4 eligible; at the old 25% roll that is roughly one reaction per
-    28 messages, which is why none was ever observed. A person reacts to "yo"
-    more readily than to a database query.
+    It is sent before the agent runs -- a receipt that waited for a
+    ninety-second turn to finish would confirm nothing the reply does not.
     """
-    database_path = tmp_path / "alfred.db"
-    _defer(database_path, _update(7, "yo"))
-    telegram = FakeReactingTelegram()
-    bridge = HermesBridge(
-        Database(database_path),
-        RoutedFakeAgent(AgentRunResult(text="yo.", ok=True, tool_count=0)),
-        telegram_transport=telegram,
-        reaction_chance=1.0,
-        random_emoji=lambda: "\U0001f44d",
-    )
-
-    bridge.run_once()
-
-    assert telegram.reactions == [(20, 107, "\U0001f44d")]
-
-
-def test_reacts_even_when_the_turn_used_no_tools(tmp_path: Path) -> None:
-    database_path = tmp_path / "alfred.db"
-    _defer(database_path, _update(8, "what's on my calendar next month"))
-    telegram = FakeReactingTelegram()
-    bridge = HermesBridge(
-        Database(database_path),
-        ScopedFakeAgent(AgentRunResult(text="here's next month.", ok=True, tool_count=0)),
-        telegram_transport=telegram,
-        reaction_chance=1.0,
-        random_emoji=lambda: "\U0001f525",
-    )
-
-    bridge.run_once()
-
-    assert telegram.reactions == [(20, 108, "\U0001f525")]
-
-
-def test_never_reacts_on_a_failed_turn(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     _defer(database_path, _update(9, "what's on my calendar next month"))
     telegram = FakeReactingTelegram()
@@ -287,7 +267,9 @@ def test_never_reacts_on_a_failed_turn(tmp_path: Path) -> None:
 
     bridge.run_once()
 
-    assert telegram.reactions == []
+    assert telegram.reactions == [(20, 109, "🫡")]
+    # ...and the honest failure reply is still delivered.
+    assert "snag" in _replies(database_path)[0][2]
 
 
 def test_a_rejected_reaction_never_breaks_the_turn(tmp_path: Path) -> None:
