@@ -386,6 +386,12 @@ def build_parser() -> argparse.ArgumentParser:
     alias = subcommands.add_parser("memory-alias", help="add a searchable alternate name for an entity")
     alias.add_argument("--entity-id", required=True)
     alias.add_argument("alias")
+    rename = subcommands.add_parser(
+        "memory-rename",
+        help="give an entity a better name; the old one is kept as an alias",
+    )
+    rename.add_argument("--entity-id", required=True)
+    rename.add_argument("label")
     remember = subcommands.add_parser("remember", help="store a confirmed local memory")
     remember.add_argument("statement")
     remember.add_argument("--kind", default="note")
@@ -985,6 +991,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "memory-alias":
         print(graph.add_alias(args.entity_id, args.alias).model_dump_json())
+        return 0
+    if args.command == "memory-rename":
+        print(graph.rename_entity(args.entity_id, args.label).model_dump_json())
         return 0
     if args.command == "remember":
         print(graph.remember(args.statement, kind=args.kind).model_dump_json())

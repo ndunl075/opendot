@@ -11,17 +11,22 @@ person into an entity. Calendar already stores each event's creator and
 organizer: a structured identity field keyed on an email address, so this
 needs no name extraction from prose and makes no guess about who someone is.
 
-**Gmail senders are deliberately not a source, and that was measured rather
-than assumed.** Running this over the real 628-message corpus produced 29
-candidates, of which 26 were brands: Amazon, Venmo, Pacsun, a16z, Codecademy.
-Tightening the filter does not rescue it, because the corpus contains no
-personal correspondence to find -- the connector syncs *unread* mail, which
-skews entirely to bulk, and not one surviving sender was on a consumer mail
-domain. Worse, the human-looking names are the most dangerous: "Alicia
-Dunlap" arrived from ``evite@mailva.evite.com`` and "Jordan Lee via
-LinkedIn" from ``messaging-digest-noreply@linkedin.com``. Keying a person to
-a bulk mailer is not noise, it is a false claim about who someone is, and a
-display name is the sender's branding rather than their identity.
+**Gmail decides nobody's existence, but it does supply names.** Measured over
+the real 629-message corpus, using Gmail to *create* people produced 29
+candidates of which 26 were brands (Amazon, Venmo, Pacsun, a16z), and the
+human-looking ones were the most dangerous: "Jamie Rivera" also arrives from
+``evite@mailva.evite.com`` and "Jordan Lee via LinkedIn" from
+``messaging-digest-noreply@linkedin.com``. Keying a person to a bulk mailer
+is a false claim about who someone is, not merely noise, because a display
+name there is the sender's branding.
+
+Reading it the other way round is safe and fixes a real problem. Calendar
+frequently supplies an address with no ``displayName`` at all, which would
+otherwise leave a person entity labelled ``relative@example.com`` -- an
+identifier, not a name anybody uses. So Gmail is consulted only for an
+address Calendar has *already* vouched for, purely to find what that person
+is called. A brand cannot slip in that way, because a brand is never a
+calendar organizer.
 
 Everything here is derived rather than stated, so it lands `confirmed=False`:
 section 5's rule is that inferred claims stay softly quarantined until
@@ -74,10 +79,16 @@ class PersonCandidate(BaseModel):
     source: str
 
 
+#: "Alex Owner <owner@example.com>" -- Gmail stores the raw header.
+_FROM_HEADER = re.compile(r"^\s*(?P<name>.*?)\s*<(?P<email>[^<>]+)>\s*$")
+
+
 class PeopleSyncResult(BaseModel):
     observed: int = 0
     created: int = 0
     aliased: int = 0
+    #: People whose label was an email address until a real name was found.
+    named: int = 0
     skipped_machine: int = 0
     skipped_calendar: int = 0
 
@@ -101,7 +112,10 @@ class PeopleService:
         self.database.migrate()
         result = PeopleSyncResult()
         calendar_addresses = self._calendar_entity_labels()
+        known_names = self._gmail_display_names()
         for candidate in self._candidates():
+            if not candidate.display_name:
+                candidate.display_name = known_names.get(candidate.email.casefold())
             result.observed += 1
             email = candidate.email.casefold()
             if _CALENDAR_RESOURCE_DOMAIN.search(email) or email in calendar_addresses:
@@ -117,10 +131,22 @@ class PeopleService:
             if existing is None and candidate.display_name:
                 existing = self.graph.resolve_entity_by_name(candidate.display_name)
             if existing is not None:
-                # Known already. Attach the address as an alias so the next
-                # lookup resolves by either name -- unless it is already the
-                # label, where an alias would restate the entity's own name
-                # and make each run look like it had work to do.
+                # An entity still labelled with its own address has never been
+                # named. If a name has since turned up, adopt it -- the old
+                # label survives as an alias, so nothing that resolved before
+                # stops resolving.
+                if (
+                    candidate.display_name
+                    and existing.label.casefold() == email
+                    and candidate.display_name.casefold() != email
+                ):
+                    self.graph.rename_entity(existing.id, candidate.display_name, actor=actor)
+                    result.named += 1
+                    continue
+                # Otherwise attach the address as an alias so the next lookup
+                # resolves by either name -- unless it is already the label,
+                # where an alias would restate the entity's own name and make
+                # every run look like it had work to do.
                 known = {existing.label.casefold()} | {
                     alias.alias.casefold() for alias in self.graph.aliases_for(existing.id)
                 }
@@ -143,6 +169,41 @@ class PeopleService:
                 self.graph.add_alias(entity_id=entity.id, alias=email, actor=actor)
                 result.aliased += 1
         return result
+
+    def _gmail_display_names(self) -> dict[str, str]:
+        """Map address -> display name from every Gmail ``From`` header seen.
+
+        Read across active *and* inactive records: a message being read or
+        archived says nothing about whether the person who sent it has a name.
+        The one real correspondent in this corpus turned up only in the
+        archived set, which is exactly why an "unread only" sample was a
+        misleading thing to have generalized from.
+
+        This map is never a reason to create anybody. It is consulted only
+        after Calendar has already established that an address is a person.
+        """
+        names: dict[str, str] = {}
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM connector_records
+                WHERE connector = 'gmail' AND record_type = 'unread_message'
+                """
+            ).fetchall()
+        for row in rows:
+            sender = json.loads(row["payload_json"]).get("from")
+            if not isinstance(sender, str):
+                continue
+            match = _FROM_HEADER.match(sender)
+            if not match:
+                continue
+            email = match.group("email").strip().casefold()
+            name = _clean_name(match.group("name").strip().strip('"'))
+            # A header whose display name is just the address again teaches
+            # nothing, and the first name seen wins so this stays stable.
+            if name and "@" not in name and email not in names:
+                names[email] = name
+        return names
 
     def _calendar_entity_labels(self) -> set[str]:
         with self.database.connect() as connection:

@@ -347,3 +347,34 @@ def test_source_scoped_forget_does_not_consume_an_unrelated_approval(tmp_path: P
         MemoryActions(database, approvals).execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
 
     assert approvals.get(proposal.id).state == "approved"
+
+
+def test_renaming_keeps_the_old_name_resolvable(tmp_path: Path) -> None:
+    """A derived entity often arrives labelled with an identifier rather than a
+    name; renaming must not orphan anything that referred to the old one."""
+    graph = MemoryGraph(Database(tmp_path / "alfred.db"))
+    entity = graph.create_entity(entity_type="person", label="relative@example.com")
+
+    renamed = graph.rename_entity(entity.id, "J.T. Rivera")
+
+    assert renamed.label == "J.T. Rivera"
+    assert renamed.id == entity.id  # same entity, not a replacement
+    assert graph.resolve_entity_by_name("J.T. Rivera") is not None
+    assert graph.resolve_entity_by_name("relative@example.com") is not None
+    assert graph.search("Dunlap").entities  # findable under the new name
+
+
+def test_renaming_to_the_same_name_is_a_no_op(tmp_path: Path) -> None:
+    graph = MemoryGraph(Database(tmp_path / "alfred.db"))
+    entity = graph.create_entity(entity_type="person", label="Alex Chen")
+
+    graph.rename_entity(entity.id, "Alex Chen")
+
+    assert graph.aliases_for(entity.id) == []
+
+
+def test_renaming_an_unknown_entity_is_refused(tmp_path: Path) -> None:
+    graph = MemoryGraph(Database(tmp_path / "alfred.db"))
+
+    with pytest.raises(GraphError, match="does not exist"):
+        graph.rename_entity("00000000-0000-0000-0000-000000000000", "Nobody")
