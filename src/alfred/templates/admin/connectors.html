@@ -17,4 +17,32 @@
       {% endfor %}
     </div>
   </div>
+
+  <div class="section">
+    <p class="section-label">What each connector may do</p>
+    <div class="card">
+      {% for capability in capabilities %}
+        <div class="row">
+          <div class="row-title">
+            {{ capability.connector|connector_icon }} {{ capability.connector }}
+            <span class="row-subtle">{{ capability.summary }}</span>
+          </div>
+          <div class="row-meta">{{ capability.transport }}</div>
+          {% if capability.sensitivity != 'personal' %}
+            <span class="pill stale"><span class="pill-dot"></span>{{ capability.sensitivity }}</span>
+          {% endif %}
+          {% if capability.writes %}
+            <span class="pill error"><span class="pill-dot"></span>can write</span>
+          {% else %}
+            <span class="pill ok"><span class="pill-dot"></span>read-only</span>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <p class="section-note">
+      "Can write" means the connector can change something outside Alfred — never
+      unattended. Every write goes through a preview and an explicit approval, so
+      this marks where that boundary applies, not what runs on its own.
+    </p>
+  </div>
 {% endblock %}

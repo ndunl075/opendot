@@ -17,6 +17,7 @@ from .historical_memory import HistoricalMemoryService
 from .embeddings import EmbeddingBackfill, OllamaEmbeddingProvider
 from .backup import EncryptedBackupService, latest_backup
 from .config import Settings
+from .connector_capabilities import CONNECTOR_CAPABILITIES
 from .connector_health import connector_health
 from .db import Database
 from .briefing import BriefingService
@@ -302,6 +303,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="rebuild local Calendar/Canvas rollups and their provenance-linked semantic memories",
     )
     subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
+    subcommands.add_parser(
+        "connector-capabilities",
+        help="show what each connector may do: reads/writes, scopes, sensitivity, transport",
+    )
     latency_status = subcommands.add_parser(
         "latency-status",
         help="show content-free Telegram acknowledgement and agent response latency",
@@ -819,6 +824,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
         )
+        return 0
+    if args.command == "connector-capabilities":
+        print(json.dumps([item.model_dump(mode="json") for item in CONNECTOR_CAPABILITIES]))
         return 0
     if args.command == "connector-status":
         print(json.dumps([health.model_dump(mode="json") for health in connector_health(database)]))
