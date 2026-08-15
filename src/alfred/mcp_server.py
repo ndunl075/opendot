@@ -22,6 +22,7 @@ from typing import Any, Sequence, cast
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from .briefing import BriefingService
 from .config import Settings
@@ -100,8 +101,26 @@ def create_server(
     workflow_observations = WorkflowObservationStore(database)
     server = FastMCP("Alfred")
 
-    def alfred_tool():
-        """Register a tool and retain only privacy-safe workflow structure."""
+    def alfred_tool(
+        *,
+        read_only: bool = False,
+        destructive: bool = False,
+        idempotent: bool = False,
+        open_world: bool = False,
+    ):
+        """Register a tool, annotate it, and retain privacy-safe workflow structure.
+
+        The annotations are the point of the keyword arguments. An MCP client
+        decides from these hints whether a call can run unprompted or has to
+        be shown to a human first, so leaving them off -- as this server did
+        until now -- silently downgrades every tool to "unknown", and a client
+        that would have paused on a destructive call has nothing to pause on.
+
+        They are hints about intent, not enforcement: Alfred's own policy
+        checks, previews, and approval tokens remain the actual boundary. A
+        client that ignores annotations entirely still cannot commit an action
+        without a one-time token.
+        """
 
         def decorate(function):
             signature = inspect.signature(function)
@@ -124,28 +143,38 @@ def create_server(
                         pass
                 return result
 
-            return server.tool()(observed)
+            return server.tool(
+                annotations=ToolAnnotations(
+                    readOnlyHint=read_only,
+                    # Only meaningful when the tool writes at all; stating it
+                    # for a read-only tool would imply it could destroy
+                    # something.
+                    destructiveHint=None if read_only else destructive,
+                    idempotentHint=None if read_only else idempotent,
+                    openWorldHint=open_world,
+                )
+            )(observed)
 
         return decorate
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def system_status() -> dict[str, int | str]:
         """Return Alfred's non-sensitive local health and schema status."""
         return database.status()
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def agenda_get() -> str:
         """Return Alfred's deterministic local task agenda with freshness."""
         policy.require_read(client_id, "agenda_get")
         return BriefingService(database).morning_brief().render()
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def memory_search(query: str) -> dict:
         """Search local memory anchors and their one-hop active graph context."""
         scope = policy.require_read(client_id, "memory_search")
         return MemoryGraph(database).search(query, allowed_sensitivities=scope.allowed_sensitivities).model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def profile_get() -> dict:
         """Return the local owner node and current, evidence-backed profile relationships."""
         scope = policy.require_read(client_id, "profile_get")
@@ -155,7 +184,7 @@ def create_server(
             "relationships": [relationship.model_dump(mode="json") for relationship in relationships],
         }
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def remember(statement: str, kind: str = "note", sensitivity: str = "personal") -> dict:
         """Store a confirmed local memory; the calling client is recorded as actor."""
         if sensitivity not in ALLOWED_SENSITIVITIES:
@@ -168,7 +197,7 @@ def create_server(
         )
         return memory.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def memory_correct(memory_id: str, replacement_statement: str) -> dict:
         """Correct one recalled memory while preserving its superseded history and evidence."""
         policy.require_write(client_id, "memory_correct")
@@ -178,7 +207,7 @@ def create_server(
             actor=f"mcp:{client_id}",
         ).model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def memory_feedback(memory_id: str, query: str, outcome: str) -> dict:
         """Record whether a recalled memory was relevant, irrelevant, or incorrect."""
         policy.require_write(client_id, "memory_feedback")
@@ -189,7 +218,7 @@ def create_server(
             actor=f"mcp:{client_id}",
         )
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def forget(memory_id: str, reason: str = "user requested deletion") -> dict:
         """Preview deleting one memory; nothing is deleted until action_commit confirms it.
 
@@ -207,7 +236,7 @@ def create_server(
         approval = MemoryActions(database, approvals).propose_forget(memory_id, actor=f"mcp:{client_id}", reason=reason)
         return approval.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def calendar_event_propose(summary: str, start: str, end: str, calendar_id: str = "primary") -> dict:
         """Preview a calendar event write; nothing reaches Google until action_commit confirms it."""
         policy.require_write(client_id, "calendar_event_propose")
@@ -218,7 +247,7 @@ def create_server(
         )
         return approval.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def message_draft(to: str, subject: str, body: str) -> dict:
         """Preview a Gmail draft; nothing reaches Gmail until a human confirms it."""
         policy.require_write(client_id, "message_draft")
@@ -226,7 +255,7 @@ def create_server(
         approval = actions.propose_draft(actor=f"mcp:{client_id}", to=to, subject=subject, body=body)
         return approval.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def message_send_propose(to: str, subject: str, body: str) -> dict:
         """Preview sending Gmail; a human must separately approve action_commit."""
         policy.require_write(client_id, "message_send_propose")
@@ -234,7 +263,7 @@ def create_server(
             actor=f"mcp:{client_id}", to=to, subject=subject, body=body
         ).model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def github_issue_propose(repository: str, title: str, body: str | None = None) -> dict:
         """Preview a GitHub issue creation; nothing reaches GitHub until action_commit confirms it."""
         policy.require_write(client_id, "github_issue_propose")
@@ -243,7 +272,7 @@ def create_server(
         )
         return approval.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=True, idempotent=True, open_world=True)
     def action_commit(approval_id: str, token: str) -> dict:
         """Consume a fresh approval token and perform the action it previewed."""
         policy.require_write(client_id, "action_commit")
@@ -251,20 +280,20 @@ def create_server(
             approval_id, actor=f"mcp:{client_id}", token=token
         )
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def brief_get(now: str | None = None) -> str:
         """Render the deterministic local morning brief on demand, not just on schedule."""
         policy.require_read(client_id, "brief_get")
         parsed = datetime.fromisoformat(now) if now else None
         return BriefingService(database).morning_brief(parsed).render()
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def connector_status() -> list[dict]:
         """Report each connector's health; never its credentials or synced content."""
         policy.require_read(client_id, "connector_status")
         return [health.model_dump(mode="json") for health in connector_health(database)]
 
-    @alfred_tool()
+    @alfred_tool(read_only=True, idempotent=True)
     def connector_records_get(connector: str, record_type: str | None = None, limit: int = 20) -> list[dict]:
         """Return one connector's currently-active synced records, most recently observed first.
 
@@ -309,7 +338,7 @@ def create_server(
             return json.loads(Redactor().redact(json.dumps(records)))
         return records
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def task_upsert(title: str, task_id: str | None = None, due_at: str | None = None) -> dict:
         """Create a task, or update an existing one's title/due date when task_id is given.
 
@@ -337,7 +366,7 @@ def create_server(
                     task = TaskStore.upsert(connection, task_id=task_id, title=title, due_at=parsed_due)
         return task.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False, idempotent=True)
     def task_complete(task_id: str) -> dict:
         """Mark an open task completed; completing an already-completed task is a no-op."""
         policy.require_write(client_id, "task_complete")
@@ -347,7 +376,7 @@ def create_server(
                 task = TaskStore.complete(connection, task_id)
         return task.model_dump(mode="json")
 
-    @alfred_tool()
+    @alfred_tool(destructive=False)
     def reminder_set(text: str, run_at: str, chat_id: int, task_id: str | None = None) -> dict:
         """Schedule a Telegram reminder; chat_id must already be locally paired to receive it.
 
