@@ -27,7 +27,7 @@
             {{ capability.connector|connector_icon }} {{ capability.connector }}
             <span class="row-subtle">{{ capability.summary }}</span>
           </div>
-          <div class="row-meta">{{ capability.transport }}</div>
+          <div class="row-meta">{{ capability.transport }} · {{ capability.rate_limit }}</div>
           {% if capability.sensitivity != 'personal' %}
             <span class="pill stale"><span class="pill-dot"></span>{{ capability.sensitivity }}</span>
           {% endif %}

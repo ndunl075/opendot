@@ -48,12 +48,20 @@ class ConnectorCapability(BaseModel):
     scopes: tuple[str, ...] = ()
     sensitivity: Sensitivity = "personal"
     transport: Transport = "poll"
+    #: How much this connector asks of a provider per sync. Alfred does no
+    #: quota accounting, so this describes the bound that keeps usage small
+    #: -- the page size actually requested and anything capping a single
+    #: sync -- rather than a limit Alfred enforces. On top of this, a failing
+    #: connector backs off exponentially (30s doubling, capped at its own
+    #: interval), so a dead provider is not retried every runner cycle.
+    rate_limit: str = "one bounded read per sync interval"
     notes: str = ""
 
 
 CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         connector="google_calendar",
+        rate_limit="one incremental sync-token read per calendar, per interval",
         summary="Current calendar events, and the one connector that can create one.",
         writes=True,
         write_actions=("calendar_event_propose",),
@@ -65,16 +73,19 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="google_calendar_catalog",
+        rate_limit="one calendar-list read per interval",
         summary="The list of calendars themselves, so a shared calendar can be named.",
         scopes=("https://www.googleapis.com/auth/calendar.calendarlist.readonly",),
     ),
     ConnectorCapability(
         connector="google_calendar_history",
+        rate_limit="one bounded window read, on its own longer interval",
         summary="Bounded past events, read once and reused for academic history.",
         scopes=("https://www.googleapis.com/auth/calendar.calendarlist.readonly",),
     ),
     ConnectorCapability(
         connector="gmail",
+        rate_limit="maxResults 100 per page, bounded by the configured unread limit",
         summary="Unread mail, plus drafting and sending behind an approval.",
         writes=True,
         write_actions=("message_draft", "message_send_propose"),
@@ -89,12 +100,14 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="gmail_inbound",
+        rate_limit="one bounded unread query per interval, allowlisted sender only",
         summary="Commands emailed to Alfred from one allowlisted sender.",
         scopes=("https://www.googleapis.com/auth/gmail.readonly",),
         notes="Read-only by construction: an inbound message can create work, never authorize it.",
     ),
     ConnectorCapability(
         connector="github",
+        rate_limit="per_page 50 notifications per sync",
         summary="Notifications, plus opening an issue or PR comment behind an approval.",
         writes=True,
         write_actions=("github_issue_propose",),
@@ -103,12 +116,14 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="canvas",
+        rate_limit="one upcoming/missing query per interval",
         summary="Upcoming and missing coursework via an institution-issued token.",
         scopes=("institution-issued Canvas personal token",),
         notes="Read-only. Stores assignments and missing-submission state, never grades or files.",
     ),
     ConnectorCapability(
         connector="canvas_ical",
+        rate_limit="one conditional GET per interval; ETag/Last-Modified usually make it a 304",
         summary="Degraded read-only coursework when Canvas API tokens are disabled.",
         scopes=("private iCalendar feed URL (a bearer secret)",),
         notes=(
@@ -118,6 +133,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="google_health",
+        rate_limit="one bounded lookback read per interval",
         summary="Sleep, activity, and heart metrics from a wearable-linked account.",
         scopes=(
             "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
@@ -132,6 +148,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="telegram",
+        rate_limit="10s long poll, 12s read ceiling, 1s retry after a failed poll",
         summary="The owner's chat channel: intake, replies, and approval buttons.",
         writes=True,
         write_actions=("telegram delivery (outbox)",),
@@ -142,6 +159,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="slack",
+        rate_limit="persistent Socket Mode connection; no polling",
         summary="A paired Slack channel over Socket Mode.",
         writes=True,
         write_actions=("slack delivery (outbox)",),
@@ -150,12 +168,14 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         connector="obsidian_vault",
+        rate_limit="local filesystem scan; no provider involved",
         summary="User-authored Markdown notes imported as confirmed memory.",
         transport="local",
         notes="Alfred never writes back to an imported file; projections go only to Generated/.",
     ),
     ConnectorCapability(
         connector="people",
+        rate_limit="reads Alfred's own tables only; no provider involved",
         summary="Person entities derived from calendar identities already synced.",
         transport="local",
         notes="Reads Alfred's own tables only; reaches no provider and creates nothing confirmed.",

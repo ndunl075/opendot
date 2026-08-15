@@ -12,3 +12,4 @@ build/
 .env
 deploy/couchdb/data/
 deploy/couchdb/config/
+.alfred/backup-verify.log
