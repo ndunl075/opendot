@@ -52,6 +52,81 @@ def test_manual_file_is_preserved_with_a_conflict_copy(tmp_path: Path) -> None:
     assert "managed: true" in projection.path.read_text(encoding="utf-8")
 
 
+def test_time_range_export_covers_only_memories_recorded_in_the_window(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    old = graph.remember("Recorded well before the window.")
+    inside = graph.remember("Recorded inside the window.")
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                "UPDATE memories SET created_at = ? WHERE id = ?",
+                ("2026-01-05T00:00:00+00:00", old.id),
+            )
+            connection.execute(
+                "UPDATE memories SET created_at = ? WHERE id = ?",
+                ("2026-03-10T00:00:00+00:00", inside.id),
+            )
+
+    result = VaultProjector(database, tmp_path / "vault").export_by_time_range(
+        since=datetime(2026, 3, 1, tzinfo=UTC), until=datetime(2026, 4, 1, tzinfo=UTC)
+    )
+
+    assert result.selector == "time_range"
+    assert [p.path.stem for p in result.projections] == [inside.id]
+
+
+def test_time_range_bounds_are_half_open_so_adjacent_windows_do_not_overlap(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    boundary = MemoryGraph(database).remember("Recorded exactly on the boundary.")
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                "UPDATE memories SET created_at = ? WHERE id = ?",
+                ("2026-04-01T00:00:00+00:00", boundary.id),
+            )
+    projector = VaultProjector(database, tmp_path / "vault")
+
+    march = projector.export_by_time_range(
+        since=datetime(2026, 3, 1, tzinfo=UTC), until=datetime(2026, 4, 1, tzinfo=UTC)
+    )
+    april = projector.export_by_time_range(
+        since=datetime(2026, 4, 1, tzinfo=UTC), until=datetime(2026, 5, 1, tzinfo=UTC)
+    )
+
+    # `until` is exclusive and `since` inclusive, so it lands in exactly one.
+    assert march.projections == []
+    assert [p.path.stem for p in april.projections] == [boundary.id]
+
+
+def test_bulk_selectors_never_export_a_memory_a_single_export_would_refuse(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    safe = graph.remember("An ordinary personal note about rowing.")
+    secret = graph.remember("A rowing password nobody should export.", sensitivity="secret")
+    candidate = graph.remember(
+        "Maybe something about rowing.", status="candidate", confirmed=False, confidence=0.3
+    )
+
+    result = VaultProjector(database, tmp_path / "vault").export_by_topic("rowing")
+
+    assert [p.path.stem for p in result.projections] == [safe.id]
+    assert secret.id not in [p.path.stem for p in result.projections]
+    assert candidate.id not in [p.path.stem for p in result.projections]
+
+
+def test_topic_export_receipt_does_not_retain_the_query_text(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    MemoryGraph(database).remember("A note mentioning chemotherapy scheduling.")
+
+    result = VaultProjector(database, tmp_path / "vault").export_by_topic("chemotherapy")
+
+    # The search phrasing can itself be sensitive; the receipt records how the
+    # set was chosen, never what was typed to choose it.
+    assert "chemotherapy" not in result.model_dump_json()
+    assert result.selector == "topic"
+
+
 def test_fs_leaves_ordinary_paths_untouched() -> None:
     ordinary = Path("vault") / "Generated" / "Entities" / "note.md"
 

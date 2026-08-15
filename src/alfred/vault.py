@@ -68,6 +68,20 @@ class SourceEventProjection(BaseModel):
     skipped_memory_ids: list[str]
 
 
+class SelectionProjection(BaseModel):
+    """Result of a bulk export whose scope is a query rather than one record.
+
+    ``selector`` names how the set was chosen so a receipt stays inspectable
+    after the fact; the query text itself is deliberately not stored here,
+    since a topic search can contain exactly the private phrasing the vault's
+    sensitivity rules exist to keep out of a generated file.
+    """
+
+    selector: str
+    projections: list[Projection]
+    skipped_memory_ids: list[str]
+
+
 class VaultProjector:
     """Write selected graph records as safe, portable local Markdown files."""
 
@@ -107,14 +121,9 @@ class VaultProjector:
         skipped: a bulk export must never downgrade a secret's sensitivity or
         turn a candidate into a confirmed memory.
         """
-        projections: list[Projection] = []
-        skipped_memory_ids: list[str] = []
-        for memory in self.graph.memories_by_source_event(source_event_id):
-            if memory.status != "confirmed" or self._memory_sensitivity(memory.id) not in self.allowed_sensitivities:
-                skipped_memory_ids.append(memory.id)
-                continue
-            path = self._managed_path("Generated", "Memories", f"{memory.id}.md")
-            projections.append(self._write_managed(path, self._render_memory(memory)))
+        projections, skipped_memory_ids = self._project_all(
+            self.graph.memories_by_source_event(source_event_id)
+        )
         self._audit(
             actor,
             "vault_export_by_source_event",
@@ -127,6 +136,82 @@ class VaultProjector:
         return SourceEventProjection(
             source_event_id=source_event_id, projections=projections, skipped_memory_ids=skipped_memory_ids
         )
+
+    def export_by_time_range(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        actor: str = "user:cli",
+    ) -> SelectionProjection:
+        """Project confirmed, vault-safe memories recorded in ``[since, until)``.
+
+        Section 4's "users can export or delete by source, time range, person,
+        topic, or individual item" -- this is the time-range selector. Same
+        skip rules as every other bulk export: a wider net must not quietly
+        widen what is exportable.
+        """
+        memories = self.graph.memories_in_range(since=since, until=until)
+        projections, skipped_memory_ids = self._project_all(memories)
+        self._audit(
+            actor,
+            "vault_export_by_time_range",
+            {
+                "since": since.isoformat() if since else "",
+                "until": until.isoformat() if until else "",
+                "projected_count": str(len(projections)),
+                "skipped_count": str(len(skipped_memory_ids)),
+            },
+        )
+        return SelectionProjection(
+            selector="time_range",
+            projections=projections,
+            skipped_memory_ids=skipped_memory_ids,
+        )
+
+    def export_by_topic(self, query: str, *, limit: int = 50, actor: str = "user:cli") -> SelectionProjection:
+        """Project confirmed, vault-safe memories matching a topic search.
+
+        Uses the same retrieval path a question would, so what you export is
+        what Alfred would actually recall -- deliberately not a second,
+        divergent matching rule. Sensitivity is restricted to the vault-safe
+        set at query time as well as at projection time, so a `secret` match
+        never even enters the candidate list.
+        """
+        result = self.graph.search(
+            query, limit=limit, allowed_sensitivities=set(self.allowed_sensitivities)
+        )
+        projections, skipped_memory_ids = self._project_all(result.memories)
+        self._audit(
+            actor,
+            "vault_export_by_topic",
+            {
+                "projected_count": str(len(projections)),
+                "skipped_count": str(len(skipped_memory_ids)),
+            },
+        )
+        return SelectionProjection(
+            selector="topic",
+            projections=projections,
+            skipped_memory_ids=skipped_memory_ids,
+        )
+
+    def _project_all(self, memories: list[Memory]) -> tuple[list[Projection], list[str]]:
+        """Project each vault-safe confirmed memory; report the rest as skipped.
+
+        Shared by every bulk selector so they cannot drift apart on the one
+        rule that matters: a bulk export must never downgrade a secret's
+        sensitivity or turn a candidate into a confirmed memory.
+        """
+        projections: list[Projection] = []
+        skipped_memory_ids: list[str] = []
+        for memory in memories:
+            if memory.status != "confirmed" or self._memory_sensitivity(memory.id) not in self.allowed_sensitivities:
+                skipped_memory_ids.append(memory.id)
+                continue
+            path = self._managed_path("Generated", "Memories", f"{memory.id}.md")
+            projections.append(self._write_managed(path, self._render_memory(memory)))
+        return projections, skipped_memory_ids
 
     def _memory_sensitivity(self, memory_id: str) -> str:
         self.database.migrate()

@@ -126,6 +126,10 @@ Alfred keeps an inspectable archive of consented inputs, not an impossible infin
 
 Corrections supersede old derived memories; they do not rewrite history. Conflicting facts remain visible until resolved. External mail/files are indexed by ID, metadata, and minimal excerpts by default rather than copied wholesale. Users can export or delete by source, time range, person, topic, or individual item.
 
+**Built (export selectors):** individual item (`vault-export-entity`, `vault-export-memory`), source (`vault-export-source-event`), time range (`vault-export-range`), and topic (`vault-export-topic`). Time range filters on `created_at` — when Alfred recorded the claim, not when the fact became true — because "export everything from last March" means what was written down then; bounds are half-open so adjacent windows tile without double-counting. Topic reuses the same retrieval path a question would, rather than inventing a second matching rule that could diverge from what Alfred actually recalls. Every bulk selector shares one projection helper, so none of them can drift on the rule that matters: a wider net never downgrades a `secret`'s sensitivity or promotes a candidate. A topic receipt records *how* the set was chosen but never the query text, which can itself carry exactly the private phrasing the vault's sensitivity rules exist to exclude.
+
+**Not built (person selector):** there is no memory↔entity edge in the schema — `evidence` only ever carries `subject_kind='memory'`, and memories link to source events rather than to the people they mention. Selecting "by person" would mean either inventing that linkage or approximating it (shared source event, or an FTS match on the entity label, which is just the topic selector wearing a different name). That is a modeling decision about what "about this person" *means*, not a missing query, so it is deliberately left for a deliberate choice rather than guessed at.
+
 ### Core records
 
 | Record | Essential fields |
