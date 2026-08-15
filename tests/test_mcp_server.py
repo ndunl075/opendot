@@ -589,3 +589,67 @@ def test_action_commit_replays_a_gmail_draft_instead_of_creating_twice(tmp_path:
     assert second["replayed"] is True
     assert second["draft_id"] == first["draft_id"]
     assert len(fake_client.calls) == 1
+
+
+def _annotations(tmp_path: Path) -> dict[str, Any]:
+    tools = asyncio.run(create_server(tmp_path / "alfred.db").list_tools())
+    return {tool.name: tool.annotations for tool in tools}
+
+
+def test_every_tool_is_annotated(tmp_path: Path) -> None:
+    """An unannotated tool reads as "unknown" to a client, so one that would
+    have paused before a destructive call has nothing to pause on."""
+    annotations = _annotations(tmp_path)
+
+    assert set(annotations) == set(MCP_TOOL_NAMES)
+    assert all(value is not None for value in annotations.values())
+
+
+def test_reads_are_marked_read_only_and_writes_are_not(tmp_path: Path) -> None:
+    annotations = _annotations(tmp_path)
+    reads = {
+        "system_status",
+        "agenda_get",
+        "memory_search",
+        "profile_get",
+        "brief_get",
+        "connector_status",
+        "connector_records_get",
+    }
+
+    for name, annotation in annotations.items():
+        assert annotation.readOnlyHint is (name in reads), name
+
+
+def test_only_action_commit_is_destructive_or_reaches_a_provider(tmp_path: Path) -> None:
+    """The propose/commit split is the whole safety design: a proposal writes
+    an approval and contacts nobody, so calling it destructive would cry wolf
+    on the one call that is actually safe to make."""
+    annotations = _annotations(tmp_path)
+
+    destructive = {name for name, a in annotations.items() if a.destructiveHint}
+    open_world = {name for name, a in annotations.items() if a.openWorldHint}
+
+    assert destructive == {"action_commit"}
+    assert open_world == {"action_commit"}
+
+
+def test_a_replayable_action_is_marked_idempotent(tmp_path: Path) -> None:
+    annotations = _annotations(tmp_path)
+
+    # action_commit replays its exact receipt rather than acting twice, and
+    # completing an already-completed task is a documented no-op.
+    assert annotations["action_commit"].idempotentHint is True
+    assert annotations["task_complete"].idempotentHint is True
+    # Each of these records something new every call.
+    assert annotations["remember"].idempotentHint is False
+    assert annotations["reminder_set"].idempotentHint is False
+
+
+def test_read_only_tools_leave_destructive_unstated(tmp_path: Path) -> None:
+    """destructiveHint is only meaningful for a tool that writes; stating it
+    for a read implies it could destroy something."""
+    annotations = _annotations(tmp_path)
+
+    assert annotations["memory_search"].destructiveHint is None
+    assert annotations["memory_search"].idempotentHint is None
