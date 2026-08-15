@@ -461,6 +461,12 @@ def build_parser() -> argparse.ArgumentParser:
     export_range.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_range.add_argument("--since", help="ISO-8601 lower bound, inclusive")
     export_range.add_argument("--until", help="ISO-8601 upper bound, exclusive")
+    export_person = subcommands.add_parser(
+        "vault-export-person",
+        help="project confirmed vault-safe memories about one person",
+    )
+    export_person.add_argument("--entity-id", required=True)
+    export_person.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_topic = subcommands.add_parser(
         "vault-export-topic",
         help="project confirmed vault-safe memories matching a topic search",
@@ -1049,6 +1055,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 since=datetime.fromisoformat(args.since) if args.since else None,
                 until=datetime.fromisoformat(args.until) if args.until else None,
             )
+            .model_dump_json()
+        )
+        return 0
+    if args.command == "vault-export-person":
+        print(
+            VaultProjector(database, args.vault)
+            .export_by_person(args.entity_id)
             .model_dump_json()
         )
         return 0

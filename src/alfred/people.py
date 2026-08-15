@@ -77,6 +77,12 @@ class PersonCandidate(BaseModel):
     email: str
     display_name: str | None = None
     source: str
+    #: The source events this identity organized or created. Recording these
+    #: is what makes "memories about this person" answerable: a memory already
+    #: carries the event it came from, so linking the person to the same event
+    #: yields an exact join with no text matching and no guess about whether a
+    #: name in a sentence refers to this person or merely resembles them.
+    source_event_ids: tuple[str, ...] = ()
 
 
 #: "Alex Owner <owner@example.com>" -- Gmail stores the raw header.
@@ -89,6 +95,9 @@ class PeopleSyncResult(BaseModel):
     aliased: int = 0
     #: People whose label was an email address until a real name was found.
     named: int = 0
+    #: Source events newly attributed to a person, which is what the
+    #: "by person" selector joins on.
+    linked_events: int = 0
     skipped_machine: int = 0
     skipped_calendar: int = 0
 
@@ -142,17 +151,18 @@ class PeopleService:
                 ):
                     self.graph.rename_entity(existing.id, candidate.display_name, actor=actor)
                     result.named += 1
-                    continue
-                # Otherwise attach the address as an alias so the next lookup
-                # resolves by either name -- unless it is already the label,
-                # where an alias would restate the entity's own name and make
-                # every run look like it had work to do.
-                known = {existing.label.casefold()} | {
-                    alias.alias.casefold() for alias in self.graph.aliases_for(existing.id)
-                }
-                if email not in known:
-                    self.graph.add_alias(entity_id=existing.id, alias=email, actor=actor)
-                    result.aliased += 1
+                else:
+                    # Otherwise attach the address as an alias so the next
+                    # lookup resolves by either name -- unless it is already
+                    # the label, where an alias would restate the entity's own
+                    # name and make every run look like it had work to do.
+                    known = {existing.label.casefold()} | {
+                        alias.alias.casefold() for alias in self.graph.aliases_for(existing.id)
+                    }
+                    if email not in known:
+                        self.graph.add_alias(entity_id=existing.id, alias=email, actor=actor)
+                        result.aliased += 1
+                result.linked_events += self._link_events(existing.id, candidate, actor=actor)
                 continue
             entity = self.graph.create_entity(
                 entity_type="person",
@@ -168,7 +178,45 @@ class PeopleService:
             if candidate.display_name:
                 self.graph.add_alias(entity_id=entity.id, alias=email, actor=actor)
                 result.aliased += 1
+            result.linked_events += self._link_events(entity.id, candidate, actor=actor)
         return result
+
+    def _link_events(self, entity_id: str, candidate: PersonCandidate, *, actor: str) -> int:
+        """Record which source events this person organized, once each.
+
+        This is the edge the "by person" selector runs on. A memory already
+        stores the event it came from, so linking the person to the same event
+        answers "which memories are about them" as an exact join -- no text
+        matching, and no deciding whether a name in a sentence refers to this
+        person or merely resembles them.
+
+        Skips events already linked so repeat runs converge; the check is one
+        query rather than one per event because a busy organizer can appear on
+        hundreds.
+        """
+        if not candidate.source_event_ids:
+            return 0
+        with self.database.connect() as connection:
+            already = {
+                str(row["source_event_id"])
+                for row in connection.execute(
+                    "SELECT source_event_id FROM evidence WHERE subject_kind = 'entity' AND subject_id = ?",
+                    (entity_id,),
+                ).fetchall()
+            }
+        linked = 0
+        for source_event_id in candidate.source_event_ids:
+            if source_event_id in already:
+                continue
+            self.graph.record_entity_mention(
+                entity_id,
+                source_event_id=source_event_id,
+                excerpt=candidate.email,
+                actor=actor,
+            )
+            already.add(source_event_id)
+            linked += 1
+        return linked
 
     def _gmail_display_names(self) -> dict[str, str]:
         """Map address -> display name from every Gmail ``From`` header seen.
@@ -213,29 +261,54 @@ class PeopleService:
         return {str(row["label"]).casefold() for row in rows}
 
     def _candidates(self) -> Iterable[PersonCandidate]:
-        """Every distinct identity Calendar and Gmail already recorded.
+        """Every distinct calendar identity, with the events each organized.
 
-        Deduplicated on the address so one busy correspondent is one
-        candidate, not one per message.
+        Two sources, because they answer different questions. Currently-active
+        connector records describe who is on the calendar *now*; the immutable
+        event log describes who has ever been, which is where the people worth
+        remembering actually live -- reading only the active set found three
+        organizers where the full history holds ten.
+
+        Deduplicated on the address, so one busy organizer is a single
+        candidate carrying all of their events rather than one candidate per
+        event.
         """
-        seen: set[str] = set()
+        by_email: dict[str, PersonCandidate] = {}
+        events: dict[str, set[str]] = {}
+
+        def observe(candidate: PersonCandidate, source_event_id: str | None) -> None:
+            key = candidate.email.casefold()
+            existing = by_email.get(key)
+            if existing is None:
+                by_email[key] = candidate
+            elif candidate.display_name and not existing.display_name:
+                existing.display_name = candidate.display_name
+            if source_event_id:
+                events.setdefault(key, set()).add(source_event_id)
+
         with self.database.connect() as connection:
-            rows = connection.execute(
+            for row in connection.execute(
                 """
                 SELECT payload_json FROM connector_records
-                WHERE active = 1
-                  AND connector = 'google_calendar'
-                  AND record_type = 'event'
+                WHERE active = 1 AND connector = 'google_calendar' AND record_type = 'event'
                 """
-            ).fetchall()
-        for row in rows:
-            payload = json.loads(row["payload_json"])
-            for candidate in _identities(payload):
-                key = candidate.email.casefold()
-                if key in seen:
-                    continue
-                seen.add(key)
-                yield candidate
+            ).fetchall():
+                for candidate in _identities(json.loads(row["payload_json"])):
+                    observe(candidate, None)
+            # The event log is the authoritative record of who organized what,
+            # and unlike connector records it is never replaced by a snapshot.
+            for row in connection.execute(
+                """
+                SELECT id, metadata_json FROM events
+                WHERE source = 'google_calendar' AND metadata_json IS NOT NULL
+                """
+            ).fetchall():
+                for candidate in _identities(json.loads(row["metadata_json"])):
+                    observe(candidate, str(row["id"]))
+
+        for key, candidate in by_email.items():
+            candidate.source_event_ids = tuple(sorted(events.get(key, ())))
+            yield candidate
 
 
 def _identities(payload: dict[str, Any]) -> list[PersonCandidate]:

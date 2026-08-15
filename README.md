@@ -604,7 +604,16 @@ Bulk exports select a set rather than one record:
 .\.venv\Scripts\alfred vault-export-source-event --source-event-id ID
 .\.venv\Scripts\alfred vault-export-range --since 2026-03-01 --until 2026-04-01
 .\.venv\Scripts\alfred vault-export-topic "rowing" --limit 50
+.\.venv\Scripts\alfred vault-export-person --entity-id ID
 ```
+
+`vault-export-person` defines "about a person" **structurally**: a memory is
+about someone when it came from an event they organized, not when their name
+appears in the wording. Text matching would treat "lunch near Alicia's office"
+as a memory *about* Alicia — tolerable for an export, wrong for a deletion, and
+this selector serves both. So it answers precisely for events with a recorded
+organizer and stays silent about mere mentions, rather than guessing at both.
+Find the entity ID with `alfred memory-search "<name>"`.
 
 `--since`/`--until` filter on when Alfred *recorded* a memory, not when the
 fact became true, and the range is half-open (`--since` inclusive, `--until`

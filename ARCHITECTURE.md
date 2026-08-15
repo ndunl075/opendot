@@ -140,7 +140,11 @@ Read the other way round it is safe and fixes a real defect. Calendar frequently
 
 `MemoryGraph.rename_entity` (`alfred memory-rename`) covers whoever is left. It keeps the previous label as an alias, so existing `[[wiki links]]` and any prior reference keep resolving — renaming is not forgetting.
 
-**Still to fix (the selector itself):** there is no memory↔entity edge in the schema — `evidence` only ever carries `subject_kind='memory'`, and memories link to source events rather than to the people they mention. Selecting "by person" would mean either inventing that linkage or approximating it (shared source event, or an FTS match on the entity label, which is just the topic selector wearing a different name). That is a modeling decision about what "about this person" *means*, not a missing query, so it is left open rather than guessed at. Closing it needs a decision on which of these "about this person" means, then a real edge recorded at extraction time — approximating it later from text would reintroduce exactly the entity-resolution guessing this section's "conservative entity resolution" rule exists to prevent.
+**Built (person selector):** all five of this section's selectors now exist. "About a person" is defined structurally: a memory is about someone when it came from a source event they organized or created, recorded as an `evidence` row linking that person to that event. `MemoryGraph.memories_about()` is then an exact join, and `alfred vault-export-person --entity-id` the selector.
+
+Text matching was considered and rejected for a reason worth keeping: matching a person's name and aliases against memory text would treat "lunch near Alicia's office" as a memory *about* Alicia. Tolerable for an export, wrong for a deletion — and this selector serves both, so it takes the precise definition rather than the generous one. Coverage is therefore honest but partial: it answers for events with a recorded organizer and stays silent about mere mentions instead of guessing at both.
+
+Measured on the live database: 1,042 of 2,609 memories carry an organizer, of which 772 are the owner (already the `self`/calendar identity) and 86 are the holidays calendar, leaving 184 memories across ten real people. Harvesting organizers from the immutable event log rather than only currently-active connector records is what found seven of those ten — the active snapshot describes who is on the calendar *now*, the log describes who ever was.
 
 ### Core records
 
