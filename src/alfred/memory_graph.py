@@ -644,6 +644,73 @@ class MemoryGraph:
                 self._audit(connection, actor, "entity_alias_add", {"entity_id": entity_id, "alias": normalized})
         return Alias(entity_id=entity_id, alias=normalized, source=source, confidence=confidence)
 
+    def rename_entity(self, entity_id: str, label: str, *, actor: str = "user:cli") -> Entity:
+        """Give an entity a better name, keeping the old one as an alias.
+
+        Needed because a derived entity often arrives with a placeholder for a
+        name -- a calendar organizer with no display name becomes
+        ``relative@example.com``, which is an identifier, not what anyone calls
+        that person. Without this the only remedy was deleting and recreating,
+        which would discard the entity's evidence and history.
+
+        The previous label is retained as an alias rather than discarded, so
+        existing ``[[wiki links]]``, prior references, and anything that
+        resolved by the old name keep resolving. Renaming is not forgetting.
+        """
+        normalized = " ".join(label.split())
+        if not normalized:
+            raise GraphError("entity label cannot be empty")
+        self.database.migrate()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                row = connection.execute(
+                    "SELECT label FROM entities WHERE id = ?", (entity_id,)
+                ).fetchone()
+                if row is None:
+                    raise GraphError(f"entity does not exist: {entity_id}")
+                previous = str(row["label"])
+                if previous == normalized:
+                    return self._entity_from_row(
+                        connection.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
+                    )
+                connection.execute(
+                    "UPDATE entities SET label = ?, updated_at = ? WHERE id = ?",
+                    (normalized, datetime.now(UTC).isoformat(), entity_id),
+                )
+                connection.execute(
+                    "UPDATE entity_fts SET label = ? WHERE entity_id = ?", (normalized, entity_id)
+                )
+                known = {
+                    str(alias["alias"]).casefold()
+                    for alias in connection.execute(
+                        "SELECT alias FROM aliases WHERE entity_id = ?", (entity_id,)
+                    ).fetchall()
+                }
+                if previous.casefold() not in known and previous.casefold() != normalized.casefold():
+                    connection.execute(
+                        "INSERT INTO aliases (entity_id, alias, source, confidence) VALUES (?, ?, ?, 1.0)",
+                        (entity_id, previous, actor),
+                    )
+                    aliases = [
+                        str(item["alias"])
+                        for item in connection.execute(
+                            "SELECT alias FROM aliases WHERE entity_id = ? ORDER BY alias", (entity_id,)
+                        ).fetchall()
+                    ]
+                    connection.execute(
+                        "UPDATE entity_fts SET aliases = ? WHERE entity_id = ?",
+                        (" ".join(aliases), entity_id),
+                    )
+                self._audit(
+                    connection,
+                    actor,
+                    "entity_rename",
+                    {"entity_id": entity_id, "label": normalized, "previous_label": previous},
+                )
+                return self._entity_from_row(
+                    connection.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
+                )
+
     def resolve_entity_by_name(self, name: str) -> Entity | None:
         """Return the single entity called ``name``, or None if that is ambiguous.
 

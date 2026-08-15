@@ -528,6 +528,19 @@ stays visible as history until it is separately forgotten.
 `alfred memory-alias --entity-id ID "Alternate Name"` adds a searchable alternate
 name for an entity—`memory-search` finds it by either name immediately after.
 
+`alfred memory-rename --entity-id ID "Real Name"` changes what an entity is
+actually called. People discovered from your calendar arrive labelled with
+whatever Google supplied, which is sometimes just an email address when the
+account has no display name set; this is how you fix that. The old label is
+kept as an alias, so existing `[[wiki links]]` and anything else that resolved
+by it keep working—renaming is not forgetting.
+
+Alfred fills names in on its own where it can: if someone's calendar address
+also appears as a Gmail sender with a display name, the next `people` sync
+adopts it. Gmail is only ever read *for names*, never to decide that someone
+exists—your inbox is mostly brands, and "Jamie Rivera" also arrives from an
+Evite mailer, so a display name there is branding rather than identity.
+
 ## Obsidian vault
 
 `alfred vault-export-entity --entity-id ID` and `alfred vault-export-memory
