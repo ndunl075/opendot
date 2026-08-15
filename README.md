@@ -257,8 +257,23 @@ chain still verifies, and the data is really there:
 
 A backup that decrypts cleanly into an *empty* database would pass every check
 except that last one. Broken backups are reported rather than raised — so this
-is safe to schedule monthly — and the command exits non-zero on failure so a
-scheduled run gets noticed instead of logging a quiet `"ok": false`.
+is safe to schedule — and the command exits non-zero on failure so a scheduled
+run gets noticed instead of logging a quiet `"ok": false`.
+
+`scripts/verify-backup.ps1` is the scheduled wrapper. The deployed installation
+runs it as the `Alfred Backup Verify` task every four weeks at 03:15 — 45
+minutes after the nightly snapshot, so it always checks a fresh one. Each run
+appends a JSON line to `.alfred\backup-verify.log`, and a failure throws, so
+Task Scheduler records a failed run rather than a green one that quietly logged
+bad news. Register it yourself with:
+
+```powershell
+$ps = (Get-Command powershell.exe).Source
+$action = New-ScheduledTaskAction -Execute $ps `
+  -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\path\to\alfred\scripts\verify-backup.ps1"'
+$trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Sunday -At 3:15AM
+Register-ScheduledTask -TaskName "Alfred Backup Verify" -Action $action -Trigger $trigger -Force
+```
 
 ## Tasks and reminders
 

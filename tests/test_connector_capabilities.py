@@ -121,3 +121,32 @@ def test_every_connector_that_has_ever_synced_is_declared(tmp_path: Path) -> Non
 
     undeclared = {name for name in synced if capability_for(name) is None}
     assert undeclared == set(), f"connectors with sync state but no declaration: {sorted(undeclared)}"
+
+
+def test_every_connector_declares_a_rate_limit() -> None:
+    """The contract lists five things to declare; rate limits were the one
+    omitted when this registry was first written."""
+    for item in CONNECTOR_CAPABILITIES:
+        assert item.rate_limit, item.connector
+
+
+def test_declared_page_sizes_match_the_code_that_requests_them() -> None:
+    """Numbers in a declaration rot silently, so they are checked, not trusted."""
+    gmail_source = (_SOURCE / "gmail.py").read_text(encoding="utf-8")
+    github_source = (_SOURCE / "github.py").read_text(encoding="utf-8")
+
+    gmail = capability_for("gmail")
+    github = capability_for("github")
+    assert gmail is not None and github is not None
+
+    # "maxResults 100 per page" / "per_page 50 notifications per sync"
+    assert '"maxResults": min(100' in gmail_source
+    assert "100" in gmail.rate_limit
+    assert '{"per_page": 50}' in github_source
+    assert "50" in github.rate_limit
+
+
+def test_local_connectors_declare_that_no_provider_is_involved() -> None:
+    for item in CONNECTOR_CAPABILITIES:
+        if item.transport == "local":
+            assert "no provider" in item.rate_limit, item.connector
