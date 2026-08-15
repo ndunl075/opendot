@@ -127,6 +127,51 @@ def test_topic_export_receipt_does_not_retain_the_query_text(tmp_path: Path) -> 
     assert result.selector == "topic"
 
 
+def test_a_person_note_creates_a_confirmed_entity_that_links_then_resolve(tmp_path: Path) -> None:
+    """Naming someone yourself is an explicit statement, so it is confirmed --
+    unlike the unconfirmed people derived from calendar data."""
+    database = Database(tmp_path / "alfred.db")
+    vault = tmp_path / "vault" / "People"
+    vault.mkdir(parents=True)
+    (vault / "Alex Chen.md").write_text(
+        "---\ntype: person\n---\n\nRowing coach. Met through the club.\n", encoding="utf-8"
+    )
+    (tmp_path / "vault" / "today.md").write_text("Practice with [[Alex Chen]].\n", encoding="utf-8")
+
+    result = VaultImporter(database, tmp_path / "vault").sync()
+
+    entity = MemoryGraph(database).resolve_entity_by_name("Alex Chen")
+    assert entity is not None
+    assert entity.entity_type == "person"
+    assert entity.confirmed is True
+    # The note declaring the person is imported before the note linking to it,
+    # so the link resolves in the same pass.
+    assert result.linked == 1
+
+
+def test_a_note_declaring_an_unknown_type_creates_nothing(tmp_path: Path) -> None:
+    """Only registry types; a typo must not mint a new kind of thing."""
+    database = Database(tmp_path / "alfred.db")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Thing.md").write_text("---\ntype: gadget\n---\n\nA gadget.\n", encoding="utf-8")
+
+    VaultImporter(database, vault).sync()
+
+    assert MemoryGraph(database).resolve_entity_by_name("Thing") is None
+
+
+def test_a_note_cannot_mint_a_second_owner(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Impostor.md").write_text("---\ntype: self\n---\n\nMe, allegedly.\n", encoding="utf-8")
+
+    VaultImporter(database, vault).sync()
+
+    assert MemoryGraph(database).resolve_entity_by_name("Impostor") is None
+
+
 def test_wiki_link_targets_ignores_display_text_and_headings() -> None:
     from alfred.vault import wiki_link_targets
 
