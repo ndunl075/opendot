@@ -127,6 +127,115 @@ def test_topic_export_receipt_does_not_retain_the_query_text(tmp_path: Path) -> 
     assert result.selector == "topic"
 
 
+def test_wiki_link_targets_ignores_display_text_and_headings() -> None:
+    from alfred.vault import wiki_link_targets
+
+    body = "Talked to [[Alex Chen|Alex]] about [[Trayce#Roadmap]] and [[Alex Chen]] again."
+
+    # Display text and heading are presentation and location; neither changes
+    # which note is referenced. The repeat is emphasis, not new evidence.
+    assert wiki_link_targets(body) == ["Alex Chen", "Trayce"]
+
+
+def test_a_wiki_link_records_provenance_against_the_named_entity(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="project", label="Trayce")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("Shipped the [[Trayce]] rewrite today.\n", encoding="utf-8")
+
+    result = VaultImporter(database, vault).sync()
+
+    assert result.linked == 1
+    assert result.unresolved_links == 0
+    evidence = graph.evidence_for("entity", entity.id)
+    assert len(evidence) == 1
+    assert evidence[0].source_event_id is not None
+
+
+def test_a_link_to_something_unknown_is_counted_not_invented(tmp_path: Path) -> None:
+    """A filename is not evidence that a thing exists."""
+    database = Database(tmp_path / "alfred.db")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("Met with [[Someone Nobody Knows]] today.\n", encoding="utf-8")
+
+    result = VaultImporter(database, vault).sync()
+
+    assert result.linked == 0
+    assert result.unresolved_links == 1
+    assert MemoryGraph(database).resolve_entity_by_name("Someone Nobody Knows") is None
+
+
+def test_an_ambiguous_name_resolves_to_nothing_rather_than_guessing(tmp_path: Path) -> None:
+    """Two possible "Alex" entities beat one wrong merge."""
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    graph.create_entity(entity_type="person", label="Alex")
+    graph.create_entity(entity_type="project", label="Alex")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("Spoke to [[Alex]] about it.\n", encoding="utf-8")
+
+    result = VaultImporter(database, vault).sync()
+
+    assert graph.resolve_entity_by_name("Alex") is None
+    assert result.linked == 0
+    assert result.unresolved_links == 1
+
+
+def test_an_alias_resolves_a_link_to_its_entity(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="person", label="Alexander Chen")
+    graph.add_alias(entity_id=entity.id, alias="Alex Chen")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("Lunch with [[alex chen]].\n", encoding="utf-8")
+
+    result = VaultImporter(database, vault).sync()
+
+    assert result.linked == 1
+    assert len(graph.evidence_for("entity", entity.id)) == 1
+
+
+def test_links_in_alfreds_own_generated_notes_are_never_imported(tmp_path: Path) -> None:
+    """Generated notes are Alfred's writing, not the owner's testimony."""
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="project", label="Trayce")
+    vault = tmp_path / "vault" / "Generated"
+    vault.mkdir(parents=True)
+    (vault / "gen.md").write_text(
+        "---\nmanaged: true\n---\n\nAbout [[Trayce]].\n", encoding="utf-8"
+    )
+
+    result = VaultImporter(database, tmp_path / "vault").sync()
+
+    assert result.linked == 0
+    assert graph.evidence_for("entity", entity.id) == []
+
+
+def test_a_wiki_link_never_creates_a_relationship_edge(tmp_path: Path) -> None:
+    """What a bare link *means* is a typed, registry-validated decision."""
+    database = Database(tmp_path / "alfred.db")
+    graph = MemoryGraph(database)
+    entity = graph.create_entity(entity_type="project", label="Trayce")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("Notes on [[Trayce]].\n", encoding="utf-8")
+
+    VaultImporter(database, vault).sync()
+
+    with database.connect() as connection:
+        edges = connection.execute(
+            "SELECT COUNT(*) FROM relationships WHERE source_entity_id = ? OR target_entity_id = ?",
+            (entity.id, entity.id),
+        ).fetchone()[0]
+    assert edges == 0
+
+
 def test_fs_leaves_ordinary_paths_untouched() -> None:
     ordinary = Path("vault") / "Generated" / "Entities" / "note.md"
 

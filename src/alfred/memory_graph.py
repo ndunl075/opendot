@@ -644,6 +644,68 @@ class MemoryGraph:
                 self._audit(connection, actor, "entity_alias_add", {"entity_id": entity_id, "alias": normalized})
         return Alias(entity_id=entity_id, alias=normalized, source=source, confidence=confidence)
 
+    def resolve_entity_by_name(self, name: str) -> Entity | None:
+        """Return the single entity called ``name``, or None if that is ambiguous.
+
+        Matches the label or any recorded alias, case-insensitively. Returning
+        None for *several* matches as well as for none is the point, not an
+        oversight: this section's rule is that it is safer to keep two
+        possible "Alex" entities than to merge two people incorrectly, and a
+        caller resolving a name the user typed has no evidence with which to
+        choose between them.
+        """
+        normalized = " ".join(name.split()).casefold()
+        if not normalized:
+            return None
+        self.database.migrate()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT e.* FROM entities e
+                LEFT JOIN aliases a ON a.entity_id = e.id
+                WHERE LOWER(e.label) = ? OR LOWER(a.alias) = ?
+                """,
+                (normalized, normalized),
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        return self._entity_from_row(rows[0])
+
+    def record_entity_mention(
+        self,
+        entity_id: str,
+        *,
+        source_event_id: str,
+        excerpt: str,
+        actor: str = "user:vault",
+    ) -> None:
+        """Record that a source event explicitly named this entity.
+
+        Provenance, not a claim: it says "this note mentioned this entity",
+        which is exactly what a ``[[wiki link]]`` the owner typed asserts. It
+        deliberately does not create a relationship -- what the mention
+        *means* ("works with", "is about") is a typed, registry-validated
+        edge, and inventing a predicate from a bare link would be the kind of
+        guessing this section's rules exist to prevent.
+        """
+        self.database.migrate()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                self._require_entity(connection, entity_id)
+                self._record_evidence(
+                    connection,
+                    subject_kind="entity",
+                    subject_id=entity_id,
+                    source_event_id=source_event_id,
+                    excerpt=excerpt,
+                )
+                self._audit(
+                    connection,
+                    actor,
+                    "entity_mention_record",
+                    {"entity_id": entity_id, "source_event_id": source_event_id},
+                )
+
     def aliases_for(self, entity_id: str) -> list[Alias]:
         """Return every alternate name recorded for one entity."""
         self.database.migrate()

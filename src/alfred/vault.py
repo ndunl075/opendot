@@ -284,11 +284,38 @@ class VaultProjector:
         )
 
 
+#: Obsidian's link syntax, covering the forms that name a note: ``[[Note]]``,
+#: ``[[Note|shown text]]``, and ``[[Note#Heading]]``. Only the target matters
+#: here -- the display text is presentation and the heading is a location
+#: inside the target, neither of which changes which note is referenced.
+#: Embeds (``![[Note]]``) are matched too; an embed is still a reference.
+_WIKI_LINK = re.compile(r"\[\[\s*([^\[\]|#\n]+?)\s*(?:#[^\[\]|\n]*)?(?:\|[^\[\]\n]*)?\]\]")
+
+
+def wiki_link_targets(text: str) -> list[str]:
+    """Return each distinct note name a body links to, in first-seen order.
+
+    Deduplicated because linking the same person three times in one note is
+    emphasis, not three separate pieces of evidence.
+    """
+    seen: dict[str, None] = {}
+    for match in _WIKI_LINK.finditer(text):
+        target = " ".join(match.group(1).split())
+        if target:
+            seen.setdefault(target, None)
+    return list(seen)
+
+
 class VaultImportResult(BaseModel):
     scanned: int
     imported: int
     updated: int
     skipped: int
+    #: Wiki links resolved to exactly one existing entity and recorded as
+    #: provenance. Links naming nothing Alfred knows, or naming something
+    #: ambiguous, are counted separately rather than guessed at.
+    linked: int = 0
+    unresolved_links: int = 0
 
 
 class VaultImporter:
@@ -319,10 +346,10 @@ class VaultImporter:
         """Import every changed, non-generated note; unreadable or empty notes are skipped."""
         self.database.migrate()
         account = str(self.vault_root)
-        scanned = imported = updated = skipped = 0
+        scanned = imported = updated = skipped = linked = unresolved = 0
         for path in self._eligible_files():
             scanned += 1
-            outcome = self._import_one(path, account=account, actor=actor)
+            outcome, link_counts = self._import_one(path, account=account, actor=actor)
             if outcome == "imported":
                 imported += 1
             elif outcome == "updated":
@@ -330,16 +357,28 @@ class VaultImporter:
             elif outcome == "skipped":
                 skipped += 1
             # "unchanged" contributes only to `scanned`.
-        return VaultImportResult(scanned=scanned, imported=imported, updated=updated, skipped=skipped)
+            linked += link_counts[0]
+            unresolved += link_counts[1]
+        return VaultImportResult(
+            scanned=scanned,
+            imported=imported,
+            updated=updated,
+            skipped=skipped,
+            linked=linked,
+            unresolved_links=unresolved,
+        )
 
-    def _import_one(self, path: Path, *, account: str, actor: str) -> str:
+    def _import_one(self, path: Path, *, account: str, actor: str) -> tuple[str, tuple[int, int]]:
+        """Return the outcome plus (resolved links, unresolved links)."""
         raw = path.read_text(encoding="utf-8")
         frontmatter, body = _split_frontmatter(raw)
         if frontmatter.get("managed") == "true":
-            return "skipped"  # Alfred's own generated output; never re-imported as testimony.
+            # Alfred's own generated output; never re-imported as testimony,
+            # and its links are Alfred's own writing rather than the owner's.
+            return "skipped", (0, 0)
         statement = body.strip()
         if not statement:
-            return "skipped"
+            return "skipped", (0, 0)
         content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         record_id = path.relative_to(self.vault_root).as_posix()
         with self.database.connect() as connection:
@@ -349,7 +388,7 @@ class VaultImporter:
             ).fetchone()
         previous = json.loads(previous_row["payload_json"]) if previous_row else None
         if previous is not None and previous.get("hash") == content_hash:
-            return "unchanged"
+            return "unchanged", (0, 0)
 
         frontmatter_sensitivity = frontmatter.get("sensitivity")
         sensitivity: Sensitivity = (
@@ -408,8 +447,48 @@ class VaultImporter:
                     payload={"hash": content_hash, "memory_id": memory.id},
                     active=True,
                 )
-        self._audit(actor, "vault_import_note", {"path": record_id, "outcome": outcome})
-        return outcome
+        link_counts = self._record_links(body, source_event_id=event.id, actor=actor)
+        self._audit(
+            actor,
+            "vault_import_note",
+            {
+                "path": record_id,
+                "outcome": outcome,
+                "linked": str(link_counts[0]),
+                "unresolved_links": str(link_counts[1]),
+            },
+        )
+        return outcome, link_counts
+
+    def _record_links(self, body: str, *, source_event_id: str, actor: str) -> tuple[int, int]:
+        """Record each ``[[wiki link]]`` that names exactly one known entity.
+
+        Section 5 says the importer parses frontmatter *and links*, and that
+        wiki links can express relationships. This is the conservative half of
+        that: a link the owner typed is an explicit statement that this note
+        concerns that entity, so it is recorded as provenance against the
+        note's source event.
+
+        What it deliberately does not do is decide what the link *means*.
+        Turning "[[Alex]]" into a typed edge would require inventing a
+        predicate, and this section requires relationships to be typed,
+        registry-validated, and temporal. It also never creates an entity: a
+        link to a note Alfred has never heard of is counted as unresolved
+        rather than promoted into the graph, since a filename is not evidence
+        that a thing exists. Ambiguous names resolve to nothing at all, per
+        the rule that two possible "Alex" entities beat one wrong merge.
+        """
+        linked = unresolved = 0
+        for target in wiki_link_targets(body):
+            entity = self.graph.resolve_entity_by_name(target)
+            if entity is None:
+                unresolved += 1
+                continue
+            self.graph.record_entity_mention(
+                entity.id, source_event_id=source_event_id, excerpt=target, actor=actor
+            )
+            linked += 1
+        return linked, unresolved
 
     def _eligible_files(self) -> list[Path]:
         """Every Markdown file is scanned; ``managed: true`` frontmatter decides exclusion.
