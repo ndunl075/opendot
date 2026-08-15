@@ -225,7 +225,29 @@ new preview and approval.
 
 `scripts/backup.ps1` creates timestamped encrypted snapshots under
 `.alfred/backups`. The deployed installation runs it through the `Alfred Backup`
-scheduled task daily at 02:30; keep testing an isolated restore at least monthly.
+scheduled task daily at 02:30.
+
+Test that those snapshots actually work with `alfred backup-verify --latest-in
+.alfred\backups` (or `--backup <file>` for a specific one). It rehearses a full
+restore into a throwaway copy and **never touches your live database** — which
+is the point, since the only other way to test a restore is
+`backup-restore-execute`, and that overwrites the database you're trying to
+protect. Nobody runs that on a working system, which is how backups quietly
+stay unverified until the day they're needed.
+
+It checks what actually matters, not just that the file opens: the stored key
+still decrypts it, SQLite integrity passes, migrations apply, the audit hash
+chain still verifies, and the data is really there:
+
+```json
+{"ok": true, "schema_version": 15, "audit_chain_verified": true,
+ "row_counts": {"events": 3402, "tool_runs": 5369, "memories": 2592}}
+```
+
+A backup that decrypts cleanly into an *empty* database would pass every check
+except that last one. Broken backups are reported rather than raised — so this
+is safe to schedule monthly — and the command exits non-zero on failure so a
+scheduled run gets noticed instead of logging a quiet `"ok": false`.
 
 ## Tasks and reminders
 
