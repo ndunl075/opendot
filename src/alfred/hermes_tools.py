@@ -106,10 +106,17 @@ _FUTURE_TIME_TERMS = re.compile(
     r"|\b(?:next|by)\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     re.IGNORECASE,
 )
+# Paired with a future time, any of these means "go do this then". The verbs
+# are listed bare on purpose: an earlier version required "check again/back/it"
+# and so missed "check at 3 pm who's playing", which is the same request with a
+# different preposition. Being generous here is nearly free -- offering
+# task_schedule costs one slot of eight and the model still decides -- while
+# missing it is fatal, because with no scheduling tool at all the model either
+# says it cannot schedule or invents a cron Alfred never runs.
 _NOTIFY_INTENT_TERMS = re.compile(
     r"\b(?:text|message|ping|dm)\s+me\b"
-    r"|\b(?:let me know|tell me|hit me up|follow up)\b"
-    r"|\bcheck\s+(?:again|back|it|on|the|that)\b"
+    r"|\b(?:let me know|tell me|hit me up|follow up|get back to me)\b"
+    r"|\b(?:check|look|see|find|watch|recheck)\b"
     r"|\bremind(?:er)?\b",
     re.IGNORECASE,
 )

@@ -97,9 +97,13 @@ CASUAL_MAX_CONTEXT_EXCHANGES = 8
 # against the Bot API); Telegram rejects anything outside it.
 REACTION_CASUAL_EMOJI = "\U0001f44d"  # 👍 -- "saw it", ordinary conversation
 REACTION_WORK_EMOJI = "\U0001fae1"  # 🫡 -- "on it", a turn that will use tools
-#: Most messages, not all. Frequent enough to be relied on as "it saw me",
-#: with enough gaps that it still reads as a person rather than an autoresponder.
-REACTION_CHANCE = 0.85
+#: Effectively every message. This started at 25%, which measured out to about
+#: one reaction per 28 real messages and was never once observed; at 85% it was
+#: still described as "not enough". It reads as a receipt more than as a
+#: flourish -- the owner uses it to know the message landed -- and a receipt
+#: that shows up seven times in eight is just unreliable. The small remaining
+#: gap keeps it from looking like an automated stamp on every line.
+REACTION_CHANCE = 0.97
 
 _INBOX_TERMS = re.compile(r"\b(?:inbox|e-?mail|gmail|mail|unread|reply)\b", re.IGNORECASE)
 _GITHUB_TERMS = re.compile(
