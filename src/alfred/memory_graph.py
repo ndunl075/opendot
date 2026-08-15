@@ -492,6 +492,44 @@ class MemoryGraph:
             ).fetchall()
         return [self._memory_from_row(row) for row in rows]
 
+    def memories_in_range(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        include_deleted: bool = False,
+    ) -> list[Memory]:
+        """Return memories recorded in a half-open ``[since, until)`` window.
+
+        Filters on ``created_at`` -- when Alfred recorded the claim -- not
+        ``valid_from``, which is when the fact itself became true. "Export
+        everything from last March" means what was written down then; a
+        birthday recorded in March that has been true for decades belongs to
+        March's receipts, not to the decade it describes.
+
+        Half-open so adjacent windows tile without double-counting a memory
+        sitting exactly on a boundary. Either bound may be omitted for an
+        open-ended range.
+        """
+        self.database.migrate()
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if since is not None:
+            clauses.append("created_at >= ?")
+            parameters.append(since.astimezone(UTC).isoformat())
+        if until is not None:
+            clauses.append("created_at < ?")
+            parameters.append(until.astimezone(UTC).isoformat())
+        if not include_deleted:
+            clauses.append("status != 'deleted'")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM memories {where} ORDER BY created_at, id",
+                tuple(parameters),
+            ).fetchall()
+        return [self._memory_from_row(row) for row in rows]
+
     def forget_memories_by_source_event(
         self,
         source_event_id: str,

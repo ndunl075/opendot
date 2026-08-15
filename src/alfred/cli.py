@@ -422,6 +422,20 @@ def build_parser() -> argparse.ArgumentParser:
     export_source = subcommands.add_parser("vault-export-source-event", help="project confirmed vault-safe memories from one source event")
     export_source.add_argument("--vault", type=Path, default=Path("alfred-vault"))
     export_source.add_argument("--source-event-id", required=True)
+    export_range = subcommands.add_parser(
+        "vault-export-range",
+        help="project confirmed vault-safe memories recorded in a time range",
+    )
+    export_range.add_argument("--vault", type=Path, default=Path("alfred-vault"))
+    export_range.add_argument("--since", help="ISO-8601 lower bound, inclusive")
+    export_range.add_argument("--until", help="ISO-8601 upper bound, exclusive")
+    export_topic = subcommands.add_parser(
+        "vault-export-topic",
+        help="project confirmed vault-safe memories matching a topic search",
+    )
+    export_topic.add_argument("query")
+    export_topic.add_argument("--vault", type=Path, default=Path("alfred-vault"))
+    export_topic.add_argument("--limit", type=int, default=50)
     import_vault = subcommands.add_parser(
         "vault-import", help="import changed user-authored vault notes as confirmed memories"
     )
@@ -969,6 +983,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "vault-export-source-event":
         print(VaultProjector(database, args.vault).export_by_source_event(args.source_event_id).model_dump_json())
+        return 0
+    if args.command == "vault-export-range":
+        if not args.since and not args.until:
+            raise SystemExit("vault-export-range needs --since, --until, or both")
+        print(
+            VaultProjector(database, args.vault)
+            .export_by_time_range(
+                since=datetime.fromisoformat(args.since) if args.since else None,
+                until=datetime.fromisoformat(args.until) if args.until else None,
+            )
+            .model_dump_json()
+        )
+        return 0
+    if args.command == "vault-export-topic":
+        print(
+            VaultProjector(database, args.vault)
+            .export_by_topic(args.query, limit=args.limit)
+            .model_dump_json()
+        )
         return 0
     if args.command == "vault-import":
         print(VaultImporter(database, args.vault).sync().model_dump_json())

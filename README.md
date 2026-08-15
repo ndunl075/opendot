@@ -537,6 +537,26 @@ graph record into `Generated/`—plain, portable Markdown with an `alfred_id` an
 silently overwritten; it's preserved and the projection instead becomes an
 `.alfred-conflict-<timestamp>.md` copy for review.
 
+Bulk exports select a set rather than one record:
+
+```powershell
+.\.venv\Scripts\alfred vault-export-source-event --source-event-id ID
+.\.venv\Scripts\alfred vault-export-range --since 2026-03-01 --until 2026-04-01
+.\.venv\Scripts\alfred vault-export-topic "rowing" --limit 50
+```
+
+`--since`/`--until` filter on when Alfred *recorded* a memory, not when the
+fact became true, and the range is half-open (`--since` inclusive, `--until`
+exclusive) so back-to-back months don't both claim a memory on the boundary.
+Either bound can be omitted for an open-ended range, but not both. The topic
+selector runs the same search a question would, so what you export matches
+what Alfred would actually recall. Every bulk export applies the same rule as
+a single one—only confirmed, `public`/`personal` memories are written, and
+anything skipped is reported by ID rather than silently dropped—so widening
+the net never widens what's exportable. A topic export's receipt records that
+it *was* a topic export, never the query you typed, since a search phrase can
+be as private as the memories it finds.
+
 `alfred vault-import --vault PATH` reads the other direction: any user-authored
 note anywhere in the vault (not just `Generated/`) becomes a confirmed,
 evidence-backed memory, since the owner writing something in their own vault

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,39 @@ from .events import EventStore
 from .memory_graph import Entity, GraphError, Memory, MemoryGraph, Sensitivity
 
 
+#: Windows rejects any path at or over MAX_PATH unless the process opts into
+#: long paths (off by default) or the path carries the ``\\?\`` extended-length
+#: prefix. 260 is the documented limit including the terminating null, so a
+#: path is already unsafe at 260 characters.
+_WINDOWS_MAX_PATH = 259
+
+
+def _fs(path: Path) -> Path:
+    """Return a form of ``path`` Windows can actually open past MAX_PATH.
+
+    Alfred generates its own vault filenames -- a 36-character UUID plus, for
+    a conflict copy, a 33-character ``.alfred-conflict-<timestamp>`` suffix --
+    so a deeply nested vault root can push an otherwise ordinary export over
+    the limit. Without this, that surfaces as a bare ``FileNotFoundError: No
+    such file or directory``, which names the wrong problem entirely and sends
+    you looking for a missing directory that is right there.
+
+    Applied only at the I/O boundary. The prefix is a Win32 filename
+    convention, not part of the path's identity, so ``Projection.path``, audit
+    records, and connector record IDs all keep the plain form. No-op on every
+    other platform, and on paths that are already short or already prefixed.
+    """
+    if os.name != "nt":
+        return path
+    text = str(path)
+    if len(text) <= _WINDOWS_MAX_PATH or text.startswith("\\\\?\\"):
+        return path
+    # A UNC path takes \\?\UNC\server\share, not \\?\\\server\share.
+    if text.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{text[2:]}")
+    return Path(f"\\\\?\\{text}")
+
+
 class VaultError(ValueError):
     """Raised when a vault projection would be unsafe or non-portable."""
 
@@ -30,6 +64,20 @@ class Projection(BaseModel):
 
 class SourceEventProjection(BaseModel):
     source_event_id: str
+    projections: list[Projection]
+    skipped_memory_ids: list[str]
+
+
+class SelectionProjection(BaseModel):
+    """Result of a bulk export whose scope is a query rather than one record.
+
+    ``selector`` names how the set was chosen so a receipt stays inspectable
+    after the fact; the query text itself is deliberately not stored here,
+    since a topic search can contain exactly the private phrasing the vault's
+    sensitivity rules exist to keep out of a generated file.
+    """
+
+    selector: str
     projections: list[Projection]
     skipped_memory_ids: list[str]
 
@@ -73,14 +121,9 @@ class VaultProjector:
         skipped: a bulk export must never downgrade a secret's sensitivity or
         turn a candidate into a confirmed memory.
         """
-        projections: list[Projection] = []
-        skipped_memory_ids: list[str] = []
-        for memory in self.graph.memories_by_source_event(source_event_id):
-            if memory.status != "confirmed" or self._memory_sensitivity(memory.id) not in self.allowed_sensitivities:
-                skipped_memory_ids.append(memory.id)
-                continue
-            path = self._managed_path("Generated", "Memories", f"{memory.id}.md")
-            projections.append(self._write_managed(path, self._render_memory(memory)))
+        projections, skipped_memory_ids = self._project_all(
+            self.graph.memories_by_source_event(source_event_id)
+        )
         self._audit(
             actor,
             "vault_export_by_source_event",
@@ -93,6 +136,82 @@ class VaultProjector:
         return SourceEventProjection(
             source_event_id=source_event_id, projections=projections, skipped_memory_ids=skipped_memory_ids
         )
+
+    def export_by_time_range(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        actor: str = "user:cli",
+    ) -> SelectionProjection:
+        """Project confirmed, vault-safe memories recorded in ``[since, until)``.
+
+        Section 4's "users can export or delete by source, time range, person,
+        topic, or individual item" -- this is the time-range selector. Same
+        skip rules as every other bulk export: a wider net must not quietly
+        widen what is exportable.
+        """
+        memories = self.graph.memories_in_range(since=since, until=until)
+        projections, skipped_memory_ids = self._project_all(memories)
+        self._audit(
+            actor,
+            "vault_export_by_time_range",
+            {
+                "since": since.isoformat() if since else "",
+                "until": until.isoformat() if until else "",
+                "projected_count": str(len(projections)),
+                "skipped_count": str(len(skipped_memory_ids)),
+            },
+        )
+        return SelectionProjection(
+            selector="time_range",
+            projections=projections,
+            skipped_memory_ids=skipped_memory_ids,
+        )
+
+    def export_by_topic(self, query: str, *, limit: int = 50, actor: str = "user:cli") -> SelectionProjection:
+        """Project confirmed, vault-safe memories matching a topic search.
+
+        Uses the same retrieval path a question would, so what you export is
+        what Alfred would actually recall -- deliberately not a second,
+        divergent matching rule. Sensitivity is restricted to the vault-safe
+        set at query time as well as at projection time, so a `secret` match
+        never even enters the candidate list.
+        """
+        result = self.graph.search(
+            query, limit=limit, allowed_sensitivities=set(self.allowed_sensitivities)
+        )
+        projections, skipped_memory_ids = self._project_all(result.memories)
+        self._audit(
+            actor,
+            "vault_export_by_topic",
+            {
+                "projected_count": str(len(projections)),
+                "skipped_count": str(len(skipped_memory_ids)),
+            },
+        )
+        return SelectionProjection(
+            selector="topic",
+            projections=projections,
+            skipped_memory_ids=skipped_memory_ids,
+        )
+
+    def _project_all(self, memories: list[Memory]) -> tuple[list[Projection], list[str]]:
+        """Project each vault-safe confirmed memory; report the rest as skipped.
+
+        Shared by every bulk selector so they cannot drift apart on the one
+        rule that matters: a bulk export must never downgrade a secret's
+        sensitivity or turn a candidate into a confirmed memory.
+        """
+        projections: list[Projection] = []
+        skipped_memory_ids: list[str] = []
+        for memory in memories:
+            if memory.status != "confirmed" or self._memory_sensitivity(memory.id) not in self.allowed_sensitivities:
+                skipped_memory_ids.append(memory.id)
+                continue
+            path = self._managed_path("Generated", "Memories", f"{memory.id}.md")
+            projections.append(self._write_managed(path, self._render_memory(memory)))
+        return projections, skipped_memory_ids
 
     def _memory_sensitivity(self, memory_id: str) -> str:
         self.database.migrate()
@@ -109,18 +228,18 @@ class VaultProjector:
         return candidate
 
     def _write_managed(self, path: Path, contents: str) -> Projection:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and not self._is_managed(path):
+        _fs(path.parent).mkdir(parents=True, exist_ok=True)
+        if _fs(path).exists() and not self._is_managed(path):
             timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             conflict = path.with_name(f"{path.stem}.alfred-conflict-{timestamp}{path.suffix}")
-            conflict.write_text(contents, encoding="utf-8", newline="\n")
+            _fs(conflict).write_text(contents, encoding="utf-8", newline="\n")
             return Projection(path=conflict, conflict_copy=True)
-        path.write_text(contents, encoding="utf-8", newline="\n")
+        _fs(path).write_text(contents, encoding="utf-8", newline="\n")
         return Projection(path=path, conflict_copy=False)
 
     @staticmethod
     def _is_managed(path: Path) -> bool:
-        return "managed: true" in path.read_text(encoding="utf-8")[:1024]
+        return "managed: true" in _fs(path).read_text(encoding="utf-8")[:1024]
 
     def _assert_exportable(self, sensitivity: str) -> None:
         if sensitivity not in self.allowed_sensitivities:
