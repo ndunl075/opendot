@@ -54,14 +54,16 @@ web:
 # BrowserOS neo (https://www.browseros.com/neo/) gives Hermes real browser
 # hands -- navigate, click, fill forms, read pages -- in a dedicated
 # agent-driven browser signed into whatever sites you're logged into there.
-# It runs locally and must already be open for this to connect; the URL is
-# fixed (BrowserOS neo always serves its MCP endpoint on 127.0.0.1:9200).
+# It runs locally and must already be open for this to connect. The port is
+# NOT fixed: the docs say 9200, the installed build chose 9210, and the app
+# records the live value in its own config.json under `ports.server`. Check
+# there if this stops connecting after an update.
 # See hermes-profile/README.md's BrowserOS section for the manual-setup
 # alternative (`hermes -p alfred mcp add browseros-neo`) if this file's copy
 # ever gets overwritten by a profile update.
 mcp_servers:
   browseros-neo:
-    url: "http://127.0.0.1:9200/mcp"
+    url: "http://127.0.0.1:9210/mcp"
 
 # Every Telegram turn runs through `hermes -z` (one-shot, no TTY), which
 # unconditionally sets HERMES_YOLO_MODE=1 -- there's no one there to answer

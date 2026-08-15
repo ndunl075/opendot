@@ -11,12 +11,15 @@ from .audit import AuditEvent, AuditLog
 from .brief_schedule import next_daily_occurrence
 from .briefing import BriefingService
 from .db import Database
+from .events import EventStore
 from .outbox import Outbox
 
 
 class ExecutedJob(BaseModel):
     id: str
-    outbox_id: str
+    #: None for a scheduled agent task: it queues work rather than a
+    #: message, and the reply is enqueued later by the bridge that answers it.
+    outbox_id: str | None = None
     late: bool
 
 
@@ -65,6 +68,70 @@ class JobRunner:
                         destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
                         next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                         state = "active"
+                    elif job["kind"] == "agent_task":
+                        # A scheduled *task*, not a scheduled message: the user
+                        # asked for something to be done later and reported
+                        # back, so there is no text to deliver yet -- it does
+                        # not exist until the work runs.
+                        #
+                        # The work is deliberately not run here. An agent turn
+                        # takes tens of seconds and spawns a subprocess that
+                        # reads this same database, and this method holds a
+                        # write transaction. Instead this queues the request
+                        # exactly the way an inbound Telegram message is
+                        # queued, so `hermes_bridge` picks it up on the next
+                        # cycle and answers it through the whole normal path:
+                        # tool selection, typing indicator, bubbles, feedback
+                        # buttons. The user cannot tell it came from a
+                        # schedule rather than from them, which is the point.
+                        chat_id = payload.get("chat_id")
+                        if not isinstance(chat_id, int):
+                            continue
+                        EventStore.append(
+                            connection,
+                            source="telegram",
+                            external_id=f"scheduled:{job['id']}:{job['next_run_at']}",
+                            occurred_at=run_at,
+                            content=str(payload["prompt"]),
+                            metadata={
+                                "chat_id": chat_id,
+                                "user_id": payload.get("user_id"),
+                                "agent_deferred": True,
+                                # Named so a scheduled turn is identifiable in
+                                # the event log without changing how it is
+                                # answered.
+                                "scheduled_job_id": job["id"],
+                            },
+                            sensitivity="personal",
+                        )
+                        schedule = json.loads(job["schedule_json"])
+                        repeat_daily = bool(schedule.get("daily"))
+                        connection.execute(
+                            """
+                            UPDATE jobs SET state = ?, next_run_at = ?, updated_at = ?
+                            WHERE id = ? AND state = 'active'
+                            """,
+                            (
+                                "active" if repeat_daily else "completed",
+                                next_daily_occurrence(schedule, run_at).isoformat() if repeat_daily else None,
+                                run_at.isoformat(),
+                                job["id"],
+                            ),
+                        )
+                        AuditLog.append_in_transaction(
+                            connection,
+                            AuditEvent(
+                                actor="system:scheduler",
+                                client="jobs",
+                                tool="agent_task_queue",
+                                outcome="queued",
+                                arguments={"job_id": job["id"], "scheduled_at": scheduled_at.isoformat()},
+                                result={"late": late},
+                                correlation_id=job["id"],
+                            ),
+                        )
+                        executed.append(ExecutedJob(id=job["id"], outbox_id=None, late=late))
+                        continue
                     else:
                         continue
                     outbox = Outbox.enqueue(

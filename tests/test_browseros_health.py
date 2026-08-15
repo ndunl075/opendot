@@ -33,3 +33,40 @@ def test_error_when_nothing_is_listening() -> None:
     assert result.state == "error"
     assert result.last_success_at is None
     assert "not reachable" in result.last_error
+
+
+def test_the_port_comes_from_browseros_own_config(tmp_path, monkeypatch) -> None:
+    """The installed build serves 9210 while the docs say 9200, so trusting the
+    documented constant reports a healthy service as down."""
+    import json
+
+    from alfred.browseros_health import browseros_port
+
+    config = tmp_path / "BrowserClaw" / "User Data" / ".browseros" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({"ports": {"cdp": 9110, "server": 9210}}), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert browseros_port() == 9210
+
+
+def test_the_documented_default_is_used_when_browseros_is_not_installed(tmp_path, monkeypatch) -> None:
+    """Not installed is the ordinary case, not an error a health probe raises."""
+    from alfred.browseros_health import BROWSEROS_DEFAULT_PORT, browseros_port
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    assert browseros_port() == BROWSEROS_DEFAULT_PORT
+
+
+def test_a_malformed_config_falls_back_instead_of_raising(tmp_path, monkeypatch) -> None:
+    from alfred.browseros_health import BROWSEROS_DEFAULT_PORT, browseros_port
+
+    config = tmp_path / "BrowserClaw" / "User Data" / ".browseros" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    assert browseros_port() == BROWSEROS_DEFAULT_PORT

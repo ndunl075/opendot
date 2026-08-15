@@ -207,8 +207,13 @@ def test_connectors_page_always_includes_a_live_browseros_row(tmp_path: Path) ->
 
     response = client.get("/connectors")
 
+    from alfred.browseros_health import browseros_port
+
     assert "browseros" in response.text
-    assert "127.0.0.1:9200" in response.text
+    # The discovered port, not a hardcoded one: this machine's install serves
+    # 9210 while the documentation says 9200, and pinning the constant here
+    # would fail on exactly the setup the feature is meant to support.
+    assert f"127.0.0.1:{browseros_port()}" in response.text
     # Whatever's actually listening on 9200 in the test environment, the
     # row must resolve to one of the two states this probe can produce.
     assert ">Connected<" in response.text or ">Disconnected<" in response.text

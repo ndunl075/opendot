@@ -92,10 +92,47 @@ _QUESTION_SHAPE = re.compile(
     re.IGNORECASE,
 )
 
+# "Do this later and tell me." Only the word "remind" used to count, so
+# "check again at 3 pm and text me" -- the same request in ordinary phrasing --
+# matched nothing, offered the model no Alfred scheduling tool, and sent it to
+# Hermes's own cron instead. That is a second job store Alfred does not run, so
+# the job sat there and never fired. Section 2 makes Alfred the sole owner of
+# schedules precisely to stop the two drifting apart.
+_FUTURE_TIME_TERMS = re.compile(
+    r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b"
+    r"|\bin\s+\d+\s*(?:min(?:ute)?s?|hours?|hrs?|days?)\b"
+    r"|\b(?:later|tonight|tomorrow|afterwards?)\b"
+    r"|\bthis (?:morning|afternoon|evening)\b"
+    r"|\b(?:next|by)\s+(?:week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.IGNORECASE,
+)
+_NOTIFY_INTENT_TERMS = re.compile(
+    r"\b(?:text|message|ping|dm)\s+me\b"
+    r"|\b(?:let me know|tell me|hit me up|follow up)\b"
+    r"|\bcheck\s+(?:again|back|it|on|the|that)\b"
+    r"|\bremind(?:er)?\b",
+    re.IGNORECASE,
+)
+
+
+def wants_scheduling(text: str) -> bool:
+    """True when the request is "do something later and report back".
+
+    Either an explicit reminder word, or a future time paired with an intent
+    to be told the result. Both halves are required for the paired form so a
+    plain question about a time ("what's at 3pm?") is not mistaken for a
+    request to schedule something.
+    """
+    if _REMINDER_TERMS.search(text):
+        return True
+    return bool(_FUTURE_TIME_TERMS.search(text) and _NOTIFY_INTENT_TERMS.search(text))
+
+
 # When a truly multi-topic request matches more than eight tools, retain the
 # tools that can safely complete an explicit action before broad read helpers.
 _TOOL_PRIORITY = (
     "calendar_event_propose",
+    "task_schedule",
     "message_draft",
     "message_send_propose",
     "github_issue_propose",
@@ -122,6 +159,14 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
     selected: set[str] = set()
     if _STATUS_TERMS.search(topic_text):
         selected.update({"connector_status", "system_status"})
+
+    # Top level, not nested under task phrasing: "check again at 3 and text me"
+    # is a scheduling request without ever mentioning a task or a reminder.
+    if wants_scheduling(topic_text):
+        # task_schedule runs the work and reports back; reminder_set only
+        # delivers text. Both are offered because "remind me to X" and "do X
+        # and tell me" are different requests the model has to tell apart.
+        selected.update({"task_schedule", "reminder_set", "task_upsert"})
 
     if _TASK_TERMS.search(topic_text) or _DAY_PLANNING_TERMS.search(topic_text):
         selected.update({"agenda_get", "brief_get"})
@@ -184,14 +229,21 @@ def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool
         return False
     if _EXTERNAL_LOOKUP_TERMS.search(request):
         return False
+    # Scheduling needs a tool, and the casual lane has none.
+    if wants_scheduling(request):
+        return False
     # Short follow-ups inherit a recent work topic ("why?", "yeah do that"),
     # while a new substantive message starts its own conversational turn.
     if len(request.split()) <= 12 and _EXPLICIT_WORK_TERMS.search(recent_topic_text):
         return False
-    # A question asked right after a lookup was set up is the answer to
-    # "what do you want me to search?" -- the naming of the thing to look up
-    # arrives in its own message and would otherwise read as a fresh topic
-    # with no lookup words of its own.
+    # The same inheritance for a lookup topic, and deliberately not limited to
+    # question-shaped follow-ups. "for this season" narrows the previous
+    # question without asking a new one, and routing it to the casual lane --
+    # which has no web search -- left a small model to improvise an answer it
+    # had no way to look up. A short message after a lookup is almost always
+    # refining that lookup, not starting small talk.
+    if len(request.split()) <= 12 and _EXTERNAL_LOOKUP_TERMS.search(recent_topic_text):
+        return False
     if _QUESTION_SHAPE.search(request) and _EXTERNAL_LOOKUP_TERMS.search(recent_topic_text):
         return False
     return True

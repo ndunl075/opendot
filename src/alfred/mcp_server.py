@@ -42,6 +42,7 @@ from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
 from .policy import ApprovalService, PolicyError, PolicyStore
 from .reminders import ReminderStore
+from .scheduled_tasks import ScheduledTaskStore
 from .tasks import UNSET, TaskStore
 from .workflow_learning import WorkflowObservationStore, current_workflow_turn_id
 
@@ -67,6 +68,7 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "task_upsert",
         "task_complete",
         "reminder_set",
+        "task_schedule",
     }
 )
 
@@ -411,6 +413,44 @@ def create_server(
                     idempotency_key=f"mcp-reminder:{client_id}:{resolved_task_id}:{parsed_run_at.isoformat()}",
                 )
         return job.model_dump(mode="json")
+
+    @alfred_tool(destructive=False)
+    def task_schedule(
+        prompt: str, run_at: str, chat_id: int, daily: bool = False, timezone: str | None = None
+    ) -> dict:
+        """Run an instruction later and send the answer to a paired chat.
+
+        Use this, not a reminder, when the user wants something *done* at a
+        time rather than something *said*: "check the order at 3 and text me"
+        has no message to deliver yet, because the answer does not exist until
+        the work runs. A reminder would just hand the task back to them.
+
+        When it comes due the instruction is queued as an ordinary agent turn,
+        so the reply arrives looking exactly like any other answer. Never
+        schedule this kind of work in your own runtime's cron: Alfred owns
+        schedules and delivery here, and a job elsewhere silently never fires.
+
+        ``run_at`` is ISO-8601 with an offset. ``daily`` repeats it, and then
+        ``timezone`` must be an IANA name (America/New_York) so the task keeps
+        its local hour across a daylight-saving change.
+        """
+        policy.require_write(client_id, "task_schedule")
+        parsed_run_at = datetime.fromisoformat(run_at)
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                task = ScheduledTaskStore.schedule(
+                    connection,
+                    prompt=prompt,
+                    run_at=parsed_run_at,
+                    chat_id=chat_id,
+                    daily=daily,
+                    timezone_name=timezone,
+                    idempotency_key=(
+                        f"mcp-task:{client_id}:{chat_id}:{parsed_run_at.isoformat()}:{prompt.strip()[:80]}"
+                    ),
+                )
+        return task.model_dump(mode="json")
 
     if tool_filter is not None:
         unknown = tool_filter - MCP_TOOL_NAMES
