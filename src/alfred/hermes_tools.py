@@ -159,6 +159,16 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
     return frozenset(ordered[:MAX_HERMES_TOOLS_PER_TURN])
 
 
+def is_external_lookup(request: str) -> bool:
+    """True when answering needs the outside world rather than Alfred's data.
+
+    Used to skip work that cannot possibly help: no local memory vector,
+    calendar row, or inbox record answers "who's playing tomorrow", and the
+    embedding round-trip alone cost 7.2 seconds of a 103-second turn.
+    """
+    return bool(_EXTERNAL_LOOKUP_TERMS.search(request))
+
+
 def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool:
     """Route ordinary chat away from agentic reasoning and connector tools.
 

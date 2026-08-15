@@ -46,6 +46,7 @@ from .db import Database
 from .hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
     is_casual_conversation,
+    is_external_lookup,
     select_hermes_tools,
 )
 from .outbox import Outbox
@@ -77,20 +78,28 @@ DEFAULT_CONTEXT_CHAR_BUDGET = 10_000
 # _fit_context_budget trims from the oldest end if the pack gets too big.
 CONVERSATION_LOOKBACK_SECONDS = 6 * 60 * 60
 MAX_CONTEXT_EXCHANGES = 8
+
+#: A request at or under this many words is treated as a follow-up that cannot
+#: stand on its own ("yeah do that", "why?"), so it inherits the previous
+#: exchange when choosing tools. Anything longer states its own topic and must
+#: not pick up one from earlier in the conversation.
+_FOLLOW_UP_MAX_WORDS = 8
 CASUAL_CONVERSATION_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 CASUAL_MAX_CONTEXT_EXCHANGES = 8
 
-# A reaction on the user's own message, not a reply -- the same small human
-# gesture as glancing up and giving a nod. Considered on any successful turn,
-# casual or tool-backed, but only some of the time (REACTION_CHANCE below); a
-# reaction on every single message reads as a scripted tic, not a person.
-# Every emoji here is confirmed against Telegram's own quick-reaction set --
-# Telegram silently rejects anything outside it, so this isn't a free choice.
-REACTION_EMOJI = ("\U0001f44d", "\U0001fae1", "\U0001f525", "\U0001f440")  # 👍 🫡 🔥 👀
-#: Roughly one message in three. High enough to actually be noticed, low
-#: enough that it still reads as a person reacting to something rather than
-#: an acknowledgement receipt stamped on every line.
-REACTION_CHANCE = 0.3
+# A reaction on the user's own message, not a reply. This is a read receipt
+# first and a human touch second: it fires *before* the agent runs, because a
+# nod that arrives after a 96-second turn is a footnote, not an
+# acknowledgement. Which emoji says what kind of turn is starting -- a salute
+# when Alfred is going off to do something, a thumbs up when it is just
+# talking -- so the reaction carries information rather than decoration.
+# Both are confirmed against Telegram's own quick-reaction set (verified live
+# against the Bot API); Telegram rejects anything outside it.
+REACTION_CASUAL_EMOJI = "\U0001f44d"  # 👍 -- "saw it", ordinary conversation
+REACTION_WORK_EMOJI = "\U0001fae1"  # 🫡 -- "on it", a turn that will use tools
+#: Most messages, not all. Frequent enough to be relied on as "it saw me",
+#: with enough gaps that it still reads as a person rather than an autoresponder.
+REACTION_CHANCE = 0.85
 
 _INBOX_TERMS = re.compile(r"\b(?:inbox|e-?mail|gmail|mail|unread|reply)\b", re.IGNORECASE)
 _GITHUB_TERMS = re.compile(
@@ -392,7 +401,6 @@ class HermesBridge:
         telegram_transport: ReactingTelegram | None = None,
         reaction_chance: float = REACTION_CHANCE,
         random_chance: Callable[[], float] = random.random,
-        random_emoji: Callable[[], str] = lambda: random.choice(REACTION_EMOJI),
     ) -> None:
         self.database = database
         self.agent = agent
@@ -405,7 +413,6 @@ class HermesBridge:
         self.telegram_transport = telegram_transport
         self.reaction_chance = reaction_chance
         self._random_chance = random_chance
-        self._random_emoji = random_emoji
 
     def run_once(self) -> HermesBridgeResult:
         """Answer up to ``max_per_run`` deferred messages; never raises for one bad turn."""
@@ -488,6 +495,8 @@ class HermesBridge:
         context_trace: dict[str, Any] = {"sources": [], "freshness": {}, "items": []}
         direct_answer = self._direct_answer(request)
         if direct_answer is not None:
+            # A local read still counts as going to look something up.
+            self._maybe_react(event, casual=False)
             result = AgentRunResult(
                 text=direct_answer,
                 ok=True,
@@ -510,6 +519,9 @@ class HermesBridge:
                 str(exchange["user"]) for exchange in initial_history
             )
             casual = is_casual_conversation(request, recent_topic_text=recent_topic_text)
+            # Before the slow part, so it reads as "saw it" rather than as a
+            # postscript to an answer that already arrived.
+            self._maybe_react(event, casual=casual)
             history = (
                 self._recent_conversation(event, casual=True)
                 if casual
@@ -528,7 +540,6 @@ class HermesBridge:
                 correlation_id=external_id,
             )
             agent_ms = max(0, round((self._monotonic() - agent_started) * 1000))
-        self._maybe_react(event, result=result)
         text = result.text if result.ok else self.failure_reply
         telemetry = {
             "timing_version": 1,
@@ -552,34 +563,38 @@ class HermesBridge:
             approval_requested_since=bridge_started_at,
         )
 
-    def _maybe_react(self, event: dict[str, Any], *, result: AgentRunResult) -> None:
-        """Sometimes react to the user's own message on any successful turn.
+    def _maybe_react(self, event: dict[str, Any], *, casual: bool) -> None:
+        """Acknowledge the message itself, before the slow part, most of the time.
 
-        Originally this fired only on tool-backed turns, on the theory that a
-        reaction acknowledges work. Measured against real traffic that was
-        close to never: 19 of 28 consecutive turns were casual (tool_count 0)
-        and another 5 failed, leaving 4 eligible turns which, at a 25% roll,
-        works out to about one reaction per 28 messages. The point of the
-        gesture is to feel like a person half-listening, and a person reacts
-        to "yo" more readily than to a database query -- so every successful
-        turn is eligible and the rate is high enough to actually be seen.
+        This is a read receipt, so it deliberately runs *before* the agent
+        rather than after its result is known. A turn can take a minute and a
+        half; a nod that arrives at the end confirms nothing that the reply
+        itself does not already confirm. That also means the outcome cannot
+        be a condition -- "I saw this" stays true even when the answer later
+        fails, and a failed turn still sends its own honest error message.
 
-        Best effort like every other cosmetic Telegram call in this codebase:
-        no transport configured, no message_id recorded, a failed turn, or the
-        dice not landing all skip quietly. A Telegram rejection (an emoji
-        outside its quick-reaction set, a since-deleted message) must never
-        surface as a bridge failure over one purely decorative gesture.
+        The emoji reports which lane the turn took: a salute when Alfred is
+        going off to use tools, a thumbs up when it is only talking. Two
+        earlier versions of this were wrong in ways worth recording -- it
+        fired only on tool-backed turns (about one reaction per 28 real
+        messages, so it was never once observed), and it fired only after
+        success (arriving up to two minutes late).
+
+        Best effort like every other cosmetic Telegram call here: no
+        transport, no message_id, or the dice not landing all skip quietly,
+        and a Telegram rejection never surfaces as a bridge failure.
         """
-        if self.telegram_transport is None or not result.ok:
+        if self.telegram_transport is None:
             return
         message_id = event.get("message_id")
         if not isinstance(message_id, int):
             return
         if self._random_chance() >= self.reaction_chance:
             return
+        emoji = REACTION_CASUAL_EMOJI if casual else REACTION_WORK_EMOJI
         try:
             self.telegram_transport.set_message_reaction(
-                chat_id=event["chat_id"], message_id=message_id, emoji=self._random_emoji()
+                chat_id=event["chat_id"], message_id=message_id, emoji=emoji
             )
         except Exception:
             pass
@@ -756,13 +771,30 @@ class HermesBridge:
         casual: bool = False,
         correlation_id: str | None = None,
     ) -> AgentRunResult:
-        topic_text = "\n".join(
-            [
-                request,
-                *(str(exchange["user"]) for exchange in history),
-                *(str(exchange["assistant"]) for exchange in history),
-            ]
-        )
+        # Only a request too short to stand on its own inherits the previous
+        # exchange. Scanning all of history for tool selection created a
+        # feedback loop worth naming: Alfred's own reply "i handle the boring
+        # stuff like email, github, tasks, calendar, and reminders" put four
+        # topic words into the pool, so the *next* question -- about a tennis
+        # tournament -- was handed agenda_get, brief_get, and
+        # connector_records_get and spent its budget calling them. A model's
+        # description of itself is not evidence about what the user wants.
+        #
+        # The prior assistant turn still matters for a bare "yeah do that",
+        # where the proposal being confirmed is the only place the topic
+        # exists at all -- hence the short-request exception rather than
+        # dropping history outright.
+        if len(request.split()) <= _FOLLOW_UP_MAX_WORDS:
+            recent = history[-1:]
+            topic_text = "\n".join(
+                [
+                    request,
+                    *(str(exchange["user"]) for exchange in recent),
+                    *(str(exchange["assistant"]) for exchange in recent),
+                ]
+            )
+        else:
+            topic_text = request
         if casual:
             run_conversation = getattr(self.agent, "run_conversation", None)
             if callable(run_conversation):
@@ -816,7 +848,13 @@ class HermesBridge:
         # Ollama embedding on every text ruins the conversational rhythm.
         # Exact local FTS recall remains available; semantic vector recall is
         # reserved for work/memory turns where the extra latency is justified.
-        memory = self._memory_context(request, include_vectors=not casual)
+        #
+        # An external lookup is skipped for the same reason and a stronger
+        # one: no stored memory answers "who's playing tomorrow", so the
+        # embedding round-trip is pure cost. Measured at 7.2 seconds of a
+        # 103-second turn on exactly that question.
+        include_vectors = not casual and not is_external_lookup(request)
+        memory = self._memory_context(request, include_vectors=include_vectors)
         if memory:
             context["memory"] = memory
         # The casual lane runs with zero Alfred tools, so connector data there
