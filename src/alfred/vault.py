@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,39 @@ from .db import Database
 from .documents import DocumentStore
 from .events import EventStore
 from .memory_graph import Entity, GraphError, Memory, MemoryGraph, Sensitivity
+
+
+#: Windows rejects any path at or over MAX_PATH unless the process opts into
+#: long paths (off by default) or the path carries the ``\\?\`` extended-length
+#: prefix. 260 is the documented limit including the terminating null, so a
+#: path is already unsafe at 260 characters.
+_WINDOWS_MAX_PATH = 259
+
+
+def _fs(path: Path) -> Path:
+    """Return a form of ``path`` Windows can actually open past MAX_PATH.
+
+    Alfred generates its own vault filenames -- a 36-character UUID plus, for
+    a conflict copy, a 33-character ``.alfred-conflict-<timestamp>`` suffix --
+    so a deeply nested vault root can push an otherwise ordinary export over
+    the limit. Without this, that surfaces as a bare ``FileNotFoundError: No
+    such file or directory``, which names the wrong problem entirely and sends
+    you looking for a missing directory that is right there.
+
+    Applied only at the I/O boundary. The prefix is a Win32 filename
+    convention, not part of the path's identity, so ``Projection.path``, audit
+    records, and connector record IDs all keep the plain form. No-op on every
+    other platform, and on paths that are already short or already prefixed.
+    """
+    if os.name != "nt":
+        return path
+    text = str(path)
+    if len(text) <= _WINDOWS_MAX_PATH or text.startswith("\\\\?\\"):
+        return path
+    # A UNC path takes \\?\UNC\server\share, not \\?\\\server\share.
+    if text.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{text[2:]}")
+    return Path(f"\\\\?\\{text}")
 
 
 class VaultError(ValueError):
@@ -109,18 +143,18 @@ class VaultProjector:
         return candidate
 
     def _write_managed(self, path: Path, contents: str) -> Projection:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and not self._is_managed(path):
+        _fs(path.parent).mkdir(parents=True, exist_ok=True)
+        if _fs(path).exists() and not self._is_managed(path):
             timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             conflict = path.with_name(f"{path.stem}.alfred-conflict-{timestamp}{path.suffix}")
-            conflict.write_text(contents, encoding="utf-8", newline="\n")
+            _fs(conflict).write_text(contents, encoding="utf-8", newline="\n")
             return Projection(path=conflict, conflict_copy=True)
-        path.write_text(contents, encoding="utf-8", newline="\n")
+        _fs(path).write_text(contents, encoding="utf-8", newline="\n")
         return Projection(path=path, conflict_copy=False)
 
     @staticmethod
     def _is_managed(path: Path) -> bool:
-        return "managed: true" in path.read_text(encoding="utf-8")[:1024]
+        return "managed: true" in _fs(path).read_text(encoding="utf-8")[:1024]
 
     def _assert_exportable(self, sensitivity: str) -> None:
         if sensitivity not in self.allowed_sensitivities:

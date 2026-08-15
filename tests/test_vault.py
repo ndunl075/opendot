@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from alfred.db import Database
 from alfred.documents import DocumentStore
 from alfred.events import EventStore
 from alfred.memory_graph import MemoryGraph
-from alfred.vault import VaultError, VaultImporter, VaultProjector
+from alfred.vault import VaultError, VaultImporter, VaultProjector, _fs
 
 
 def test_projected_entity_is_plain_markdown_with_stable_id(tmp_path: Path) -> None:
@@ -49,6 +50,45 @@ def test_manual_file_is_preserved_with_a_conflict_copy(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "# My manual note\n"
     assert projection.path.name.startswith(f"{entity.id}.alfred-conflict-")
     assert "managed: true" in projection.path.read_text(encoding="utf-8")
+
+
+def test_fs_leaves_ordinary_paths_untouched() -> None:
+    ordinary = Path("vault") / "Generated" / "Entities" / "note.md"
+
+    # No prefix on a short path, on an already-prefixed one, or off-Windows.
+    assert _fs(ordinary) == ordinary
+    assert "?" not in str(_fs(ordinary))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="MAX_PATH is a Windows-only limit")
+def test_projection_survives_a_vault_root_deep_enough_to_pass_max_path(tmp_path: Path) -> None:
+    """A deep vault root must not turn an export into a bare FileNotFoundError.
+
+    Alfred picks the filename here (a 36-character UUID, plus 33 more for a
+    conflict copy), so the limit can be crossed by an ordinary export into a
+    vault the operator nested a few levels too deep.
+    """
+    database = Database(tmp_path / "alfred.db")
+    entity = MemoryGraph(database).create_entity(entity_type="project", label="Alfred")
+    # Pad the root until the generated conflict filename is comfortably past
+    # the limit rather than hovering at it.
+    vault = tmp_path / "vault"
+    while len(str(vault / "Generated" / "Entities")) + 80 < 300:
+        vault = vault / "nested-vault-directory"
+    manual = vault / "Generated" / "Entities" / f"{entity.id}.md"
+    assert len(str(manual)) > 259
+    _fs(manual.parent).mkdir(parents=True)
+    _fs(manual).write_text("# My manual note\n", encoding="utf-8")
+
+    projection = VaultProjector(database, vault).project_entity(entity.id)
+
+    # The conflict copy is written, the hand-authored file is untouched, and
+    # Projection.path stays plain -- the \\?\ prefix is an I/O detail, not
+    # part of the path's identity.
+    assert projection.conflict_copy is True
+    assert not str(projection.path).startswith("\\\\?\\")
+    assert _fs(manual).read_text(encoding="utf-8") == "# My manual note\n"
+    assert "managed: true" in _fs(projection.path).read_text(encoding="utf-8")
 
 
 def test_only_confirmed_memories_are_projected(tmp_path: Path) -> None:
