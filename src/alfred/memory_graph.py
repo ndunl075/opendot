@@ -530,6 +530,35 @@ class MemoryGraph:
             ).fetchall()
         return [self._memory_from_row(row) for row in rows]
 
+    def memories_about(self, entity_id: str, *, include_deleted: bool = False) -> list[Memory]:
+        """Memories from source events this entity is recorded as having produced.
+
+        Section 4's "by person" selector. Deliberately structural rather than
+        textual: a memory is *about* someone when it came from an event they
+        organized, not when their name happens to appear in its wording. The
+        difference is not academic -- text matching would treat "lunch near
+        Alicia's office" as a memory about Alicia, which is fine for an
+        export and wrong for a deletion.
+
+        Coverage is therefore honest but partial: it answers for events with a
+        recorded organizer and stays silent about mere mentions, rather than
+        guessing at both.
+        """
+        self.database.migrate()
+        condition = "" if include_deleted else "AND m.status != 'deleted'"
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT DISTINCT m.* FROM memories m
+                JOIN evidence e ON e.source_event_id = m.source_event_id
+                WHERE e.subject_kind = 'entity' AND e.subject_id = ?
+                  AND m.source_event_id IS NOT NULL {condition}
+                ORDER BY m.created_at, m.id
+                """,
+                (entity_id,),
+            ).fetchall()
+        return [self._memory_from_row(row) for row in rows]
+
     def forget_memories_by_source_event(
         self,
         source_event_id: str,

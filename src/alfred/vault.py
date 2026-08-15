@@ -169,6 +169,34 @@ class VaultProjector:
             skipped_memory_ids=skipped_memory_ids,
         )
 
+    def export_by_person(self, entity_id: str, *, actor: str = "user:cli") -> SelectionProjection:
+        """Project confirmed, vault-safe memories about one person.
+
+        The last of section 4's five selectors. "About" means the person
+        organized the source event the memory came from -- structural rather
+        than textual, so a memory that merely mentions their name is not
+        swept in.
+        """
+        entity = self.graph.get_entity(entity_id)
+        if entity is None:
+            raise VaultError(f"entity does not exist: {entity_id}")
+        memories = self.graph.memories_about(entity_id)
+        projections, skipped_memory_ids = self._project_all(memories)
+        self._audit(
+            actor,
+            "vault_export_by_person",
+            {
+                "entity_id": entity_id,
+                "projected_count": str(len(projections)),
+                "skipped_count": str(len(skipped_memory_ids)),
+            },
+        )
+        return SelectionProjection(
+            selector="person",
+            projections=projections,
+            skipped_memory_ids=skipped_memory_ids,
+        )
+
     def export_by_topic(self, query: str, *, limit: int = 50, actor: str = "user:cli") -> SelectionProjection:
         """Project confirmed, vault-safe memories matching a topic search.
 

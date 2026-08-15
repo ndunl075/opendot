@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from alfred.connector_records import ConnectorRecordStore
@@ -243,4 +244,91 @@ def test_a_gmail_name_never_creates_someone_calendar_did_not_vouch_for(tmp_path:
 
     PeopleService(database).sync()
 
+    assert _people(database) == []
+
+
+def _event_with_source(database: Database, record_id: str, *, email: str, event_id: str) -> None:
+    """A calendar event in the immutable log, as the connector records it."""
+    from alfred.events import EventStore
+
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            EventStore.append(
+                connection,
+                source="google_calendar",
+                external_id=event_id,
+                occurred_at=datetime.now(UTC),
+                content="Practice",
+                metadata={"organizer": {"email": email}},
+                sensitivity="personal",
+            )
+
+
+def test_people_are_found_in_history_not_only_in_current_records(tmp_path: Path) -> None:
+    """Active connector records describe who is on the calendar now; the event
+    log describes who ever was, which is where most people live."""
+    database = Database(tmp_path / "alfred.db")
+    _event_with_source(database, "e1", email="coach@example.com", event_id="evt-1")
+
+    result = PeopleService(database).sync()
+
+    assert result.created == 1
+    assert _people(database) == [("coach@example.com", False)]
+
+
+def test_organized_events_are_linked_and_repeat_runs_converge(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    for index in range(3):
+        _event_with_source(database, f"e{index}", email="coach@example.com", event_id=f"evt-{index}")
+    service = PeopleService(database)
+
+    first = service.sync()
+    second = service.sync()
+
+    assert first.linked_events == 3
+    assert second.linked_events == 0  # nothing left to attribute
+
+
+def test_a_memory_is_about_whoever_organized_its_event(tmp_path: Path) -> None:
+    from alfred.events import EventStore
+
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            event = EventStore.append(
+                connection,
+                source="google_calendar",
+                external_id="evt-1",
+                occurred_at=datetime.now(UTC),
+                content="Practice",
+                metadata={"organizer": {"email": "coach@example.com"}},
+                sensitivity="personal",
+            )
+    graph = MemoryGraph(database)
+    mine = graph.remember("Practice was moved to Thursday.", source_event_id=event.id)
+    unrelated = graph.remember("Unrelated note about coach@example.com in the text.")
+    PeopleService(database).sync()
+
+    coach = graph.resolve_entity_by_name("coach@example.com")
+    assert coach is not None
+    about = {memory.id for memory in graph.memories_about(coach.id)}
+
+    assert mine.id in about
+    # Structural, not textual: mentioning the address is not being about them.
+    assert unrelated.id not in about
+
+
+def test_the_owners_own_address_is_never_linked_as_a_person(tmp_path: Path) -> None:
+    """772 of the real events were organized by the owner; treating those as a
+    contact would make "by person" meaningless."""
+    database = Database(tmp_path / "alfred.db")
+    MemoryGraph(database).create_entity(entity_type="calendar", label="owner@example.com")
+    _event_with_source(database, "e1", email="owner@example.com", event_id="evt-1")
+
+    result = PeopleService(database).sync()
+
+    assert result.skipped_calendar == 1
+    assert result.linked_events == 0
     assert _people(database) == []

@@ -497,3 +497,41 @@ def test_a_forgotten_memory_is_freshly_reimported_on_the_next_edit(tmp_path: Pat
     assert result.imported == 1
     assert result.updated == 0
     assert len(graph.search("Second version note").memories) == 1
+
+
+def test_export_by_person_covers_events_they_organized(tmp_path: Path) -> None:
+    """The last of section 4's five selectors."""
+    from alfred.events import EventStore
+    from alfred.people import PeopleService
+
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            event = EventStore.append(
+                connection,
+                source="google_calendar",
+                external_id="evt-1",
+                occurred_at=datetime.now(UTC),
+                content="Practice",
+                metadata={"organizer": {"email": "coach@example.com"}},
+                sensitivity="personal",
+            )
+    graph = MemoryGraph(database)
+    theirs = graph.remember("Practice moved to Thursday.", source_event_id=event.id)
+    graph.remember("Something else entirely.")
+    PeopleService(database).sync()
+    coach = graph.resolve_entity_by_name("coach@example.com")
+    assert coach is not None
+
+    result = VaultProjector(database, tmp_path / "vault").export_by_person(coach.id)
+
+    assert result.selector == "person"
+    assert [p.path.stem for p in result.projections] == [theirs.id]
+
+
+def test_export_by_person_refuses_an_unknown_entity(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+
+    with pytest.raises(VaultError, match="does not exist"):
+        VaultProjector(database, tmp_path / "vault").export_by_person("nobody")
