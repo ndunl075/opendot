@@ -243,6 +243,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 profile=args.hermes_profile,
                 conversation_model=args.hermes_conversation_model,
                 timeout_seconds=args.hermes_timeout,
+                conversation_timeout_seconds=args.hermes_conversation_timeout,
                 database=database,
                 monthly_call_limit=args.hermes_monthly_call_limit,
             ),
@@ -721,6 +722,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=120.0,
         help="seconds to allow one agent turn before giving up on it",
+    )
+    run.add_argument(
+        "--hermes-conversation-timeout",
+        type=float,
+        default=45.0,
+        help=(
+            "seconds to allow one casual no-tool reply; much shorter than "
+            "--hermes-timeout because the fast lane should be fast or fail fast"
+        ),
     )
     run.add_argument(
         "--hermes-conversation-model",

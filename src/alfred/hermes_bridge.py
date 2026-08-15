@@ -81,15 +81,16 @@ CASUAL_CONVERSATION_LOOKBACK_SECONDS = 7 * 24 * 60 * 60
 CASUAL_MAX_CONTEXT_EXCHANGES = 8
 
 # A reaction on the user's own message, not a reply -- the same small human
-# gesture as glancing up and giving a nod before actually going to do the
-# thing. Only considered for turns that went through the tool-enabled work
-# lane (never casual chat, which always runs with zero tools) and only some
-# of the time (REACTION_CHANCE below); a reaction on every single message
-# reads as a scripted tic, not a person. Every emoji here is confirmed
-# against Telegram's own quick-reaction set -- Telegram silently rejects
-# anything outside it, so this isn't a free-form choice.
+# gesture as glancing up and giving a nod. Considered on any successful turn,
+# casual or tool-backed, but only some of the time (REACTION_CHANCE below); a
+# reaction on every single message reads as a scripted tic, not a person.
+# Every emoji here is confirmed against Telegram's own quick-reaction set --
+# Telegram silently rejects anything outside it, so this isn't a free choice.
 REACTION_EMOJI = ("\U0001f44d", "\U0001fae1", "\U0001f525", "\U0001f440")  # 👍 🫡 🔥 👀
-REACTION_CHANCE = 0.25
+#: Roughly one message in three. High enough to actually be noticed, low
+#: enough that it still reads as a person reacting to something rather than
+#: an acknowledgement receipt stamped on every line.
+REACTION_CHANCE = 0.3
 
 _INBOX_TERMS = re.compile(r"\b(?:inbox|e-?mail|gmail|mail|unread|reply)\b", re.IGNORECASE)
 _GITHUB_TERMS = re.compile(
@@ -210,6 +211,7 @@ class SubprocessAgentRunner:
         profile: str,
         conversation_model: str | None = None,
         timeout_seconds: float = 120.0,
+        conversation_timeout_seconds: float = 45.0,
         redact_outbound: bool = True,
         database: Database | None = None,
         monthly_call_limit: int | None = None,
@@ -221,6 +223,7 @@ class SubprocessAgentRunner:
         self.profile = profile
         self.conversation_model = conversation_model
         self.timeout_seconds = timeout_seconds
+        self.conversation_timeout_seconds = conversation_timeout_seconds
         self.redact_outbound = redact_outbound
         self._redactor = Redactor()
         self.database = database
@@ -247,12 +250,21 @@ class SubprocessAgentRunner:
         )
 
     def run_conversation(self, prompt: str) -> AgentRunResult:
-        """Use the free fast model as a plain conversational model."""
+        """Use the free fast model as a plain conversational model.
+
+        Bounded far tighter than a work turn. This lane exists to answer "yo"
+        quickly with no tools and no reasoning; if it has not produced a
+        sentence in well under a minute, something is wrong upstream and a
+        prompt retry beats making someone watch a typing indicator for two
+        minutes over small talk. A work turn keeps the full budget, since
+        real tool calls legitimately take that long.
+        """
         return self._run(
             prompt,
             allowed_tools=frozenset(),
             reasoning="none",
             model=self.conversation_model,
+            timeout_seconds=self.conversation_timeout_seconds,
         )
 
     def _run(
@@ -263,8 +275,10 @@ class SubprocessAgentRunner:
         reasoning: str | None = None,
         model: str | None = None,
         correlation_id: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> AgentRunResult:
         started = self._monotonic()
+        effective_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         tool_count = len(allowed_tools) if allowed_tools is not None else None
 
         def result(text: str, ok: bool, detail: str = "") -> AgentRunResult:
@@ -296,7 +310,7 @@ class SubprocessAgentRunner:
             "text": True,
             "encoding": "utf-8",
             "errors": "replace",
-            "timeout": self.timeout_seconds,
+            "timeout": effective_timeout,
             "check": False,
         }
         if os.name == "nt":
@@ -314,7 +328,7 @@ class SubprocessAgentRunner:
         try:
             completed = self._runner(argv, **run_arguments)
         except subprocess.TimeoutExpired:
-            return result("", False, f"agent timed out after {self.timeout_seconds:.0f}s")
+            return result("", False, f"agent timed out after {effective_timeout:.0f}s")
         except OSError as error:
             # Most often the binary is not on PATH -- a real possibility when
             # the run loop is the Windows service rather than a login shell.
@@ -514,7 +528,7 @@ class HermesBridge:
                 correlation_id=external_id,
             )
             agent_ms = max(0, round((self._monotonic() - agent_started) * 1000))
-        self._maybe_react(event, result=result, casual=casual)
+        self._maybe_react(event, result=result)
         text = result.text if result.ok else self.failure_reply
         telemetry = {
             "timing_version": 1,
@@ -538,20 +552,25 @@ class HermesBridge:
             approval_requested_since=bridge_started_at,
         )
 
-    def _maybe_react(self, event: dict[str, Any], *, result: AgentRunResult, casual: bool) -> None:
-        """Sometimes react to the user's own message on a real, successful tool turn.
+    def _maybe_react(self, event: dict[str, Any], *, result: AgentRunResult) -> None:
+        """Sometimes react to the user's own message on any successful turn.
+
+        Originally this fired only on tool-backed turns, on the theory that a
+        reaction acknowledges work. Measured against real traffic that was
+        close to never: 19 of 28 consecutive turns were casual (tool_count 0)
+        and another 5 failed, leaving 4 eligible turns which, at a 25% roll,
+        works out to about one reaction per 28 messages. The point of the
+        gesture is to feel like a person half-listening, and a person reacts
+        to "yo" more readily than to a database query -- so every successful
+        turn is eligible and the rate is high enough to actually be seen.
 
         Best effort like every other cosmetic Telegram call in this codebase:
-        no transport configured, no message_id recorded, a failed turn, a
-        casual turn (always zero tools), a turn that never touched a tool, or
-        the dice not landing all just skip quietly. A Telegram rejection
-        (an emoji outside its quick-reaction set, a since-deleted message)
-        must never surface as a bridge failure over one purely decorative
-        gesture.
+        no transport configured, no message_id recorded, a failed turn, or the
+        dice not landing all skip quietly. A Telegram rejection (an emoji
+        outside its quick-reaction set, a since-deleted message) must never
+        surface as a bridge failure over one purely decorative gesture.
         """
-        if self.telegram_transport is None or casual or not result.ok:
-            return
-        if not result.tool_count:
+        if self.telegram_transport is None or not result.ok:
             return
         message_id = event.get("message_id")
         if not isinstance(message_id, int):
@@ -777,9 +796,18 @@ class HermesBridge:
         """
         request = str(event["content"])
         history = self._recent_conversation(event, casual=casual) if history is None else history
-        topic_text = "\n".join(
-            [request, *(str(exchange["user"]) for exchange in history)]
-        )
+        # Connector selection keys off the current request alone. History
+        # stays in the pack for continuity, but letting it *choose* connectors
+        # meant a GitHub conversation loaded the whole GitHub pack into a
+        # question about a tennis tournament -- and the casual lane's
+        # seven-day window made that the common case rather than the rare one.
+        #
+        # The asymmetry is deliberate: this pack is an optimization that saves
+        # a tool round-trip, not the only way to reach a connector. Guessing
+        # too narrowly costs one `connector_records_get` call on a follow-up
+        # that needed it; guessing too widely costs every unrelated turn a
+        # pile of irrelevant context, which is what the operator actually hit.
+        connector_topic_text = request
         context: dict[str, Any] = {}
         trace_candidates: dict[str, list[str]] = {}
         if history:
@@ -791,14 +819,20 @@ class HermesBridge:
         memory = self._memory_context(request, include_vectors=not casual)
         if memory:
             context["memory"] = memory
-        if _INBOX_TERMS.search(topic_text):
-            context["gmail"] = self._gmail_context(trace_candidates=trace_candidates)
-        if _GITHUB_TERMS.search(topic_text):
-            context["github"] = self._github_context(trace_candidates=trace_candidates)
-        if _ACADEMIC_TERMS.search(topic_text):
-            academic = self._academic_context(request)
-            if academic:
-                context["academic_history"] = academic
+        # The casual lane runs with zero Alfred tools, so connector data there
+        # is dead weight: it cannot be acted on, and packing it is what turned
+        # a two-word chat reply into a 120-second timeout. A request that
+        # genuinely concerns a connector is not casual in the first place --
+        # every connector noun is already an explicit work term.
+        if not casual:
+            if _INBOX_TERMS.search(connector_topic_text):
+                context["gmail"] = self._gmail_context(trace_candidates=trace_candidates)
+            if _GITHUB_TERMS.search(connector_topic_text):
+                context["github"] = self._github_context(trace_candidates=trace_candidates)
+            if _ACADEMIC_TERMS.search(connector_topic_text):
+                academic = self._academic_context(request)
+                if academic:
+                    context["academic_history"] = academic
         if not context:
             if casual:
                 return (

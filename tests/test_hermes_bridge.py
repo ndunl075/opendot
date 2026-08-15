@@ -233,23 +233,31 @@ def test_never_reacts_when_the_dice_dont_land(tmp_path: Path) -> None:
     assert telegram.reactions == []
 
 
-def test_never_reacts_on_a_casual_turn(tmp_path: Path) -> None:
+def test_reacts_on_a_casual_turn_too(tmp_path: Path) -> None:
+    """Casual chat is most of the traffic, so excluding it meant near-never.
+
+    Measured over 28 consecutive real turns, 19 were casual and 5 failed,
+    leaving 4 eligible; at the old 25% roll that is roughly one reaction per
+    28 messages, which is why none was ever observed. A person reacts to "yo"
+    more readily than to a database query.
+    """
     database_path = tmp_path / "alfred.db"
     _defer(database_path, _update(7, "yo"))
     telegram = FakeReactingTelegram()
     bridge = HermesBridge(
         Database(database_path),
-        RoutedFakeAgent(AgentRunResult(text="yo.", ok=True, tool_count=5)),
+        RoutedFakeAgent(AgentRunResult(text="yo.", ok=True, tool_count=0)),
         telegram_transport=telegram,
         reaction_chance=1.0,
+        random_emoji=lambda: "\U0001f44d",
     )
 
     bridge.run_once()
 
-    assert telegram.reactions == []
+    assert telegram.reactions == [(20, 107, "\U0001f44d")]
 
 
-def test_never_reacts_when_the_turn_used_no_tools(tmp_path: Path) -> None:
+def test_reacts_even_when_the_turn_used_no_tools(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     _defer(database_path, _update(8, "what's on my calendar next month"))
     telegram = FakeReactingTelegram()
@@ -258,11 +266,12 @@ def test_never_reacts_when_the_turn_used_no_tools(tmp_path: Path) -> None:
         ScopedFakeAgent(AgentRunResult(text="here's next month.", ok=True, tool_count=0)),
         telegram_transport=telegram,
         reaction_chance=1.0,
+        random_emoji=lambda: "\U0001f525",
     )
 
     bridge.run_once()
 
-    assert telegram.reactions == []
+    assert telegram.reactions == [(20, 108, "\U0001f525")]
 
 
 def test_never_reacts_on_a_failed_turn(tmp_path: Path) -> None:
@@ -812,6 +821,69 @@ def test_casual_turn_uses_the_conversation_lane(tmp_path: Path) -> None:
     assert len(agent.conversation_prompts) == 1
     assert agent.tool_scopes == []
     assert "don't turn a greeting into a work check-in" in agent.conversation_prompts[0]
+
+
+def test_a_question_needing_a_web_lookup_is_not_treated_as_small_talk(tmp_path: Path) -> None:
+    """The casual lane has zero tools, so it cannot answer this at all.
+
+    Observed live: "who's playing tmrw in the cinci open" was routed to the
+    no-tool conversation model, which then spent 120 seconds failing to
+    answer a question that needed a web search.
+    """
+    database_path = tmp_path / "alfred.db"
+    _defer(
+        database_path,
+        _update(72, "who's playing tmrw in the cinci open? just grandstand and the other courts."),
+    )
+    agent = RoutedFakeAgent(AgentRunResult(text="here's the order of play.", ok=True))
+
+    HermesBridge(Database(database_path), agent).run_once()
+
+    assert agent.conversation_prompts == []  # not the casual lane
+    assert len(agent.tool_scopes) == 1
+
+
+def test_an_unrelated_question_does_not_inherit_an_old_connector_topic(tmp_path: Path) -> None:
+    """A GitHub conversation must not load GitHub context into a tennis question.
+
+    Observed live: the seven-day casual history meant days-old PR/CI talk
+    kept dragging the whole GitHub pack into unrelated turns.
+    """
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(73, "did that PR pass CI on github?"))
+    HermesBridge(
+        Database(database_path), ScopedFakeAgent(AgentRunResult(text="it failed.", ok=True))
+    ).run_once()
+
+    _defer(database_path, _update(74, "who is playing tomorrow in the tournament?"))
+    agent = ScopedFakeAgent(AgentRunResult(text="here's the order of play.", ok=True))
+    HermesBridge(Database(database_path), agent).run_once()
+
+    # The JSON key specifically -- the static preamble mentions github by name
+    # while telling the model not to re-fetch it, so a bare substring check
+    # would pass for the wrong reason.
+    assert '"github":' not in agent.prompts[0]
+
+
+def test_casual_turns_carry_no_connector_context_at_all(tmp_path: Path) -> None:
+    """Zero Alfred tools means connector data is unusable weight on the fast lane."""
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(75, "anything good in my inbox?"))
+    HermesBridge(
+        Database(database_path), ScopedFakeAgent(AgentRunResult(text="two things.", ok=True))
+    ).run_once()
+
+    # Long enough that the "short follow-up inherits a work topic" rule does
+    # not fire -- this is a genuinely new casual message, not a continuation.
+    _defer(
+        database_path,
+        _update(76, "haha that is honestly wild i cannot believe any of that happened today man"),
+    )
+    agent = RoutedFakeAgent(AgentRunResult(text="right?", ok=True))
+    HermesBridge(Database(database_path), agent).run_once()
+
+    assert len(agent.conversation_prompts) == 1
+    assert "gmail" not in agent.conversation_prompts[0]
 
 
 def test_casual_turn_skips_slow_vector_recall_but_keeps_exact_memory(tmp_path: Path) -> None:

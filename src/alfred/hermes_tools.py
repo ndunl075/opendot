@@ -64,6 +64,34 @@ _EXPLICIT_WORK_TERMS = re.compile(
     re.IGNORECASE,
 )
 
+# Facts about the outside world that Alfred cannot know on its own. These are
+# not "work" in the connector sense -- no Alfred tool answers them -- but they
+# are emphatically not small talk either: the casual lane runs a small model
+# with reasoning disabled and no tools, so routing one of these there produces
+# a confident guess or a timeout, never an answer. "who's playing tomorrow in
+# the cinci open" is the case that exposed this; it needs a web search, and
+# the casual lane cannot make one.
+_EXTERNAL_LOOKUP_TERMS = re.compile(
+    r"\b(?:"
+    r"look (?:it|this|that|them)? ?up|look up|google|find out|"
+    r"search|searching|"
+    r"weather|forecast|temperature|"
+    r"score|scores|standings|bracket|seeded?|lineup|"
+    r"playing|plays|match(?:es|up)?|tournament|championships?|"
+    r"news|headlines?|"
+    r"stock|ticker|"
+    r"who won|who’s winning|who's winning|how much (?:is|are|does)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# A request phrased as a question, used only to decide whether a substantive
+# message continues a lookup the previous turn set up.
+_QUESTION_SHAPE = re.compile(
+    r"(?:\?\s*$)|^\s*(?:who|what|when|where|which|whose|how many|how much|is|are|does|do|did|can you)\b",
+    re.IGNORECASE,
+)
+
 # When a truly multi-topic request matches more than eight tools, retain the
 # tools that can safely complete an explicit action before broad read helpers.
 _TOOL_PRIORITY = (
@@ -132,13 +160,28 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
 
 
 def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool:
-    """Route ordinary chat away from agentic reasoning and connector tools."""
+    """Route ordinary chat away from agentic reasoning and connector tools.
+
+    The casual lane is a small model with reasoning disabled and no tools, so
+    "casual" has to mean *answerable with no outside information*, not merely
+    "doesn't mention a connector". Anything needing a fact Alfred cannot know
+    on its own belongs in the capable lane even though no Alfred tool serves
+    it -- Hermes's own web search does.
+    """
     if _SOCIAL_GREETING.fullmatch(request):
         return True
     if _EXPLICIT_WORK_TERMS.search(request) or _DAY_PLANNING_TERMS.search(request):
         return False
+    if _EXTERNAL_LOOKUP_TERMS.search(request):
+        return False
     # Short follow-ups inherit a recent work topic ("why?", "yeah do that"),
     # while a new substantive message starts its own conversational turn.
     if len(request.split()) <= 12 and _EXPLICIT_WORK_TERMS.search(recent_topic_text):
+        return False
+    # A question asked right after a lookup was set up is the answer to
+    # "what do you want me to search?" -- the naming of the thing to look up
+    # arrives in its own message and would otherwise read as a fresh topic
+    # with no lookup words of its own.
+    if _QUESTION_SHAPE.search(request) and _EXTERNAL_LOOKUP_TERMS.search(recent_topic_text):
         return False
     return True
