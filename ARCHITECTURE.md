@@ -103,6 +103,10 @@ health() -> status
 
 Each connector declares read/write capabilities, OAuth scopes, sensitivity, polling/webhook support, and rate limits. A normalized event always retains `source`, `account`, `external_id`, timestamps, and a deep link to the original.
 
+**Built:** `connector_capabilities.py` is that declaration (`alfred connector-capabilities`, plus a section on the admin UI's connectors page). Nothing declared any of it before — `connector_health.py` answers *is it working*, and there was no answer at all to *what may it do*, so establishing whether Canvas can write, which Google scopes are actually requested, or which connector stores `sensitive` data meant reading eight modules and inferring. That is a security question rather than a curiosity, since section 8 gates writes behind approvals and filters retrieval by sensitivity. Five connectors can write (`google_calendar`, `gmail`, `github`, `telegram`, `slack`) and exactly one stores `sensitive` data (`google_health`, all three scopes read-only).
+
+The declarations are cross-checked against the code they describe rather than trusted: a module defining an `Actions` class must declare that it writes, declared Google scopes must actually appear in the source that requests them, the writer set is pinned so adding one forces a deliberate edit, and any connector recording `sync_state` must be declared at all. A declaration that can silently drift is worse than none, because it invites trust it has not earned. (Verified by temporarily marking `github` read-only: the cross-check failed with the reason, as intended.) The deep-link half of this contract already held — across 3,452 real connector events, every Calendar, Gmail, and GitHub event carries one.
+
 Prefer official APIs for reliable sync. Third-party MCP servers are acceptable for optional/ad-hoc tools, but must be allowlisted and cannot receive Alfred secrets other than their own scoped credential.
 
 When an institution disables student-generated Canvas API tokens, Alfred may

@@ -211,6 +211,17 @@ connector's health without ever exposing a credential or synced content: `ok`,
 `stale` (no success in the last 24 hours), `error` (the most recent attempt
 failed), or `never_synced`.
 
+`alfred connector-capabilities` answers the other question—not *is it working*
+but *what is it allowed to do*: which connectors can write, what OAuth scopes
+each one actually requests, which stores sensitive data, and whether it polls,
+pushes, or is purely local. Today five can write (Calendar, Gmail, GitHub,
+Telegram, Slack) and exactly one stores `sensitive` data (Google Health, all
+three scopes read-only). "Can write" marks where the approval boundary
+applies—every write still needs a preview and your explicit approval, so
+nothing there runs unattended. The same table appears on the admin dashboard's
+connectors page, and it's cross-checked against the source by tests, so it
+can't quietly drift out of date.
+
 ## Encrypted backup and restore
 
 Create the local AES-256 key once with `alfred backup-key-generate`; it is kept

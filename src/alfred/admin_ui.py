@@ -45,6 +45,7 @@ from starlette.staticfiles import StaticFiles
 from .audit import AuditLog
 from .briefing import BriefingService
 from .browseros_health import browseros_health
+from .connector_capabilities import CONNECTOR_CAPABILITIES
 from .connector_health import connector_health
 from .db import Database
 from .evaluation import EvaluationService
@@ -282,7 +283,12 @@ def create_admin_app(database: Database, *, bearer_token_value: str) -> Starlett
         # itself. Appended last so sync-tracked connectors keep their stable
         # order and this one shot doesn't reshuffle the page on every load.
         connectors = [*connector_health(database), browseros_health()]
-        return _render("connectors.html", active="connectors", connectors=connectors)
+        return _render(
+            "connectors.html",
+            active="connectors",
+            connectors=connectors,
+            capabilities=CONNECTOR_CAPABILITIES,
+        )
 
     async def evaluation_page(request: Request) -> Response:
         return _render(

@@ -353,3 +353,19 @@ def test_run_admin_ui_defaults_to_loopback_but_accepts_another_host(tmp_path: Pa
 
     hosts = [call.kwargs.get("host") for call in uvicorn_mock.Config.call_args_list]
     assert hosts == ["127.0.0.1", "100.64.1.2"]
+
+
+def test_connectors_page_shows_what_each_connector_may_do(tmp_path: Path) -> None:
+    """Health answers "is it working"; this answers "what can it do", which is
+    the security-relevant half and previously required reading the source."""
+    client = _client(Database(tmp_path / "alfred.db"))
+    _login(client)
+
+    response = client.get("/connectors")
+
+    assert "What each connector may do" in response.text
+    assert "can write" in response.text
+    assert "read-only" in response.text
+    # The one sensitive connector is called out by name.
+    assert "google_health" in response.text
+    assert "sensitive" in response.text
