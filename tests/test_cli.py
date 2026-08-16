@@ -10,7 +10,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
 
     assert main(["--db", str(database_path), "init"]) == 0
     initialized = json.loads(capsys.readouterr().out)
-    assert initialized["schema_version"] == 15
+    assert initialized["schema_version"] == 16
 
     assert (
         main(

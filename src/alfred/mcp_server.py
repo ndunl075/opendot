@@ -39,6 +39,7 @@ from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
 from .http_auth import generate_token as generate_http_token
 from .important_dates import ImportantDateStore
+from .journal import JournalStore
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
@@ -82,6 +83,9 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "threads_awaiting_reply",
         "availability_get",
         "pull_requests_get",
+        "mood_record",
+        "gratitude_record",
+        "journal_get",
     }
 )
 
@@ -586,6 +590,44 @@ def create_server(
             item.model_dump(mode="json")
             for item in ImportantDateStore.upcoming(database, within_days=within_days)
         ]
+
+    @alfred_tool(destructive=False)
+    def mood_record(rating: int, note: str | None = None) -> dict:
+        """Record a 1–5 mood check-in with an optional short note.
+
+        Stored separately from habits: mood tracks how things felt, not whether
+        a behavior happened. Use ``journal_get`` to review recent entries and
+        whether a trend can be named.
+        """
+        policy.require_write(client_id, "mood_record")
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                recorded = JournalStore.mood_record(connection, rating=rating, note=note)
+        return recorded.model_dump(mode="json")
+
+    @alfred_tool(destructive=False)
+    def gratitude_record(text: str) -> dict:
+        """Append a free-text gratitude journal entry."""
+        policy.require_write(client_id, "gratitude_record")
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                recorded = JournalStore.gratitude_record(connection, text=text)
+        return recorded.model_dump(mode="json")
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def journal_get(days: int = 30) -> dict:
+        """Return recent mood check-ins, gratitude entries, and mood trend.
+
+        Trend direction is only named when there are at least five days with mood
+        check-ins and the older/newer daily averages differ by at least 0.5 on
+        the 1–5 scale; otherwise ``mood_trend.reason`` explains the refusal so
+        a null direction does not read as "no change".
+        """
+        policy.require_read(client_id, "journal_get")
+        snapshot = JournalStore.get(database, days=days)
+        return snapshot.model_dump(mode="json")
 
     @alfred_tool(destructive=False)
     def task_schedule(

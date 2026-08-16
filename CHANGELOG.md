@@ -9,6 +9,9 @@ only bumps the minor version — see RELEASING.md).
 
 ### Fixed
 
+- Annual birthday reminder roll-forward no longer loses the next year's
+  "turns N" payload: the shared job UPDATE after delivery was rewriting
+  `payload_json` from the pre-delivery snapshot (introduced with nag jobs).
 - Google Calendar REST paths now encode provider IDs as path segments, fixing
   the built-in US Holidays calendar whose `#` previously truncated the ID and
   surfaced only as `HTTPStatusError`.
@@ -24,6 +27,12 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Mood check-ins and gratitude journal (`mood_record`, `gratitude_record`,
+  `journal_get`): 1–5 mood ratings with optional notes and free-text
+  gratitude entries on dedicated tables, deliberately separate from habits.
+  Trend direction is only named with at least five days of mood data and a
+  0.5-point spread between older and newer daily averages; otherwise
+  `journal_get` returns an explicit reason instead of a silent null.
 - Nag-until-done reminders on the job runner: `nag_until_done` (MCP) and
   `alfred nag-until-done` repeat on an interval, re-check linked task state on
   every fire, stop silently when the task is completed anywhere, and deliver an

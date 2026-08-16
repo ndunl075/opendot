@@ -86,7 +86,8 @@ _SOCIAL_GREETING = re.compile(
 _EXPLICIT_WORK_TERMS = re.compile(
     r"\b(?:agenda|anniversary|assignment|bedtime|birthday|calendar|canvas|class|connector|"
     r"course|deadline|due|email|gmail|github|health|inbox|issue|lock[\s-]?in|mail|meeting|"
-    r"memory|nag|note|pull request|remind(?:er|ing|s)?|repo|schedule|search the web|slack|task|"
+    r"gratitude|journal|memory|mood|nag|note|pull request|remind(?:er|ing|s)?|repo|schedule|"
+    r"search the web|slack|task|"
     r"to-?do|wake(?:\s+me)?\s*up|wake-up|web search|workout)\b",
     re.IGNORECASE,
 )
@@ -172,6 +173,18 @@ _IMPORTANT_DATE_TERMS = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_MOOD_TERMS = re.compile(
+    r"\b(?:mood|feeling|feelings|how am i|how was my day|mood check(?:-|\s)?in)\b",
+    re.IGNORECASE,
+)
+_GRATITUDE_TERMS = re.compile(
+    r"\b(?:gratitude|grateful|thankful|thanks for|three things|gratitude journal)\b",
+    re.IGNORECASE,
+)
+_JOURNAL_TERMS = re.compile(
+    r"\b(?:journal|mood trend|mood history|gratitude entries)\b",
+    re.IGNORECASE,
+)
 
 
 def wants_scheduling(text: str) -> bool:
@@ -196,6 +209,9 @@ _TOOL_PRIORITY = (
     "message_send_propose",
     "github_issue_propose",
     "important_date_set",
+    "mood_record",
+    "gratitude_record",
+    "journal_get",
     "reminder_set",
     "nag_until_done",
     "task_upsert",
@@ -240,6 +256,13 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
 
     if _IMPORTANT_DATE_TERMS.search(topic_text):
         selected.update({"important_date_set", "important_dates_get", "brief_get"})
+
+    if _MOOD_TERMS.search(topic_text):
+        selected.update({"mood_record", "journal_get"})
+    if _GRATITUDE_TERMS.search(topic_text):
+        selected.update({"gratitude_record", "journal_get"})
+    if _JOURNAL_TERMS.search(topic_text):
+        selected.add("journal_get")
 
     if _NAG_TERMS.search(topic_text):
         selected.update({"nag_until_done", "task_upsert", "task_complete"})
@@ -315,6 +338,8 @@ def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool
     if wants_scheduling(request):
         return False
     if _IMPORTANT_DATE_TERMS.search(request):
+        return False
+    if _MOOD_TERMS.search(request) or _GRATITUDE_TERMS.search(request) or _JOURNAL_TERMS.search(request):
         return False
     # Short follow-ups inherit a recent work topic ("why?", "yeah do that"),
     # while a new substantive message starts its own conversational turn.

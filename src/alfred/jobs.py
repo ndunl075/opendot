@@ -53,6 +53,11 @@ class JobRunner:
                 for job in due_jobs:
                     scheduled_at = datetime.fromisoformat(job["next_run_at"])
                     payload = json.loads(job["payload_json"])
+                    # Default: leave payload alone. Nags bump attempt; annual
+                    # dates rewrite text via advance_after_delivery — both must
+                    # survive the shared UPDATE below (do not clobber with the
+                    # pre-delivery row snapshot).
+                    payload_json_for_update = job["payload_json"]
                     late = run_at - scheduled_at > self.late_after
                     if job["kind"] in {"reminder", "telegram_reminder"}:
                         prefix = f"Late reminder (scheduled {scheduled_at.isoformat()}): " if late else "Reminder: "
@@ -73,6 +78,10 @@ class JobRunner:
                                 after=run_at,
                             ).isoformat()
                             state = "active"
+                            payload_json_for_update = connection.execute(
+                                "SELECT payload_json FROM jobs WHERE id = ?",
+                                (job["id"],),
+                            ).fetchone()["payload_json"]
                         elif schedule.get("daily"):
                             next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                             state = "active"
@@ -201,6 +210,9 @@ class JobRunner:
                             state = "active"
                             updated_payload = {**payload, "attempt": attempt + 1}
                             audit_tool = "nag_deliver"
+                        payload_json_for_update = json.dumps(
+                            updated_payload, sort_keys=True, separators=(",", ":")
+                        )
                     else:
                         continue
                     outbox = Outbox.enqueue(
@@ -219,9 +231,7 @@ class JobRunner:
                         (
                             state,
                             next_run_at,
-                            json.dumps(updated_payload, sort_keys=True, separators=(",", ":"))
-                            if job["kind"] == "nag"
-                            else job["payload_json"],
+                            payload_json_for_update,
                             run_at.isoformat(),
                             job["id"],
                         ),

@@ -6,8 +6,8 @@ from alfred.db import Database
 def test_migrate_is_idempotent_and_enables_wal(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
 
-    assert database.migrate() == 15
-    assert database.migrate() == 15
+    assert database.migrate() == 16
+    assert database.migrate() == 16
 
     with database.connect() as connection:
         mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
@@ -27,6 +27,8 @@ def test_migrate_is_idempotent_and_enables_wal(tmp_path: Path) -> None:
         "embeddings",
         "action_receipts",
         "documents",
+        "mood_entries",
+        "gratitude_entries",
     } <= tables
 
 
@@ -35,7 +37,7 @@ def test_status_is_non_sensitive(tmp_path: Path) -> None:
 
     assert database.status() == {
         "database_path": str(tmp_path / "alfred.db"),
-        "schema_version": 15,
+        "schema_version": 16,
         "audit_event_count": 0,
     }
 
