@@ -451,7 +451,7 @@ These change configuration, not the architecture:
 - Google account type (personal vs. Workspace changes what an org admin can restrict). Calendar/Gmail scopes default to `calendar.events` (read/write, matching the approval-gated event write), `gmail.readonly`, and `gmail.compose` (matching the approval-gated draft write); override with `alfred google-auth --scope` if a narrower or different grant is preferred.
 - Current ChatGPT/Claude plans; ChatGPT write-capable custom MCP access is plan-dependent.
 - Phone OS and whether offline Markdown editing is important beyond Telegram; this selects the optional free vault-sync adapter.
-- Desired morning-brief time, timezone, quiet hours, and cloud-spend ceiling.
+- Desired morning-brief time, timezone, quiet hours (`ALFRED_QUIET_HOURS_*`), and cloud-spend ceiling.
 
 ## 13. Primary references
 

@@ -27,6 +27,12 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Quiet hours for proactive deliveries: set `ALFRED_QUIET_HOURS_START` /
+  `ALFRED_QUIET_HOURS_END` (HH:MM) and optional `ALFRED_QUIET_HOURS_TIMEZONE`
+  (IANA). Job-backed outbox rows (reminders, briefs, nags) stay `pending`
+  through the local window; interactive Hermes/gateway replies with no
+  `job_id` still deliver so a late-night chat is not silence. Disabled when
+  unset.
 - Mood check-ins and gratitude journal (`mood_record`, `gratitude_record`,
   `journal_get`): 1–5 mood ratings with optional notes and free-text
   gratitude entries on dedicated tables, deliberately separate from habits.

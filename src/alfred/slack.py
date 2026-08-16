@@ -20,6 +20,7 @@ from .audit import AuditEvent, AuditLog
 from .db import Database
 from .events import EventStore
 from .outbox import Outbox
+from .quiet_hours import QuietHours
 from .reminders import ReminderStore
 from .tasks import TaskStore
 
@@ -151,16 +152,26 @@ class SlackOutboxWorker:
 
     destination_pattern = re.compile(r"^slack:([A-Z0-9]+)$")
 
-    def __init__(self, database: Database, transport: SlackTransport, allowed_channel_ids: set[str]) -> None:
+    def __init__(
+        self,
+        database: Database,
+        transport: SlackTransport,
+        allowed_channel_ids: set[str],
+        quiet_hours: QuietHours | None = None,
+    ) -> None:
         self.database = database
         self.transport = transport
         self.allowed_channel_ids = allowed_channel_ids
+        self.quiet_hours = quiet_hours or QuietHours.disabled()
 
-    def deliver_pending(self, *, limit: int = 20) -> list[dict[str, str]]:
+    def deliver_pending(
+        self, *, limit: int = 20, now: datetime | None = None
+    ) -> list[dict[str, str]]:
         self.database.migrate()
         results: list[dict[str, str]] = []
+        hold_jobs = self.quiet_hours.holds_job_deliveries(now)
         for _ in range(limit):
-            claimed = self._claim_next()
+            claimed = self._claim_next(hold_job_deliveries=hold_jobs)
             if claimed is None:
                 break
             outbox_id, destination, payload = claimed
@@ -193,15 +204,31 @@ class SlackOutboxWorker:
             results.append({"outbox_id": outbox_id, "state": "sent", "slack_message_id": message_id})
         return results
 
-    def _claim_next(self) -> tuple[str, str, dict[str, Any]] | None:
+    def _claim_next(self, *, hold_job_deliveries: bool) -> tuple[str, str, dict[str, Any]] | None:
         with self.database.connect() as connection:
             with self.database.transaction(connection):
-                row = connection.execute(
-                    "SELECT id, destination, payload_json FROM outbox WHERE state = 'pending' AND destination LIKE 'slack:%' ORDER BY created_at, id LIMIT 1"
-                ).fetchone()
+                if hold_job_deliveries:
+                    row = connection.execute(
+                        """
+                        SELECT id, destination, payload_json FROM outbox
+                        WHERE state = 'pending' AND destination LIKE 'slack:%' AND job_id IS NULL
+                        ORDER BY created_at, id LIMIT 1
+                        """
+                    ).fetchone()
+                else:
+                    row = connection.execute(
+                        """
+                        SELECT id, destination, payload_json FROM outbox
+                        WHERE state = 'pending' AND destination LIKE 'slack:%'
+                        ORDER BY created_at, id LIMIT 1
+                        """
+                    ).fetchone()
                 if row is None:
                     return None
-                if connection.execute("UPDATE outbox SET state = 'sending', attempts = attempts + 1 WHERE id = ? AND state = 'pending'", (row["id"],)).rowcount != 1:
+                if connection.execute(
+                    "UPDATE outbox SET state = 'sending', attempts = attempts + 1 WHERE id = ? AND state = 'pending'",
+                    (row["id"],),
+                ).rowcount != 1:
                     return None
                 return row["id"], row["destination"], json.loads(row["payload_json"])
 

@@ -285,6 +285,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
         background_connectors=telegram_transport is not None or slack_bot is not None,
         poll_timeout_seconds=args.poll_timeout,
         idle_sleep_seconds=args.idle_sleep,
+        quiet_hours=Settings.from_environment().quiet_hours,
     )
     try:
         if slack_receiver is not None:
@@ -1323,7 +1324,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "telegram-deliver":
         client = TelegramBotClient(SystemKeyringSecretStore().get_required(args.secret_name))
         try:
-            result = TelegramOutboxWorker(database, client, set(args.chat_id)).deliver_pending(limit=args.limit)
+            result = TelegramOutboxWorker(
+                database,
+                client,
+                set(args.chat_id),
+                quiet_hours=Settings.from_environment().quiet_hours,
+            ).deliver_pending(limit=args.limit)
         finally:
             client.close()
         print(json.dumps([item.model_dump(mode="json") for item in result]))

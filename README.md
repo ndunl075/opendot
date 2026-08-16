@@ -36,6 +36,13 @@ for every parameter.
 The default database path is `.alfred/alfred.db`. It is deliberately ignored by
 Git. To use another path, pass `--db <path>` or set `ALFRED_DB_PATH`.
 
+Optional quiet hours hold proactive Telegram/Slack deliveries (reminders,
+morning briefs, nags — anything with an outbox `job_id`) inside a local
+window. Set `ALFRED_QUIET_HOURS_START` and `ALFRED_QUIET_HOURS_END` to `HH:MM`
+values (overnight windows like `22:00`–`07:00` are fine) and optionally
+`ALFRED_QUIET_HOURS_TIMEZONE` to an IANA name (default `UTC`). Interactive
+replies with no `job_id` still deliver. Unset means quiet hours are off.
+
 ## Local connectors
 
 Telegram polling and delivery are local commands. Put the bot token in your OS

@@ -21,6 +21,7 @@ from typing import Callable, TypeVar
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .jobs import JobRunner
+from .quiet_hours import QuietHours
 from .telegram import TelegramPair
 from .telegram_actions import TelegramActionWorker
 from .telegram_runtime import (
@@ -79,6 +80,7 @@ class AlfredRunner:
         idle_sleep_seconds: float = 5.0,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
+        quiet_hours: QuietHours | None = None,
     ) -> None:
         self.database = database
         self.telegram_transport = telegram_transport
@@ -98,6 +100,7 @@ class AlfredRunner:
         self.idle_sleep_seconds = idle_sleep_seconds
         self.sleep = sleep
         self.now = now
+        self.quiet_hours = quiet_hours or QuietHours.disabled()
         self._last_synced: dict[str, float] = {}
         self._next_sync_attempt: dict[str, float] = {}
         self._sync_failures: dict[str, int] = {}
@@ -204,7 +207,12 @@ class AlfredRunner:
             channel_ids = set(self.slack_channel_ids)
             delivered_ok, delivered = self._safe(
                 "slack_deliver",
-                lambda: SlackOutboxWorker(self.database, self.slack_transport, channel_ids).deliver_pending(),
+                lambda: SlackOutboxWorker(
+                    self.database,
+                    self.slack_transport,
+                    channel_ids,
+                    quiet_hours=self.quiet_hours,
+                ).deliver_pending(),
                 errors,
             )
             slack_delivered = len(delivered) if delivered_ok and delivered is not None else 0
@@ -299,7 +307,12 @@ class AlfredRunner:
         chat_ids = set(self.telegram_chat_ids)
         delivered_ok, delivered = self._safe(
             "telegram_deliver",
-            lambda: TelegramOutboxWorker(self.database, transport, chat_ids).deliver_pending(),
+            lambda: TelegramOutboxWorker(
+                self.database,
+                transport,
+                chat_ids,
+                quiet_hours=self.quiet_hours,
+            ).deliver_pending(),
             errors,
         )
         return len(delivered) if delivered_ok and delivered is not None else 0

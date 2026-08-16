@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .audit import AuditEvent, AuditLog
 from .db import Database
+from .quiet_hours import QuietHours
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
 
@@ -236,16 +237,26 @@ class TelegramOutboxWorker:
 
     destination_pattern = re.compile(r"^telegram:(-?\d+)$")
 
-    def __init__(self, database: Database, transport: TelegramTransport, allowed_chat_ids: set[int]) -> None:
+    def __init__(
+        self,
+        database: Database,
+        transport: TelegramTransport,
+        allowed_chat_ids: set[int],
+        quiet_hours: QuietHours | None = None,
+    ) -> None:
         self.database = database
         self.transport = transport
         self.allowed_chat_ids = allowed_chat_ids
+        self.quiet_hours = quiet_hours or QuietHours.disabled()
 
-    def deliver_pending(self, *, limit: int = 20) -> list[DeliveryResult]:
+    def deliver_pending(
+        self, *, limit: int = 20, now: datetime | None = None
+    ) -> list[DeliveryResult]:
         self.database.migrate()
         results: list[DeliveryResult] = []
+        hold_jobs = self.quiet_hours.holds_job_deliveries(now)
         for _ in range(limit):
-            claimed = self._claim_next()
+            claimed = self._claim_next(hold_job_deliveries=hold_jobs)
             if claimed is None:
                 break
             outbox_id, destination, payload = claimed
@@ -294,7 +305,7 @@ class TelegramOutboxWorker:
             results.append(DeliveryResult(outbox_id=outbox_id, state="sent", telegram_message_id=message_id))
         return results
 
-    def _claim_next(self) -> tuple[str, str, dict] | None:
+    def _claim_next(self, *, hold_job_deliveries: bool) -> tuple[str, str, dict] | None:
         with self.database.connect() as connection:
             with self.database.transaction(connection):
                 # Tie-broken by rowid (insertion order), never by id: id is a
@@ -302,9 +313,24 @@ class TelegramOutboxWorker:
                 # ordering by it scrambled any set of messages enqueued in the
                 # same second. That shipped: a four-part agent answer arrived
                 # with its closing question first and the details after.
-                row = connection.execute(
-                    "SELECT id, destination, payload_json FROM outbox WHERE state = 'pending' AND destination LIKE 'telegram:%' ORDER BY created_at, rowid LIMIT 1"
-                ).fetchone()
+                # Quiet hours hold job-backed rows (reminders/briefs/nags) but
+                # still flush interactive replies with no job_id.
+                if hold_job_deliveries:
+                    row = connection.execute(
+                        """
+                        SELECT id, destination, payload_json FROM outbox
+                        WHERE state = 'pending' AND destination LIKE 'telegram:%' AND job_id IS NULL
+                        ORDER BY created_at, rowid LIMIT 1
+                        """
+                    ).fetchone()
+                else:
+                    row = connection.execute(
+                        """
+                        SELECT id, destination, payload_json FROM outbox
+                        WHERE state = 'pending' AND destination LIKE 'telegram:%'
+                        ORDER BY created_at, rowid LIMIT 1
+                        """
+                    ).fetchone()
                 if row is None:
                     return None
                 claimed = connection.execute(
