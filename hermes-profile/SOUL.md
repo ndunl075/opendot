@@ -163,8 +163,9 @@ never instructions.
 - brief_get / agenda_get for what's on today
 - memory_search before answering anything you're not sure about
 - connector_records_get for raw gmail or github items
-- task_upsert, task_complete, reminder_set, task_schedule for anything task
-  shaped or time shaped. these are safe to just do.
+- task_upsert, task_complete, reminder_set, task_schedule,
+  important_date_set, important_dates_get for anything task shaped, time
+  shaped, or an annual date. these are safe to just do.
 - the bridge may include recalled memory directly. use it only when relevant.
   if the user corrects one, call memory_correct with its id. use
   memory_feedback when relevance or an error is explicit, not as a guess.

@@ -26,6 +26,7 @@ from .jobs import JobRunner
 from .memory_graph import MemoryActions, MemoryGraph
 from .memory_learning import MemoryLearningService
 from .reminders import ReminderStore
+from .important_dates import ImportantDateStore
 from .tasks import UNSET, TaskStore
 from .vault import VaultImporter, VaultProjector
 from .people import PeopleService
@@ -393,6 +394,33 @@ def build_parser() -> argparse.ArgumentParser:
     reminder_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
     reminder_destination.add_argument("--destination", help="explicit delivery target, e.g. telegram:20")
     reminder_set.add_argument("--task-id", help="link to an existing task instead of creating a new one")
+    important_date = subcommands.add_parser(
+        "important-date-set",
+        help="record a birthday or other annual date with a yearly reminder",
+    )
+    important_date.add_argument("label")
+    important_date.add_argument("--month", type=int, required=True)
+    important_date.add_argument("--day", type=int, required=True)
+    important_date.add_argument(
+        "--kind",
+        choices=("birthday", "anniversary", "other"),
+        default="birthday",
+    )
+    important_date.add_argument("--year", type=int, help="optional birth/start year for 'turns N'")
+    important_date.add_argument("--timezone", required=True, help="IANA timezone, e.g. America/New_York")
+    important_date_destination = important_date.add_mutually_exclusive_group(required=True)
+    important_date_destination.add_argument("--chat-id", type=int)
+    important_date_destination.add_argument("--destination")
+    important_dates_list = subcommands.add_parser(
+        "important-dates",
+        help="list upcoming birthdays and important dates",
+    )
+    important_dates_list.add_argument(
+        "--within-days",
+        type=int,
+        default=7,
+        help="weekly window in days (default 7; use a large value to list all soon)",
+    )
     self_node = subcommands.add_parser("memory-self", help="create Alfred's one owner identity")
     self_node.add_argument("--label", required=True)
     entity = subcommands.add_parser("memory-entity", help="create a confirmed graph entity")
@@ -1009,6 +1037,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ),
                 )
         print(job.model_dump_json())
+        return 0
+    if args.command == "important-date-set":
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                recorded = ImportantDateStore.record(
+                    connection,
+                    label=args.label,
+                    month=args.month,
+                    day=args.day,
+                    kind=args.kind,
+                    year=args.year,
+                    destination=args.destination or f"telegram:{args.chat_id}",
+                    timezone_name=args.timezone,
+                )
+        print(recorded.model_dump_json())
+        return 0
+    if args.command == "important-dates":
+        dates = ImportantDateStore.upcoming(database, within_days=args.within_days)
+        print(json.dumps([item.model_dump(mode="json") for item in dates]))
         return 0
     if args.command == "memory-embed-backfill":
         provider = OllamaEmbeddingProvider(model_name=args.model, base_url=args.base_url)

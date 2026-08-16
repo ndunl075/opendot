@@ -58,10 +58,10 @@ _SOCIAL_GREETING = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_WORK_TERMS = re.compile(
-    r"\b(?:agenda|assignment|bedtime|calendar|canvas|class|connector|course|deadline|due|"
-    r"email|gmail|github|health|inbox|issue|lock[\s-]?in|mail|meeting|memory|note|pull request|"
-    r"remind(?:er|ing|s)?|repo|schedule|search the web|slack|task|to-?do|"
-    r"wake(?:\s+me)?\s*up|wake-up|web search|workout)\b",
+    r"\b(?:agenda|anniversary|assignment|bedtime|birthday|calendar|canvas|class|connector|"
+    r"course|deadline|due|email|gmail|github|health|inbox|issue|lock[\s-]?in|mail|meeting|"
+    r"memory|note|pull request|remind(?:er|ing|s)?|repo|schedule|search the web|slack|task|"
+    r"to-?do|wake(?:\s+me)?\s*up|wake-up|web search|workout)\b",
     re.IGNORECASE,
 )
 
@@ -138,6 +138,15 @@ _DAILY_ROUTINE_TERMS = re.compile(
     re.IGNORECASE,
 )
 
+_IMPORTANT_DATE_TERMS = re.compile(
+    r"\b(?:"
+    r"birthday|birthdays|anniversary|anniversaries|"
+    r"important date|important dates|"
+    r"turns \d+"
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 def wants_scheduling(text: str) -> bool:
     """True when the request is "do something later and report back".
@@ -160,6 +169,7 @@ _TOOL_PRIORITY = (
     "message_draft",
     "message_send_propose",
     "github_issue_propose",
+    "important_date_set",
     "reminder_set",
     "task_upsert",
     "task_complete",
@@ -167,6 +177,7 @@ _TOOL_PRIORITY = (
     "memory_correct",
     "memory_feedback",
     "forget",
+    "important_dates_get",
     "agenda_get",
     "brief_get",
     "memory_search",
@@ -196,6 +207,9 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
 
     if _DAILY_ROUTINE_TERMS.search(topic_text):
         selected.update({"reminder_set", "task_upsert"})
+
+    if _IMPORTANT_DATE_TERMS.search(topic_text):
+        selected.update({"important_date_set", "important_dates_get", "brief_get"})
 
     if _TASK_TERMS.search(topic_text) or _DAY_PLANNING_TERMS.search(topic_text):
         selected.update({"agenda_get", "brief_get"})
@@ -260,6 +274,8 @@ def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool
         return False
     # Scheduling needs a tool, and the casual lane has none.
     if wants_scheduling(request):
+        return False
+    if _IMPORTANT_DATE_TERMS.search(request):
         return False
     # Short follow-ups inherit a recent work topic ("why?", "yeah do that"),
     # while a new substantive message starts its own conversational turn.

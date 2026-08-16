@@ -37,6 +37,7 @@ from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
 from .http_auth import generate_token as generate_http_token
+from .important_dates import ImportantDateStore
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
@@ -69,6 +70,8 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "task_complete",
         "reminder_set",
         "task_schedule",
+        "important_date_set",
+        "important_dates_get",
     }
 )
 
@@ -430,6 +433,56 @@ def create_server(
                     ),
                 )
         return job.model_dump(mode="json")
+
+    @alfred_tool(destructive=False)
+    def important_date_set(
+        label: str,
+        month: int,
+        day: int,
+        chat_id: int,
+        timezone: str,
+        kind: str = "birthday",
+        year: int | None = None,
+    ) -> dict:
+        """Remember a birthday or other annual date and remind on that day each year.
+
+        Stored as an ordinary task (next occurrence as due_at) plus an annual
+        reminder job — not a separate calendar. The morning brief and weekly
+        window surface dates in the next seven days under Birthdays & dates.
+        ``timezone`` is an IANA name so the local morning of the date survives
+        daylight saving. ``year`` is optional and only used to say "turns N".
+        """
+        policy.require_write(client_id, "important_date_set")
+        if kind not in {"birthday", "anniversary", "other"}:
+            raise ValueError("kind must be birthday, anniversary, or other")
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                recorded = ImportantDateStore.record(
+                    connection,
+                    label=label,
+                    month=month,
+                    day=day,
+                    kind=kind,  # type: ignore[arg-type]
+                    year=year,
+                    chat_id=chat_id,
+                    timezone_name=timezone,
+                )
+        return recorded.model_dump(mode="json")
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def important_dates_get(within_days: int = 7) -> list[dict]:
+        """List upcoming birthdays and important dates inside the weekly window.
+
+        Defaults to seven days so a "what's coming up this week" question and
+        the morning brief share the same horizon. Pass a larger window to look
+        further ahead; pass 0 for only dates still later today.
+        """
+        policy.require_read(client_id, "important_dates_get")
+        return [
+            item.model_dump(mode="json")
+            for item in ImportantDateStore.upcoming(database, within_days=within_days)
+        ]
 
     @alfred_tool(destructive=False)
     def task_schedule(

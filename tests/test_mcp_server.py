@@ -468,6 +468,31 @@ def test_reminder_set_can_repeat_daily_at_a_local_wall_clock(tmp_path: Path) -> 
     }
 
 
+def test_important_date_set_records_an_annual_birthday(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"important_date_set", "important_dates_get"})
+    server = create_server(database_path)
+
+    recorded = _call(
+        server,
+        "important_date_set",
+        {
+            "label": "Mom",
+            "month": 8,
+            "day": 20,
+            "year": 1970,
+            "chat_id": 20,
+            "timezone": "UTC",
+            "kind": "birthday",
+        },
+    )
+    upcoming = _call(server, "important_dates_get", {"within_days": 30})
+
+    assert recorded["label"] == "Mom"
+    assert recorded["kind"] == "birthday"
+    assert any(item["label"] == "Mom" for item in upcoming)
+
+
 class _FakeCalendarClient:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -645,6 +670,7 @@ def test_reads_are_marked_read_only_and_writes_are_not(tmp_path: Path) -> None:
         "brief_get",
         "connector_status",
         "connector_records_get",
+        "important_dates_get",
     }
 
     for name, annotation in annotations.items():

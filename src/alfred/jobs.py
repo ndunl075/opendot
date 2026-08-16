@@ -12,6 +12,7 @@ from .brief_schedule import next_daily_occurrence
 from .briefing import BriefingService
 from .db import Database
 from .events import EventStore
+from .important_dates import ImportantDateStore
 from .outbox import Outbox
 
 
@@ -59,7 +60,18 @@ class JobRunner:
                         # Wake-up / bedtime / study lock-in are just daily
                         # reminders: same delivery path as a one-shot, then
                         # the wall-clock schedule advances one day.
-                        if schedule.get("daily"):
+                        if schedule.get("annual"):
+                            # Birthdays and important dates: deliver, then roll
+                            # the reminder and its linked task to next year.
+                            next_run_at = ImportantDateStore.advance_after_delivery(
+                                connection,
+                                job_id=job["id"],
+                                schedule=schedule,
+                                payload=payload,
+                                after=run_at,
+                            ).isoformat()
+                            state = "active"
+                        elif schedule.get("daily"):
                             next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                             state = "active"
                         else:

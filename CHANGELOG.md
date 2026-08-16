@@ -29,6 +29,12 @@ only bumps the minor version — see RELEASING.md).
   IANA timezone so wake-up, bedtime, and study lock-in requests keep their
   local wall-clock hour across daylight saving. One-shot reminders are
   unchanged.
+- Birthdays and important dates over the existing task + reminder tables:
+  `important_date_set` / `important_dates_get` (MCP) and
+  `alfred important-date-set` / `alfred important-dates`. Each date is an
+  open task whose due date is the next occurrence, plus an annual reminder
+  that rolls forward after delivery. The morning brief surfaces the next
+  seven days under Birthdays & dates (the weekly digest window).
 - Telegram answers now include explicit helpful/missing/wrong context buttons.
   Feedback stores only source/freshness/opaque-record provenance, is paired to
   the original sender, cannot authorize actions, and has bounded influence on

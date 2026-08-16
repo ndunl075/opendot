@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from .academic_dedup import academic_item_signature
 from .audit import AuditEvent, AuditLog
 from .db import Database
+from .important_dates import ImportantDateStore, annual_task_ids
 from .models import TextGenerationProvider
 
 
@@ -31,6 +32,7 @@ class MorningBrief(BaseModel):
     missing_assignments: list[BriefItem] = []
     calendar_today: list[BriefItem] = []
     github_notifications: list[BriefItem] = []
+    important_dates: list[BriefItem] = []
     scheduled_at: datetime | None = None
     conflicts: list[str] = []
     source_freshness: dict[str, str] = {}
@@ -50,6 +52,7 @@ class MorningBrief(BaseModel):
             ("Overdue", self.overdue),
             ("Due today", self.due_today),
             ("Next 7 days", self.upcoming),
+            ("Birthdays & dates", self.important_dates),
             ("Canvas missing", self.missing_assignments),
             ("Today's calendar", self.calendar_today),
             ("GitHub notifications", self.github_notifications),
@@ -94,7 +97,7 @@ class BriefingService:
         self.database.migrate()
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT title, due_at FROM tasks WHERE state = 'open' ORDER BY due_at IS NULL, due_at, created_at"
+                "SELECT id, title, due_at FROM tasks WHERE state = 'open' ORDER BY due_at IS NULL, due_at, created_at"
             ).fetchall()
             canvas_rows = connection.execute(
                 """
@@ -132,9 +135,39 @@ class BriefingService:
             source_freshness={str(row["connector"]): str(row["last_success_at"]) for row in freshness_rows},
         )
         end_of_window = generated_at.date() + timedelta(days=7)
+        date_task_ids = annual_task_ids(self.database)
+        for item in ImportantDateStore.upcoming(
+            self.database, within_days=7, now=generated_at.astimezone(UTC)
+        ):
+            # Prefer the reminder wording (includes "turns N" when known) over
+            # the bare task title so the weekly window reads like a digest.
+            title = item.label
+            if item.kind == "birthday":
+                title = (
+                    f"{item.label}'s birthday (turns {item.turns})"
+                    if item.turns is not None
+                    else f"{item.label}'s birthday"
+                )
+            elif item.kind == "anniversary":
+                title = (
+                    f"{item.label} anniversary ({item.turns} years)"
+                    if item.turns is not None
+                    else f"{item.label} anniversary"
+                )
+            brief.important_dates.append(
+                BriefItem(
+                    title=title,
+                    due_at=item.next_at.astimezone(timezone),
+                    source=item.kind.replace("_", " ").title(),
+                )
+            )
         canvas_signatures: set[tuple[str, int]] = set()
         for row in rows:
             due_at = datetime.fromisoformat(row["due_at"]).astimezone(timezone) if row["due_at"] else None
+            # Annual dates already appear under Birthdays & dates; keep them
+            # out of the generic task buckets so a birthday is not also homework.
+            if row["id"] in date_task_ids:
+                continue
             item = BriefItem(title=row["title"], due_at=due_at)
             if due_at is None:
                 brief.no_due_date.append(item)
@@ -204,6 +237,7 @@ class BriefingService:
             brief.overdue,
             brief.due_today,
             brief.upcoming,
+            brief.important_dates,
             brief.missing_assignments,
             brief.calendar_today,
             brief.github_notifications,
