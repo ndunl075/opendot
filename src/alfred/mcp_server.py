@@ -15,7 +15,7 @@ import argparse
 import inspect
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Sequence, cast
@@ -43,6 +43,7 @@ from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
 from .policy import ApprovalService, PolicyError, PolicyStore
+from .nags import NagStore
 from .pull_requests import PullRequestService
 from .reminders import ReminderStore
 from .github import GitHubClient
@@ -74,6 +75,7 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "task_upsert",
         "task_complete",
         "reminder_set",
+        "nag_until_done",
         "task_schedule",
         "important_date_set",
         "important_dates_get",
@@ -482,6 +484,55 @@ def create_server(
                     idempotency_key=(
                         f"mcp-reminder:{client_id}:{resolved_task_id}:{parsed_run_at.isoformat()}"
                         + (f":daily:{timezone or ''}" if daily else "")
+                    ),
+                )
+        return job.model_dump(mode="json")
+
+    @alfred_tool(destructive=False)
+    def nag_until_done(
+        text: str,
+        chat_id: int,
+        interval_hours: float = 24.0,
+        max_attempts: int = 5,
+        task_id: str | None = None,
+        first_run_at: str | None = None,
+    ) -> dict:
+        """Repeat a reminder until the linked task is completed or attempts run out.
+
+        Each firing re-reads task state, so completing the task anywhere silences
+        future nags. The final attempt is labeled explicitly as the last reminder.
+        """
+        policy.require_write(client_id, "nag_until_done")
+        if first_run_at is None:
+            run_at = datetime.now(UTC) + timedelta(hours=interval_hours)
+        else:
+            run_at = datetime.fromisoformat(first_run_at)
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                if task_id is None:
+                    event = EventStore.append(
+                        connection,
+                        source="mcp",
+                        external_id=f"nag:{client_id}:{uuid4()}",
+                        occurred_at=datetime.now(UTC),
+                        content=text,
+                        metadata={"client": client_id},
+                    )
+                    task = TaskStore.upsert(connection, title=text, source_event_id=event.id)
+                    resolved_task_id = task.id
+                else:
+                    resolved_task_id = task_id
+                job = NagStore.create(
+                    connection,
+                    run_at=run_at,
+                    task_id=resolved_task_id,
+                    chat_id=chat_id,
+                    text=text,
+                    interval_hours=interval_hours,
+                    max_attempts=max_attempts,
+                    idempotency_key=(
+                        f"mcp-nag:{client_id}:{resolved_task_id}:{interval_hours}:{max_attempts}"
                     ),
                 )
         return job.model_dump(mode="json")

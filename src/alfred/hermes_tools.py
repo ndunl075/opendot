@@ -18,6 +18,13 @@ _TASK_COMPLETE_TERMS = re.compile(
     r"\b(?:complete|completed|done|finish|finished|mark off)\b", re.IGNORECASE
 )
 _REMINDER_TERMS = re.compile(r"\bremind(?:er|ing|s)?\b", re.IGNORECASE)
+_NAG_TERMS = re.compile(
+    r"\b(?:"
+    r"keep reminding(?:\s+me)?|nag(?:\s+me)?|"
+    r"until\s+(?:I(?:\s+(?:do|finish|complete|done))?|done)"
+    r")\b",
+    re.IGNORECASE,
+)
 _CALENDAR_TERMS = re.compile(
     r"\b(?:agenda|appointment|availability|available|calendar|event|free|meeting|schedule)\b",
     re.IGNORECASE,
@@ -79,7 +86,7 @@ _SOCIAL_GREETING = re.compile(
 _EXPLICIT_WORK_TERMS = re.compile(
     r"\b(?:agenda|anniversary|assignment|bedtime|birthday|calendar|canvas|class|connector|"
     r"course|deadline|due|email|gmail|github|health|inbox|issue|lock[\s-]?in|mail|meeting|"
-    r"memory|note|pull request|remind(?:er|ing|s)?|repo|schedule|search the web|slack|task|"
+    r"memory|nag|note|pull request|remind(?:er|ing|s)?|repo|schedule|search the web|slack|task|"
     r"to-?do|wake(?:\s+me)?\s*up|wake-up|web search|workout)\b",
     re.IGNORECASE,
 )
@@ -190,6 +197,7 @@ _TOOL_PRIORITY = (
     "github_issue_propose",
     "important_date_set",
     "reminder_set",
+    "nag_until_done",
     "task_upsert",
     "task_complete",
     "remember",
@@ -232,6 +240,9 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
 
     if _IMPORTANT_DATE_TERMS.search(topic_text):
         selected.update({"important_date_set", "important_dates_get", "brief_get"})
+
+    if _NAG_TERMS.search(topic_text):
+        selected.update({"nag_until_done", "task_upsert", "task_complete"})
 
     if _TASK_TERMS.search(topic_text) or _DAY_PLANNING_TERMS.search(topic_text):
         selected.update({"agenda_get", "brief_get"})

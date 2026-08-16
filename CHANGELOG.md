@@ -24,6 +24,12 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Nag-until-done reminders on the job runner: `nag_until_done` (MCP) and
+  `alfred nag-until-done` repeat on an interval, re-check linked task state on
+  every fire, stop silently when the task is completed anywhere, and deliver an
+  explicit final message on the last attempt (hard-capped at `max_attempts`).
+  Hermes tool selection routes "keep reminding", "nag me", and "until done"
+  phrasing to the new tool.
 - Daily fixed-time reminders on the existing job machinery: `reminder_set`
   (MCP) and `alfred reminder-set` accept `--daily` / `daily=true` with an
   IANA timezone so wake-up, bedtime, and study lock-in requests keep their

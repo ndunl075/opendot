@@ -13,7 +13,9 @@ from .briefing import BriefingService
 from .db import Database
 from .events import EventStore
 from .important_dates import ImportantDateStore
+from .nags import NagStore
 from .outbox import Outbox
+from .tasks import TaskStore
 
 
 class ExecutedJob(BaseModel):
@@ -152,6 +154,53 @@ class JobRunner:
                         )
                         executed.append(ExecutedJob(id=job["id"], outbox_id=None, late=late))
                         continue
+                    elif job["kind"] == "nag":
+                        schedule = json.loads(job["schedule_json"])
+                        interval_hours = float(schedule["interval_hours"])
+                        attempt = int(payload["attempt"])
+                        max_attempts = int(payload["max_attempts"])
+                        task = TaskStore.get(connection, payload["task_id"])
+                        if task is None or task.state != "open":
+                            connection.execute(
+                                """
+                                UPDATE jobs
+                                SET state = 'completed', next_run_at = NULL, updated_at = ?
+                                WHERE id = ? AND state = 'active'
+                                """,
+                                (run_at.isoformat(), job["id"]),
+                            )
+                            AuditLog.append_in_transaction(
+                                connection,
+                                AuditEvent(
+                                    actor="system:scheduler",
+                                    client="jobs",
+                                    tool="nag_silence",
+                                    outcome="task_closed",
+                                    arguments={"job_id": job["id"], "task_id": payload["task_id"]},
+                                    result={"late": late},
+                                    correlation_id=job["id"],
+                                ),
+                            )
+                            executed.append(ExecutedJob(id=job["id"], outbox_id=None, late=late))
+                            continue
+                        destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
+                        if attempt >= max_attempts:
+                            text = f"Last reminder ({attempt} of {max_attempts}): {payload['text']}"
+                            next_run_at = None
+                            state = "completed"
+                            updated_payload = payload
+                            audit_tool = "nag_deliver_final"
+                        else:
+                            prefix = (
+                                f"Late reminder (scheduled {scheduled_at.isoformat()}): "
+                                if late
+                                else "Reminder: "
+                            )
+                            text = f"{prefix}{payload['text']}"
+                            next_run_at = NagStore.next_run_at(after=run_at, interval_hours=interval_hours).isoformat()
+                            state = "active"
+                            updated_payload = {**payload, "attempt": attempt + 1}
+                            audit_tool = "nag_deliver"
                     else:
                         continue
                     outbox = Outbox.enqueue(
@@ -164,17 +213,31 @@ class JobRunner:
                     connection.execute(
                         """
                         UPDATE jobs
-                        SET state = ?, next_run_at = ?, updated_at = ?
+                        SET state = ?, next_run_at = ?, payload_json = ?, updated_at = ?
                         WHERE id = ? AND state = 'active'
                         """,
-                        (state, next_run_at, run_at.isoformat(), job["id"]),
+                        (
+                            state,
+                            next_run_at,
+                            json.dumps(updated_payload, sort_keys=True, separators=(",", ":"))
+                            if job["kind"] == "nag"
+                            else job["payload_json"],
+                            run_at.isoformat(),
+                            job["id"],
+                        ),
                     )
+                    if job["kind"] == "nag":
+                        deliver_tool = audit_tool
+                    elif job["kind"] in {"morning_brief", "telegram_morning_brief"}:
+                        deliver_tool = "morning_brief_deliver"
+                    else:
+                        deliver_tool = "reminder_deliver"
                     AuditLog.append_in_transaction(
                         connection,
                         AuditEvent(
                             actor="system:scheduler",
                             client="jobs",
-                            tool="morning_brief_deliver" if job["kind"] in {"morning_brief", "telegram_morning_brief"} else "reminder_deliver",
+                            tool=deliver_tool,
                             outcome="outbox_enqueued",
                             arguments={"job_id": job["id"], "scheduled_at": scheduled_at.isoformat()},
                             result={"outbox_id": outbox.id, "late": late},

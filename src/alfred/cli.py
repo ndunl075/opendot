@@ -26,6 +26,7 @@ from .events import EventStore
 from .jobs import JobRunner
 from .memory_graph import MemoryActions, MemoryGraph
 from .memory_learning import MemoryLearningService
+from .nags import NagStore
 from .reminders import ReminderStore
 from .important_dates import ImportantDateStore
 from .tasks import UNSET, TaskStore
@@ -405,6 +406,21 @@ def build_parser() -> argparse.ArgumentParser:
     reminder_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
     reminder_destination.add_argument("--destination", help="explicit delivery target, e.g. telegram:20")
     reminder_set.add_argument("--task-id", help="link to an existing task instead of creating a new one")
+    nag_until_done = subcommands.add_parser(
+        "nag-until-done",
+        help="repeat a reminder until a task is completed or attempts run out",
+    )
+    nag_until_done.add_argument("text")
+    nag_until_done.add_argument("--interval-hours", type=float, default=24.0)
+    nag_until_done.add_argument("--max-attempts", type=int, default=5)
+    nag_until_done.add_argument(
+        "--first-run-at",
+        help="ISO-8601 time with timezone for the first nag (defaults to one interval from now)",
+    )
+    nag_destination = nag_until_done.add_mutually_exclusive_group(required=True)
+    nag_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
+    nag_destination.add_argument("--destination", help="explicit delivery target, e.g. telegram:20")
+    nag_until_done.add_argument("--task-id", help="link to an existing task instead of creating a new one")
     important_date = subcommands.add_parser(
         "important-date-set",
         help="record a birthday or other annual date with a yearly reminder",
@@ -1084,6 +1100,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                     idempotency_key=(
                         f"reminder:{task_id}:{run_at.isoformat()}"
                         + (f":daily:{args.timezone or ''}" if args.daily else "")
+                    ),
+                )
+        print(job.model_dump_json())
+        return 0
+    if args.command == "nag-until-done":
+        if args.first_run_at is None:
+            run_at = datetime.now(UTC) + timedelta(hours=args.interval_hours)
+        else:
+            run_at = _parse_timestamp(args.first_run_at)
+        database.migrate()
+        with database.connect() as connection:
+            with database.transaction(connection):
+                if args.task_id is None:
+                    event = EventStore.append(
+                        connection,
+                        source="cli",
+                        external_id=f"nag:{uuid4()}",
+                        occurred_at=datetime.now(UTC),
+                        content=args.text,
+                        metadata={},
+                    )
+                    task = TaskStore.upsert(connection, title=args.text, source_event_id=event.id)
+                    task_id = task.id
+                else:
+                    task_id = args.task_id
+                job = NagStore.create(
+                    connection,
+                    run_at=run_at,
+                    task_id=task_id,
+                    destination=args.destination or f"telegram:{args.chat_id}",
+                    text=args.text,
+                    interval_hours=args.interval_hours,
+                    max_attempts=args.max_attempts,
+                    idempotency_key=(
+                        f"nag:{task_id}:{args.interval_hours}:{args.max_attempts}:{run_at.isoformat()}"
                     ),
                 )
         print(job.model_dump_json())

@@ -468,6 +468,33 @@ def test_reminder_set_can_repeat_daily_at_a_local_wall_clock(tmp_path: Path) -> 
     }
 
 
+def test_nag_until_done_creates_its_own_task_when_none_is_given(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"nag_until_done"})
+    server = create_server(database_path)
+
+    job = _call(
+        server,
+        "nag_until_done",
+        {
+            "text": "Finish the draft",
+            "chat_id": 20,
+            "interval_hours": 2,
+            "max_attempts": 4,
+            "first_run_at": "2026-08-15T09:00:00-04:00",
+        },
+    )
+
+    assert job["max_attempts"] == 4
+    with Database(database_path).connect() as connection:
+        row = connection.execute("SELECT title, state FROM tasks WHERE id = ?", (job["task_id"],)).fetchone()
+        schedule = json.loads(
+            connection.execute("SELECT schedule_json FROM jobs WHERE id = ?", (job["id"],)).fetchone()[0]
+        )
+    assert (row["title"], row["state"]) == ("Finish the draft", "open")
+    assert schedule == {"interval_hours": 2.0}
+
+
 def test_important_date_set_records_an_annual_birthday(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     _grant(database_path, allowed_tools={"important_date_set", "important_dates_get"})
@@ -703,6 +730,7 @@ def test_a_replayable_action_is_marked_idempotent(tmp_path: Path) -> None:
     # Each of these records something new every call.
     assert annotations["remember"].idempotentHint is False
     assert annotations["reminder_set"].idempotentHint is False
+    assert annotations["nag_until_done"].idempotentHint is False
 
 
 def test_read_only_tools_leave_destructive_unstated(tmp_path: Path) -> None:
