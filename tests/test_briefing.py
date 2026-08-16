@@ -246,3 +246,66 @@ def test_write_brief_falls_back_to_the_deterministic_render_on_a_model_failure(t
     assert row["tool"] == "brief_llm_pass"
     assert row["outcome"] == "error"
     assert "Ollama is not running" in row["result_json"]
+
+
+def test_morning_brief_includes_last_night_sleep_from_google_health(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    payload = {
+        "data_type": "sleep",
+        "raw": {
+            "interval": {
+                "startTime": "2026-08-13T23:00:00Z",
+                "endTime": "2026-08-14T06:30:00Z",
+            },
+            "sleep": {"stage": "deep"},
+        },
+    }
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (
+                    connector, account, record_type, record_id,
+                    payload_json, observed_at, active
+                ) VALUES ('google_health', 'self', 'sleep', 'sleep:1', ?, '2026-08-14T07:00:00+00:00', 1)
+                """,
+                (json.dumps(payload),),
+            )
+
+    brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    assert brief.sleep_summary == "7h 30m last night — Google Health (includes deep)"
+    assert "Sleep:\n- 7h 30m last night — Google Health (includes deep)" in brief.render()
+
+
+def test_morning_brief_omits_sleep_when_google_health_has_no_night_data(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    # Daytime nap outside the evening→noon window must not invent "last night".
+    payload = {
+        "data_type": "sleep",
+        "raw": {
+            "interval": {
+                "startTime": "2026-08-13T14:00:00Z",
+                "endTime": "2026-08-13T15:00:00Z",
+            },
+            "sleep": {"stage": "light"},
+        },
+    }
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (
+                    connector, account, record_type, record_id,
+                    payload_json, observed_at, active
+                ) VALUES ('google_health', 'self', 'sleep', 'sleep:nap', ?, '2026-08-14T07:00:00+00:00', 1)
+                """,
+                (json.dumps(payload),),
+            )
+
+    brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    assert brief.sleep_summary is None
+    assert "Sleep:" not in brief.render()

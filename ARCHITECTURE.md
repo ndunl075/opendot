@@ -414,7 +414,7 @@ Additional invariants:
 
 Canvas starts with an institution-issued personal token only for the owner's private installation if school policy permits it. A distributed app must use institution-approved OAuth; [Canvas explicitly disallows](https://developerdocs.instructure.com/services/canvas/oauth2/file.oauth) asking other users to paste manually generated tokens. Store assignments and missing-submission state, not grades or course files unless requested.
 
-The morning brief gathers data without an LLM, ranks due/overdue items using timezone-aware rules, detects calendar conflicts, and can then ask a local model to write a short brief. It reports per-connector freshness and includes available Calendar, Canvas, or GitHub links. Optional sleep context remains unbuilt pending a real Google Health smoke test.
+The morning brief gathers data without an LLM, ranks due/overdue items using timezone-aware rules, detects calendar conflicts, and can then ask a local model to write a short brief. It reports per-connector freshness and includes available Calendar, Canvas, or GitHub links. Optional sleep context from Google Health remains fixture-covered and is a no-op when no sleep records overlap last night; a live wearable-linked smoke test is still pending.
 
 ## 10. Build slices
 

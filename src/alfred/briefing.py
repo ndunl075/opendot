@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -33,6 +33,8 @@ class MorningBrief(BaseModel):
     calendar_today: list[BriefItem] = []
     github_notifications: list[BriefItem] = []
     important_dates: list[BriefItem] = []
+    #: One-line last-night sleep summary from Google Health; None when unknown.
+    sleep_summary: str | None = None
     scheduled_at: datetime | None = None
     conflicts: list[str] = []
     source_freshness: dict[str, str] = {}
@@ -47,6 +49,8 @@ class MorningBrief(BaseModel):
             lines.append(f"Freshness: {source} checked {checked_at}.")
         if self.scheduled_at is not None:
             lines.append(f"Note: delivered late (scheduled {self.scheduled_at.isoformat()}, sent after a missed run).")
+        if self.sleep_summary:
+            lines.append(f"\nSleep:\n- {self.sleep_summary}")
         empty_length = len(lines)
         for heading, items in (
             ("Overdue", self.overdue),
@@ -119,6 +123,13 @@ class BriefingService:
                 WHERE connector = 'github' AND account = 'self' AND record_type = 'notification' AND active = 1
                 """
             ).fetchall()
+            sleep_rows = connection.execute(
+                """
+                SELECT payload_json FROM connector_records
+                WHERE connector = 'google_health' AND account = 'self'
+                  AND record_type = 'sleep' AND active = 1
+                """
+            ).fetchall()
             freshness_rows = connection.execute(
                 """
                 SELECT connector, MAX(last_success_at) AS last_success_at
@@ -132,6 +143,7 @@ class BriefingService:
             generated_at=generated_at,
             scheduled_at=scheduled_at.astimezone(timezone) if scheduled_at else None,
             overdue=[], due_today=[], upcoming=[], no_due_date=[],
+            sleep_summary=_sleep_summary_for_night(sleep_rows, generated_at),
             source_freshness={str(row["connector"]): str(row["last_success_at"]) for row in freshness_rows},
         )
         end_of_window = generated_at.date() + timedelta(days=7)
@@ -295,3 +307,65 @@ def _parse_optional_timestamp(value: object) -> datetime | None:
         return None
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _sleep_summary_for_night(rows: list[object], generated_at: datetime) -> str | None:
+    """Summarize last night's sleep from Google Health snapshots; None if unknown.
+
+    Uses the local evening-before through noon-of-brief window so a morning
+    brief at 08:00 picks up sleep that started the prior evening. Segments
+    without a positive duration are ignored. No rows / no overlap → omit.
+    """
+    timezone = generated_at.tzinfo or UTC
+    window_start = datetime.combine(
+        generated_at.date() - timedelta(days=1), time(18, 0), tzinfo=timezone
+    )
+    window_end = datetime.combine(generated_at.date(), time(12, 0), tzinfo=timezone)
+    total = timedelta()
+    stages: list[str] = []
+    for row in rows:
+        payload_json = row["payload_json"] if hasattr(row, "keys") else row[0]
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        raw = payload.get("raw") if isinstance(payload.get("raw"), dict) else payload
+        interval = raw.get("interval") if isinstance(raw.get("interval"), dict) else {}
+        start = _parse_optional_timestamp(interval.get("startTime"))
+        end = _parse_optional_timestamp(interval.get("endTime"))
+        if start is None or end is None:
+            continue
+        start = start.astimezone(timezone)
+        end = end.astimezone(timezone)
+        if end <= start:
+            continue
+        # Overlap with last night's window.
+        overlap_start = max(start, window_start)
+        overlap_end = min(end, window_end)
+        if overlap_end <= overlap_start:
+            continue
+        total += overlap_end - overlap_start
+        sleep = raw.get("sleep") if isinstance(raw.get("sleep"), dict) else {}
+        stage = sleep.get("stage") if isinstance(sleep, dict) else raw.get("stage")
+        if isinstance(stage, str) and stage.strip():
+            stages.append(stage.strip().lower())
+    if total <= timedelta():
+        return None
+    summary = f"{_format_duration(total)} last night — Google Health"
+    if stages:
+        # Prefer the longest-named common stage label without inventing quality.
+        dominant = max(set(stages), key=stages.count)
+        summary += f" (includes {dominant})"
+    return summary
+
+
+def _format_duration(value: timedelta) -> str:
+    total_minutes = int(value.total_seconds() // 60)
+    hours, minutes = divmod(total_minutes, 60)
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"

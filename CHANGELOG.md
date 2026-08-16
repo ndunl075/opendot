@@ -27,6 +27,10 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Morning brief optional sleep context from synced Google Health sleep
+  records: when last night's segments overlap the local evening→noon window,
+  the brief shows a duration line (and dominant stage when present). No sleep
+  data → section omitted (fixtures only until a live wearable smoke test).
 - Quiet hours for proactive deliveries: set `ALFRED_QUIET_HOURS_START` /
   `ALFRED_QUIET_HOURS_END` (HH:MM) and optional `ALFRED_QUIET_HOURS_TIMEZONE`
   (IANA). Job-backed outbox rows (reminders, briefs, nags) stay `pending`
