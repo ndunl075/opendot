@@ -438,6 +438,36 @@ def test_reminder_set_creates_its_own_task_when_none_is_given(tmp_path: Path) ->
     assert (row["title"], row["state"]) == ("Call advisor", "open")
 
 
+def test_reminder_set_can_repeat_daily_at_a_local_wall_clock(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"reminder_set"})
+    server = create_server(database_path)
+
+    job = _call(
+        server,
+        "reminder_set",
+        {
+            "text": "Wake up",
+            "run_at": "2026-08-15T07:00:00-04:00",
+            "chat_id": 20,
+            "daily": True,
+            "timezone": "America/New_York",
+        },
+    )
+
+    assert job["daily"] is True
+    with Database(database_path).connect() as connection:
+        schedule = json.loads(
+            connection.execute("SELECT schedule_json FROM jobs WHERE id = ?", (job["id"],)).fetchone()[0]
+        )
+    assert schedule == {
+        "daily": True,
+        "run_at": "2026-08-15T07:00:00-04:00",
+        "time": "07:00",
+        "timezone": "America/New_York",
+    }
+
+
 class _FakeCalendarClient:
     def __init__(self) -> None:
         self.calls: list[dict] = []

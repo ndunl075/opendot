@@ -19,9 +19,16 @@ only bumps the minor version — see RELEASING.md).
   raising that cap, fetching thousands of messages individually every sync
   cycle wasn't actually useful. Bounding to the most recent window (Gmail's
   own default ordering) fixes both.
+- Reminder routing no longer misses "reminding": `\bremind\b` never matched
+  that form, so "keep reminding me…" could fall into the toolless casual lane.
 
 ### Added
 
+- Daily fixed-time reminders on the existing job machinery: `reminder_set`
+  (MCP) and `alfred reminder-set` accept `--daily` / `daily=true` with an
+  IANA timezone so wake-up, bedtime, and study lock-in requests keep their
+  local wall-clock hour across daylight saving. One-shot reminders are
+  unchanged.
 - Telegram answers now include explicit helpful/missing/wrong context buttons.
   Feedback stores only source/freshness/opaque-record provenance, is paired to
   the original sender, cannot authorize actions, and has bounded influence on

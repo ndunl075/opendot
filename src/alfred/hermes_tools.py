@@ -17,7 +17,7 @@ _TASK_CREATE_TERMS = re.compile(
 _TASK_COMPLETE_TERMS = re.compile(
     r"\b(?:complete|completed|done|finish|finished|mark off)\b", re.IGNORECASE
 )
-_REMINDER_TERMS = re.compile(r"\b(?:remind|reminder)\b", re.IGNORECASE)
+_REMINDER_TERMS = re.compile(r"\bremind(?:er|ing|s)?\b", re.IGNORECASE)
 _CALENDAR_TERMS = re.compile(
     r"\b(?:agenda|appointment|calendar|event|meeting|schedule)\b", re.IGNORECASE
 )
@@ -58,9 +58,10 @@ _SOCIAL_GREETING = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_WORK_TERMS = re.compile(
-    r"\b(?:agenda|assignment|calendar|canvas|class|connector|course|deadline|due|"
-    r"email|gmail|github|health|inbox|issue|mail|meeting|memory|note|pull request|"
-    r"remind|reminder|repo|schedule|search the web|slack|task|to-?do|web search|workout)\b",
+    r"\b(?:agenda|assignment|bedtime|calendar|canvas|class|connector|course|deadline|due|"
+    r"email|gmail|github|health|inbox|issue|lock[\s-]?in|mail|meeting|memory|note|pull request|"
+    r"remind(?:er|ing|s)?|repo|schedule|search the web|slack|task|to-?do|"
+    r"wake(?:\s+me)?\s*up|wake-up|web search|workout)\b",
     re.IGNORECASE,
 )
 
@@ -117,7 +118,23 @@ _NOTIFY_INTENT_TERMS = re.compile(
     r"\b(?:text|message|ping|dm)\s+me\b"
     r"|\b(?:let me know|tell me|hit me up|follow up|get back to me)\b"
     r"|\b(?:check|look|see|find|watch|recheck)\b"
-    r"|\bremind(?:er)?\b",
+    r"|\bremind(?:er|ing)?\b",
+    re.IGNORECASE,
+)
+
+# Fixed local-time routines: wake-up, bedtime, study lock-in. These are daily
+# reminders, not agent tasks -- the text already exists. Matching them here
+# keeps the capable lane and reminder_set available even when the message
+# never says "remind".
+_DAILY_ROUTINE_TERMS = re.compile(
+    r"\b(?:"
+    r"wake(?:\s+me)?\s*up|wake-up"
+    r"|bedtime|bed\s+time|go to (?:bed|sleep)"
+    r"|(?:study\s+)?lock[\s-]?in"
+    r"|every\s+(?:day|morning|night|evening)"
+    r"|each\s+(?:day|morning|night|evening)"
+    r"|daily\s+reminder"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -125,12 +142,12 @@ _NOTIFY_INTENT_TERMS = re.compile(
 def wants_scheduling(text: str) -> bool:
     """True when the request is "do something later and report back".
 
-    Either an explicit reminder word, or a future time paired with an intent
-    to be told the result. Both halves are required for the paired form so a
-    plain question about a time ("what's at 3pm?") is not mistaken for a
-    request to schedule something.
+    Either an explicit reminder word, a daily routine (wake/bedtime/lock-in),
+    or a future time paired with an intent to be told the result. Both halves
+    are required for the paired form so a plain question about a time
+    ("what's at 3pm?") is not mistaken for a request to schedule something.
     """
-    if _REMINDER_TERMS.search(text):
+    if _REMINDER_TERMS.search(text) or _DAILY_ROUTINE_TERMS.search(text):
         return True
     return bool(_FUTURE_TIME_TERMS.search(text) and _NOTIFY_INTENT_TERMS.search(text))
 
@@ -173,7 +190,12 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
         # task_schedule runs the work and reports back; reminder_set only
         # delivers text. Both are offered because "remind me to X" and "do X
         # and tell me" are different requests the model has to tell apart.
+        # Daily routines (wake-up, bedtime, study lock-in) use reminder_set
+        # with daily=true -- the message already exists.
         selected.update({"task_schedule", "reminder_set", "task_upsert"})
+
+    if _DAILY_ROUTINE_TERMS.search(topic_text):
+        selected.update({"reminder_set", "task_upsert"})
 
     if _TASK_TERMS.search(topic_text) or _DAY_PLANNING_TERMS.search(topic_text):
         selected.update({"agenda_get", "brief_get"})

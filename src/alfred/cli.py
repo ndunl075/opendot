@@ -380,6 +380,15 @@ def build_parser() -> argparse.ArgumentParser:
     reminder_set = subcommands.add_parser("reminder-set", help="schedule a local reminder")
     reminder_set.add_argument("text")
     reminder_set.add_argument("--run-at", required=True, help="ISO-8601 time with timezone")
+    reminder_set.add_argument(
+        "--daily",
+        action="store_true",
+        help="repeat every day at the same local wall-clock time (wake-up, bedtime, study lock-in)",
+    )
+    reminder_set.add_argument(
+        "--timezone",
+        help="IANA timezone required with --daily so the local hour survives daylight saving",
+    )
     reminder_destination = reminder_set.add_mutually_exclusive_group(required=True)
     reminder_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
     reminder_destination.add_argument("--destination", help="explicit delivery target, e.g. telegram:20")
@@ -992,7 +1001,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     task_id=task_id,
                     destination=args.destination or f"telegram:{args.chat_id}",
                     text=args.text,
-                    idempotency_key=f"reminder:{task_id}:{run_at.isoformat()}",
+                    daily=bool(args.daily),
+                    timezone_name=args.timezone,
+                    idempotency_key=(
+                        f"reminder:{task_id}:{run_at.isoformat()}"
+                        + (f":daily:{args.timezone or ''}" if args.daily else "")
+                    ),
                 )
         print(job.model_dump_json())
         return 0

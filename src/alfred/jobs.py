@@ -55,8 +55,16 @@ class JobRunner:
                         prefix = f"Late reminder (scheduled {scheduled_at.isoformat()}): " if late else "Reminder: "
                         text = f"{prefix}{payload['text']}"
                         destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
-                        next_run_at = None
-                        state = "completed"
+                        schedule = json.loads(job["schedule_json"])
+                        # Wake-up / bedtime / study lock-in are just daily
+                        # reminders: same delivery path as a one-shot, then
+                        # the wall-clock schedule advances one day.
+                        if schedule.get("daily"):
+                            next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
+                            state = "active"
+                        else:
+                            next_run_at = None
+                            state = "completed"
                     elif job["kind"] in {"morning_brief", "telegram_morning_brief"}:
                         schedule = json.loads(job["schedule_json"])
                         brief_service = BriefingService(self.database)

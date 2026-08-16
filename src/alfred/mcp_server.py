@@ -379,12 +379,24 @@ def create_server(
         return task.model_dump(mode="json")
 
     @alfred_tool(destructive=False)
-    def reminder_set(text: str, run_at: str, chat_id: int, task_id: str | None = None) -> dict:
+    def reminder_set(
+        text: str,
+        run_at: str,
+        chat_id: int,
+        task_id: str | None = None,
+        daily: bool = False,
+        timezone: str | None = None,
+    ) -> dict:
         """Schedule a Telegram reminder; chat_id must already be locally paired to receive it.
 
         Alfred's only delivery channel today is Telegram, so the caller must
         say which paired chat this goes to -- there is no channel-agnostic
         queue to defer that choice to.
+
+        ``daily`` repeats at the same local wall-clock time (wake-up, bedtime,
+        study lock-in). When ``daily`` is true, ``timezone`` must be an IANA
+        name such as America/New_York so the hour survives a daylight-saving
+        change.
         """
         policy.require_write(client_id, "reminder_set")
         parsed_run_at = datetime.fromisoformat(run_at)
@@ -410,7 +422,12 @@ def create_server(
                     task_id=resolved_task_id,
                     chat_id=chat_id,
                     text=text,
-                    idempotency_key=f"mcp-reminder:{client_id}:{resolved_task_id}:{parsed_run_at.isoformat()}",
+                    daily=daily,
+                    timezone_name=timezone,
+                    idempotency_key=(
+                        f"mcp-reminder:{client_id}:{resolved_task_id}:{parsed_run_at.isoformat()}"
+                        + (f":daily:{timezone or ''}" if daily else "")
+                    ),
                 )
         return job.model_dump(mode="json")
 
