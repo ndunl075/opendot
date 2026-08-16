@@ -30,6 +30,7 @@ from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
 from .action_executor import ActionExecutor
+from .availability import AvailabilityService
 from .gmail import GmailActions, GmailSendActions
 from .github import GitHubActions
 from .google_calendar import GoogleCalendarActions
@@ -74,6 +75,7 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "important_date_set",
         "important_dates_get",
         "threads_awaiting_reply",
+        "availability_get",
     }
 )
 
@@ -305,6 +307,24 @@ def create_server(
         """
         policy.require_read(client_id, "threads_awaiting_reply")
         return ThreadService(database).awaiting_reply().render()
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def availability_get(
+        days: int = 7,
+        timezone: str = "UTC",
+        min_minutes: int = 30,
+    ) -> str:
+        """Find free gaps in the synced Google Calendar over the next few days.
+
+        Timed events block the day; all-day events are listed as ambiguous
+        context rather than busy hours. Overlapping meetings merge before gaps
+        are computed. ``timezone`` is an IANA name; default working hours are
+        09:00–17:00 local.
+        """
+        policy.require_read(client_id, "availability_get")
+        return AvailabilityService(database).get(
+            days=days, timezone_name=timezone, min_minutes=min_minutes
+        ).render()
 
     @alfred_tool(read_only=True, idempotent=True)
     def connector_status() -> list[dict]:

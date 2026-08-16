@@ -11,6 +11,7 @@ from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Iterator, Sequence
 
+from .availability import AvailabilityService
 from .audit import AuditEvent, AuditLog
 from .academic_memory import AcademicMemoryService
 from .historical_memory import HistoricalMemoryService
@@ -368,6 +369,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_due.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     brief = subcommands.add_parser("brief", help="render the deterministic local morning brief")
     brief.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
+    availability = subcommands.add_parser(
+        "availability", help="find free gaps in the synced Google Calendar"
+    )
+    availability.add_argument("--days", type=int, default=7)
+    availability.add_argument("--timezone", default="UTC", help="IANA timezone, e.g. America/New_York")
+    availability.add_argument("--min-minutes", type=int, default=30)
+    availability.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     schedule_brief = subcommands.add_parser("schedule-brief", help="schedule one local daily morning brief")
     schedule_brief_destination = schedule_brief.add_mutually_exclusive_group(required=True)
     schedule_brief_destination.add_argument("--chat-id", type=int, help="paired Telegram chat ID (legacy shortcut)")
@@ -977,6 +985,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "brief":
         now = _parse_timestamp(args.now) if args.now else None
         print(BriefingService(database).morning_brief(now).render())
+        return 0
+    if args.command == "availability":
+        now = _parse_timestamp(args.now) if args.now else None
+        print(
+            AvailabilityService(database)
+            .get(
+                days=args.days,
+                timezone_name=args.timezone,
+                min_minutes=args.min_minutes,
+                now=now,
+            )
+            .render()
+        )
         return 0
     if args.command == "schedule-brief":
         try:

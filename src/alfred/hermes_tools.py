@@ -19,7 +19,8 @@ _TASK_COMPLETE_TERMS = re.compile(
 )
 _REMINDER_TERMS = re.compile(r"\bremind(?:er|ing|s)?\b", re.IGNORECASE)
 _CALENDAR_TERMS = re.compile(
-    r"\b(?:agenda|appointment|calendar|event|meeting|schedule)\b", re.IGNORECASE
+    r"\b(?:agenda|appointment|availability|available|calendar|event|free|meeting|schedule)\b",
+    re.IGNORECASE,
 )
 _CALENDAR_WRITE_TERMS = re.compile(
     r"\b(?:add|book|create|move|reschedule|schedule|set up)\b", re.IGNORECASE
@@ -189,6 +190,7 @@ _TOOL_PRIORITY = (
     "forget",
     "important_dates_get",
     "threads_awaiting_reply",
+    "availability_get",
     "agenda_get",
     "brief_get",
     "memory_search",
@@ -232,7 +234,7 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
             selected.update({"reminder_set", "task_upsert"})
 
     if _CALENDAR_TERMS.search(topic_text):
-        selected.update({"agenda_get", "brief_get", "connector_records_get"})
+        selected.update({"agenda_get", "brief_get", "connector_records_get", "availability_get"})
         if _CALENDAR_WRITE_TERMS.search(topic_text):
             selected.add("calendar_event_propose")
 

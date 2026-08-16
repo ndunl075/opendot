@@ -41,6 +41,9 @@ only bumps the minor version — see RELEASING.md).
   `threads_awaiting_reply` / `alfred threads-awaiting-reply` groups unread
   by thread and drops List-Unsubscribe newsletters that Gmail often labels
   CATEGORY_PERSONAL.
+- Calendar availability (`availability_get` / `alfred availability`):
+  interval-merge free gaps over synced timed events; all-day events are
+  listed as ambiguous context rather than busy hours.
 - Telegram answers now include explicit helpful/missing/wrong context buttons.
   Feedback stores only source/freshness/opaque-record provenance, is paired to
   the original sender, cannot authorize actions, and has bounded influence on
