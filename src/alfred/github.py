@@ -116,6 +116,34 @@ class GitHubClient:
             raise ValueError("GitHub returned an ambiguous PR-comment recovery result")
         return matches[0] if matches else None
 
+    def search_issues(self, query: str, *, per_page: int = 100) -> list[dict[str, Any]]:
+        """Run one GitHub issue/PR search query and return matching items."""
+        items: list[dict[str, Any]] = []
+        page = 1
+        for _ in range(10):
+            response = self._client.get(
+                "/search/issues",
+                params={
+                    "q": query,
+                    "per_page": per_page,
+                    "page": page,
+                    "sort": "updated",
+                    "order": "desc",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("GitHub search response must be an object")
+            batch = payload.get("items", [])
+            if not isinstance(batch, list):
+                raise ValueError("GitHub search items must be a list")
+            items.extend(item for item in batch if isinstance(item, dict))
+            if len(batch) < per_page:
+                return items
+            page += 1
+        raise ValueError("GitHub search pagination exceeded 10 pages")
+
     def _get_paginated(self, path: str, params: dict[str, Any] | None) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         next_url: str | None = path

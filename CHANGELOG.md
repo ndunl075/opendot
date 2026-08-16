@@ -44,6 +44,10 @@ only bumps the minor version — see RELEASING.md).
 - Calendar availability (`availability_get` / `alfred availability`):
   interval-merge free gaps over synced timed events; all-day events are
   listed as ambiguous context rather than busy hours.
+- Open GitHub pull-request watcher (`pull_requests_get` /
+  `alfred pull-requests`): live search snapshot of PRs you authored or were
+  asked to review, with stale marking when `updated_at` exceeds a threshold
+  (default 14 days). Deliberately not built on notifications sync.
 - Telegram answers now include explicit helpful/missing/wrong context buttons.
   Feedback stores only source/freshness/opaque-record provenance, is paired to
   the original sender, cannot authorize actions, and has bounded influence on

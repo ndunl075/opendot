@@ -45,6 +45,14 @@ _GITHUB_WRITE_TERMS = re.compile(
     r"\b(?:create|file|open|report)\b.*\bissue\b|\bissue\b.*\b(?:create|file|open|report)\b",
     re.IGNORECASE,
 )
+_PR_WATCH_TERMS = re.compile(
+    r"\b(?:"
+    r"open pull requests?|pull requests? awaiting|my pull requests?|my prs?|"
+    r"prs?(?:\s+open|\s+waiting|\s+need|\s+awaiting)?|"
+    r"review(?:s)?(?: requested)?|needs? (?:my )?review|waiting (?:on|for) (?:my )?review"
+    r")\b",
+    re.IGNORECASE,
+)
 _MEMORY_TERMS = re.compile(
     r"\b(?:forget|memory|memories|preference|profile|remember|you know about me)\b",
     re.IGNORECASE,
@@ -191,6 +199,7 @@ _TOOL_PRIORITY = (
     "important_dates_get",
     "threads_awaiting_reply",
     "availability_get",
+    "pull_requests_get",
     "agenda_get",
     "brief_get",
     "memory_search",
@@ -248,6 +257,10 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
 
     if _GITHUB_TERMS.search(topic_text) and _GITHUB_WRITE_TERMS.search(topic_text):
         selected.update({"github_issue_propose", "action_commit"})
+    elif _PR_WATCH_TERMS.search(topic_text) or (
+        _GITHUB_TERMS.search(topic_text) and re.search(r"\bopen\b", topic_text, re.IGNORECASE)
+    ):
+        selected.add("pull_requests_get")
 
     if _MEMORY_TERMS.search(topic_text):
         selected.update({"memory_search", "profile_get"})

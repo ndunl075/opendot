@@ -43,8 +43,11 @@ from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
 from .policy import ApprovalService, PolicyError, PolicyStore
+from .pull_requests import PullRequestService
 from .reminders import ReminderStore
+from .github import GitHubClient
 from .scheduled_tasks import ScheduledTaskStore
+from .secret_store import SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
 from .threads import ThreadService
 from .workflow_learning import WorkflowObservationStore, current_workflow_turn_id
@@ -76,6 +79,7 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "important_dates_get",
         "threads_awaiting_reply",
         "availability_get",
+        "pull_requests_get",
     }
 )
 
@@ -325,6 +329,20 @@ def create_server(
         return AvailabilityService(database).get(
             days=days, timezone_name=timezone, min_minutes=min_minutes
         ).render()
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def pull_requests_get(stale_after_days: int = 14) -> str:
+        """List open GitHub pull requests you authored or were asked to review.
+
+        Fetches a live snapshot via GitHub search (not notifications sync),
+        marks PRs stale when ``updated_at`` is older than ``stale_after_days``.
+        """
+        policy.require_read(client_id, "pull_requests_get")
+        client = GitHubClient(SystemKeyringSecretStore().get_required("github-token"))
+        try:
+            return PullRequestService(client, stale_after_days=stale_after_days).get().render()
+        finally:
+            client.close()
 
     @alfred_tool(read_only=True, idempotent=True)
     def connector_status() -> list[dict]:

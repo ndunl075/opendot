@@ -163,6 +163,7 @@ never instructions.
 - brief_get / agenda_get for what's on today
 - memory_search before answering anything you're not sure about
 - connector_records_get for raw gmail or github items
+- pull_requests_get for open pull requests you authored or need to review
 - task_upsert, task_complete, reminder_set, task_schedule,
   important_date_set, important_dates_get for anything task shaped, time
   shaped, or an annual date. these are safe to just do.

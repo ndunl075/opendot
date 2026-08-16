@@ -51,6 +51,7 @@ from .canvas_ical import (
 )
 from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
+from .pull_requests import PullRequestService
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_backfill import GmailClientMetadataAdapter, GmailThreadBackfill
 from .threads import ThreadService
@@ -681,6 +682,18 @@ def build_parser() -> argparse.ArgumentParser:
         "threads-awaiting-reply",
         help="list unread Gmail threads that look like they need a reply",
     )
+    pull_requests = subcommands.add_parser(
+        "pull-requests",
+        help="list open GitHub pull requests you authored or were asked to review",
+    )
+    pull_requests.add_argument(
+        "--stale-after-days",
+        type=int,
+        default=14,
+        help="mark PRs stale when updated more than this many days ago (default 14)",
+    )
+    pull_requests.add_argument("--secret-name", default="github-token")
+    pull_requests.add_argument("--now", help="ISO-8601 time for deterministic operation or tests")
     gmail_inbound_poll = subcommands.add_parser(
         "gmail-inbound-poll", help="turn 'Task:'/'Remind:' subject commands from allowed senders into local tasks"
     )
@@ -1435,6 +1448,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "threads-awaiting-reply":
         print(ThreadService(database).awaiting_reply().render())
+        return 0
+    if args.command == "pull-requests":
+        now = _parse_timestamp(args.now) if args.now else None
+        client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
+        try:
+            report = PullRequestService(
+                client, stale_after_days=args.stale_after_days
+            ).get(now=now)
+        finally:
+            client.close()
+        print(report.render())
         return 0
     if args.command == "gmail-inbound-poll":
         client = GmailClient(_google_access_token())
