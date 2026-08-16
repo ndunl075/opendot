@@ -27,6 +27,16 @@ _CALENDAR_WRITE_TERMS = re.compile(
 _MAIL_TERMS = re.compile(r"\b(?:email|gmail|inbox|mail|message|reply)\b", re.IGNORECASE)
 _MAIL_DRAFT_TERMS = re.compile(r"\b(?:compose|draft|reply|respond|write)\b", re.IGNORECASE)
 _MAIL_SEND_TERMS = re.compile(r"\b(?:send|email them|message them)\b", re.IGNORECASE)
+# Distinct from a plain inbox check: the bridge already prefetches unread mail,
+# so threads_awaiting_reply is only offered when the user asks for that report.
+_AWAITING_REPLY_TERMS = re.compile(
+    r"\b(?:"
+    r"awaiting(?:\s+my)?\s+reply|need(?:s)?\s+(?:a\s+)?reply|"
+    r"waiting\s+(?:on|for)\s+(?:my\s+)?reply|threads?\s+awaiting|"
+    r"what(?:'s| is)?\s+waiting|who(?:'s| is)?\s+waiting"
+    r")\b",
+    re.IGNORECASE,
+)
 _GITHUB_TERMS = re.compile(
     r"\b(?:github|issue|pull request|repo|repository)\b", re.IGNORECASE
 )
@@ -178,6 +188,7 @@ _TOOL_PRIORITY = (
     "memory_feedback",
     "forget",
     "important_dates_get",
+    "threads_awaiting_reply",
     "agenda_get",
     "brief_get",
     "memory_search",
@@ -226,6 +237,8 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
             selected.add("calendar_event_propose")
 
     if _MAIL_TERMS.search(topic_text):
+        if _AWAITING_REPLY_TERMS.search(topic_text):
+            selected.add("threads_awaiting_reply")
         if _MAIL_DRAFT_TERMS.search(topic_text):
             selected.add("message_draft")
         if _MAIL_SEND_TERMS.search(topic_text):

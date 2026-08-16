@@ -103,7 +103,12 @@ class GmailClient:
     def _get_message(self, message_id: str) -> dict[str, Any]:
         response = self._client.get(
             f"/users/me/messages/{message_id}",
-            params={"format": "metadata", "metadataHeaders": ["Subject", "From"]},
+            params={
+                "format": "metadata",
+                # List-Unsubscribe is metadata, not body: newsletters carry it
+                # even when Gmail's category labels call them CATEGORY_PERSONAL.
+                "metadataHeaders": ["Subject", "From", "List-Unsubscribe"],
+            },
         )
         response.raise_for_status()
         return response.json()
@@ -233,6 +238,11 @@ class GmailSync:
                         # layer omit Promotions/Social/Forums without asking a
                         # model to rediscover that from sender names every turn.
                         "label_ids": metadata["label_ids"],
+                        "thread_id": metadata["thread_id"],
+                        # Present when the message offers one-click bulk opt-out.
+                        # Stronger than CATEGORY_* for newsletter detection:
+                        # live mail showed most newsletters labeled PERSONAL.
+                        "list_unsubscribe": metadata["list_unsubscribe"],
                         "html_url": metadata["html_url"],
                     }
                 ConnectorRecordStore.replace_snapshot(
@@ -449,6 +459,8 @@ def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
         if isinstance(raw_label_ids, list)
         else []
     )
+    thread_id = item.get("threadId")
+    list_unsubscribe = headers.get("list-unsubscribe")
     return {
         "source": "gmail",
         # A Gmail message body never changes once received, so the ID alone is a stable key.
@@ -457,9 +469,11 @@ def _normalize_message(item: dict[str, Any]) -> dict[str, Any]:
         "content": subject,
         "metadata": {
             "message_id": message_id,
+            "thread_id": thread_id if isinstance(thread_id, str) and thread_id else None,
             "from": headers.get("from"),
             "snippet": snippet if isinstance(snippet, str) else None,
             "label_ids": label_ids,
+            "list_unsubscribe": list_unsubscribe if list_unsubscribe else None,
             "html_url": f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
         },
         "sensitivity": "personal",

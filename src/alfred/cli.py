@@ -51,6 +51,8 @@ from .canvas_ical import (
 from .google_health import GoogleHealthClient, GoogleHealthSync
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
+from .gmail_backfill import GmailClientMetadataAdapter, GmailThreadBackfill
+from .threads import ThreadService
 from .gmail_inbound import GmailInboundGateway
 from .hermes_bridge import HermesBridge, SubprocessAgentRunner
 from .evaluation import EvaluationService
@@ -656,6 +658,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_UNREAD_LIMIT,
         help="max unread messages to sync, most recent first; bounded so a large backlog doesn't mean thousands of API calls every cycle",
+    )
+    gmail_backfill = subcommands.add_parser(
+        "gmail-thread-backfill",
+        help="additive repair of unread rows missing thread_id / list_unsubscribe (never overwrites existing values)",
+    )
+    gmail_backfill.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="optional max rows to examine this run",
+    )
+    threads_report = subcommands.add_parser(
+        "threads-awaiting-reply",
+        help="list unread Gmail threads that look like they need a reply",
     )
     gmail_inbound_poll = subcommands.add_parser(
         "gmail-inbound-poll", help="turn 'Task:'/'Remind:' subject commands from allowed senders into local tasks"
@@ -1385,6 +1401,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             client.close()
         print(result.model_dump_json())
+        return 0
+    if args.command == "gmail-thread-backfill":
+        client = GmailClient(_google_access_token())
+        try:
+            result = GmailThreadBackfill(
+                database, GmailClientMetadataAdapter(client)
+            ).run(limit=args.limit)
+        finally:
+            client.close()
+        print(result.model_dump_json())
+        return 0
+    if args.command == "threads-awaiting-reply":
+        print(ThreadService(database).awaiting_reply().render())
         return 0
     if args.command == "gmail-inbound-poll":
         client = GmailClient(_google_access_token())

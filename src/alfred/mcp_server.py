@@ -45,6 +45,7 @@ from .policy import ApprovalService, PolicyError, PolicyStore
 from .reminders import ReminderStore
 from .scheduled_tasks import ScheduledTaskStore
 from .tasks import UNSET, TaskStore
+from .threads import ThreadService
 from .workflow_learning import WorkflowObservationStore, current_workflow_turn_id
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
@@ -72,6 +73,7 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "task_schedule",
         "important_date_set",
         "important_dates_get",
+        "threads_awaiting_reply",
     }
 )
 
@@ -291,6 +293,18 @@ def create_server(
         policy.require_read(client_id, "brief_get")
         parsed = datetime.fromisoformat(now) if now else None
         return BriefingService(database).morning_brief(parsed).render()
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def threads_awaiting_reply() -> str:
+        """List unread Gmail threads that look like they need a reply.
+
+        Groups active unread mail by thread_id and drops messages that carry a
+        List-Unsubscribe header (newsletters Gmail often labels PERSONAL).
+        Run ``alfred gmail-thread-backfill`` once if older rows are missing
+        thread_id / list_unsubscribe.
+        """
+        policy.require_read(client_id, "threads_awaiting_reply")
+        return ThreadService(database).awaiting_reply().render()
 
     @alfred_tool(read_only=True, idempotent=True)
     def connector_status() -> list[dict]:

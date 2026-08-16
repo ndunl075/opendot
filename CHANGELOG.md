@@ -35,6 +35,12 @@ only bumps the minor version — see RELEASING.md).
   open task whose due date is the next occurrence, plus an annual reminder
   that rolls forward after delivery. The morning brief surfaces the next
   seven days under Birthdays & dates (the weekly digest window).
+- Gmail unread sync now stores `thread_id` and `list_unsubscribe`.
+  `alfred gmail-thread-backfill` additive-repairs older rows (never
+  overwrites content, timestamps, or existing values).
+  `threads_awaiting_reply` / `alfred threads-awaiting-reply` groups unread
+  by thread and drops List-Unsubscribe newsletters that Gmail often labels
+  CATEGORY_PERSONAL.
 - Telegram answers now include explicit helpful/missing/wrong context buttons.
   Feedback stores only source/freshness/opaque-record provenance, is paired to
   the original sender, cannot authorize actions, and has bounded influence on

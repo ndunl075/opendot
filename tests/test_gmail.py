@@ -13,6 +13,7 @@ from alfred.policy import ApprovalService, PolicyError
 def _message(message_id: str, internal_date: str, *, subject: str = "Re: capstone review") -> dict:
     return {
         "id": message_id,
+        "threadId": f"thread-{message_id}",
         "internalDate": internal_date,
         "labelIds": ["INBOX", "UNREAD", "CATEGORY_PRIMARY"],
         "snippet": "Quick question about the milestone due next week...",
@@ -99,6 +100,7 @@ def test_gmail_client_lists_then_fetches_metadata_only() -> None:
             return httpx.Response(200, json={"messages": [{"id": "1"}]})
         assert request.url.path == "/gmail/v1/users/me/messages/1"
         assert request.url.params["format"] == "metadata"
+        assert "List-Unsubscribe" in request.url.params.get_list("metadataHeaders")
         return httpx.Response(200, json=_message("1", "1786190400000"))
 
     client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))

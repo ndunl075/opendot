@@ -1291,7 +1291,8 @@ def _low_priority_mail(payload: dict[str, Any]) -> bool:
     Existing rows created before label capture may not have ``label_ids`` yet,
     so unmistakable newsletter language is still suppressed. High-signal
     security, billing, and deadline language wins even if Gmail categorized a
-    message as bulk.
+    message as bulk. List-Unsubscribe is stronger than CATEGORY_* alone —
+    live mail showed most newsletters labeled CATEGORY_PERSONAL.
     """
     text = " ".join(
         str(payload.get(key) or "") for key in ("subject", "from", "snippet")
@@ -1303,6 +1304,11 @@ def _low_priority_mail(payload: dict[str, Any]) -> bool:
         else set()
     )
     if labels & _LOW_VALUE_GMAIL_LABELS:
+        return True
+    list_unsubscribe = payload.get("list_unsubscribe")
+    if isinstance(list_unsubscribe, str) and list_unsubscribe.strip():
+        if _HIGH_SIGNAL_MAIL.search(text):
+            return False
         return True
     if _HIGH_SIGNAL_MAIL.search(text):
         return False
