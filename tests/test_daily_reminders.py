@@ -176,3 +176,26 @@ def test_reminding_is_not_trapped_by_a_word_boundary() -> None:
     # ``\bremind\b`` never matches "reminding"; keep that class of bug closed.
     assert wants_scheduling("keep reminding me to stretch every morning")
     assert "reminder_set" in select_hermes_tools("keep reminding me to stretch every morning")
+
+
+def test_ordinary_future_phrasing_selects_scheduling_tools() -> None:
+    reminder = select_hermes_tools("remind me tomorrow night that im watching the odyssey")
+    assert wants_scheduling("remind me tomorrow night that im watching the odyssey")
+    assert "reminder_set" in reminder
+
+    check = select_hermes_tools("check at 3pm who's playing")
+    assert wants_scheduling("check at 3pm who's playing")
+    assert "task_schedule" in check
+
+    for phrase in ("do this at 8", "send that tomorrow night"):
+        assert wants_scheduling(phrase), phrase
+        tools = select_hermes_tools(phrase)
+        assert "task_schedule" in tools or "reminder_set" in tools, phrase
+
+
+def test_a_time_question_or_calendar_booking_is_not_a_scheduled_job() -> None:
+    assert not wants_scheduling("what's at 3pm?")
+    assert "task_schedule" not in select_hermes_tools("what's at 3pm?")
+    assert not wants_scheduling("book a meeting at 3")
+    assert "task_schedule" not in select_hermes_tools("book a meeting at 3")
+    assert "calendar_event_propose" in select_hermes_tools("book a meeting at 3")

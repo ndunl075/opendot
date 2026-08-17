@@ -34,7 +34,7 @@ from .availability import AvailabilityService
 from .gmail import GmailActions, GmailSendActions
 from .github import GitHubActions
 from .google_calendar import GoogleCalendarActions
-from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV
+from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV, HERMES_TELEGRAM_CHAT_ID_ENV
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
 from .http_auth import generate_token as generate_http_token
@@ -443,7 +443,7 @@ def create_server(
     def reminder_set(
         text: str,
         run_at: str,
-        chat_id: int,
+        chat_id: int | None = None,
         task_id: str | None = None,
         daily: bool = False,
         timezone: str | None = None,
@@ -452,7 +452,9 @@ def create_server(
 
         Alfred's only delivery channel today is Telegram, so the caller must
         say which paired chat this goes to -- there is no channel-agnostic
-        queue to defer that choice to.
+        queue to defer that choice to. When Hermes is answering an inbound
+        Telegram turn, ``chat_id`` may be omitted and is read from
+        ``ALFRED_TELEGRAM_CHAT_ID``.
 
         ``daily`` repeats at the same local wall-clock time (wake-up, bedtime,
         study lock-in). When ``daily`` is true, ``timezone`` must be an IANA
@@ -460,6 +462,7 @@ def create_server(
         change.
         """
         policy.require_write(client_id, "reminder_set")
+        resolved_chat_id = _telegram_chat_id(chat_id)
         parsed_run_at = datetime.fromisoformat(run_at)
         database.migrate()
         with database.connect() as connection:
@@ -481,7 +484,7 @@ def create_server(
                     connection,
                     run_at=parsed_run_at,
                     task_id=resolved_task_id,
-                    chat_id=chat_id,
+                    chat_id=resolved_chat_id,
                     text=text,
                     daily=daily,
                     timezone_name=timezone,
@@ -631,7 +634,11 @@ def create_server(
 
     @alfred_tool(destructive=False)
     def task_schedule(
-        prompt: str, run_at: str, chat_id: int, daily: bool = False, timezone: str | None = None
+        prompt: str,
+        run_at: str,
+        chat_id: int | None = None,
+        daily: bool = False,
+        timezone: str | None = None,
     ) -> dict:
         """Run an instruction later and send the answer to a paired chat.
 
@@ -647,9 +654,12 @@ def create_server(
 
         ``run_at`` is ISO-8601 with an offset. ``daily`` repeats it, and then
         ``timezone`` must be an IANA name (America/New_York) so the task keeps
-        its local hour across a daylight-saving change.
+        its local hour across a daylight-saving change. When Hermes is
+        answering an inbound Telegram turn, ``chat_id`` may be omitted and is
+        read from ``ALFRED_TELEGRAM_CHAT_ID``.
         """
         policy.require_write(client_id, "task_schedule")
+        resolved_chat_id = _telegram_chat_id(chat_id)
         parsed_run_at = datetime.fromisoformat(run_at)
         database.migrate()
         with database.connect() as connection:
@@ -658,11 +668,11 @@ def create_server(
                     connection,
                     prompt=prompt,
                     run_at=parsed_run_at,
-                    chat_id=chat_id,
+                    chat_id=resolved_chat_id,
                     daily=daily,
                     timezone_name=timezone,
                     idempotency_key=(
-                        f"mcp-task:{client_id}:{chat_id}:{parsed_run_at.isoformat()}:{prompt.strip()[:80]}"
+                        f"mcp-task:{client_id}:{resolved_chat_id}:{parsed_run_at.isoformat()}:{prompt.strip()[:80]}"
                     ),
                 )
         return task.model_dump(mode="json")
@@ -681,6 +691,25 @@ def _tool_filter_from_environment() -> frozenset[str] | None:
     if value is None:
         return None
     return frozenset(name.strip() for name in value.split(",") if name.strip())
+
+
+def _telegram_chat_id(chat_id: int | None) -> int:
+    """Resolve a paired Telegram chat, preferring an explicit tool argument.
+
+    Hermes turns inherit ``ALFRED_TELEGRAM_CHAT_ID`` so reminder_set and
+    task_schedule still work when the model omits chat_id.
+    """
+    if chat_id is not None:
+        return chat_id
+    inherited = os.environ.get(HERMES_TELEGRAM_CHAT_ID_ENV, "").strip()
+    if inherited:
+        try:
+            return int(inherited)
+        except ValueError as error:
+            raise ValueError(
+                f"{HERMES_TELEGRAM_CHAT_ID_ENV} must be an integer chat id"
+            ) from error
+    raise ValueError("chat_id is required unless ALFRED_TELEGRAM_CHAT_ID is set")
 
 
 def parse_stdio_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

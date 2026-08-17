@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 HERMES_MCP_TOOL_FILTER_ENV = "ALFRED_HERMES_MCP_TOOLS"
+HERMES_TELEGRAM_CHAT_ID_ENV = "ALFRED_TELEGRAM_CHAT_ID"
 MAX_HERMES_TOOLS_PER_TURN = 8
 
 _TASK_TERMS = re.compile(
@@ -148,6 +149,20 @@ _NOTIFY_INTENT_TERMS = re.compile(
     r"|\bremind(?:er|ing)?\b",
     re.IGNORECASE,
 )
+# Same pairing as notify intent: a future time plus an ordinary action verb
+# is "do this later", not "do this now". Without these, "do this at 8" and
+# "send that tomorrow night" never offered a scheduling tool.
+_DELAYED_ACTION_TERMS = re.compile(
+    r"\b(?:do|send|email|draft|run|finish|complete)\b",
+    re.IGNORECASE,
+)
+# Asking what happens at a time is not a request to run something then.
+# Narrower than _QUESTION_SHAPE so "do this at 8" (imperative do) still
+# schedules.
+_TIME_QUESTION = re.compile(
+    r"^\s*(?:what(?:'s|s| is)|who(?:'s|s| is)|when(?:'s|s| is))\b",
+    re.IGNORECASE,
+)
 
 # Fixed local-time routines: wake-up, bedtime, study lock-in. These are daily
 # reminders, not agent tasks -- the text already exists. Matching them here
@@ -191,13 +206,21 @@ def wants_scheduling(text: str) -> bool:
     """True when the request is "do something later and report back".
 
     Either an explicit reminder word, a daily routine (wake/bedtime/lock-in),
-    or a future time paired with an intent to be told the result. Both halves
-    are required for the paired form so a plain question about a time
-    ("what's at 3pm?") is not mistaken for a request to schedule something.
+    or a future time paired with an action or an intent to be told the result.
+    Both halves are required for the paired form so a plain question about a
+    time ("what's at 3pm?") is not mistaken for a request to schedule
+    something. Calendar booking uses the time as the event's start, not as
+    when to run a job, so "book a meeting at 3" stays a calendar write.
     """
     if _REMINDER_TERMS.search(text) or _DAILY_ROUTINE_TERMS.search(text):
         return True
-    return bool(_FUTURE_TIME_TERMS.search(text) and _NOTIFY_INTENT_TERMS.search(text))
+    if not _FUTURE_TIME_TERMS.search(text):
+        return False
+    if _TIME_QUESTION.search(text):
+        return False
+    if _CALENDAR_TERMS.search(text) and _CALENDAR_WRITE_TERMS.search(text):
+        return False
+    return bool(_NOTIFY_INTENT_TERMS.search(text) or _DELAYED_ACTION_TERMS.search(text))
 
 
 # When a truly multi-topic request matches more than eight tools, retain the

@@ -45,6 +45,7 @@ from .audit import AuditEvent, AuditLog
 from .db import Database
 from .hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
+    HERMES_TELEGRAM_CHAT_ID_ENV,
     is_casual_conversation,
     is_external_lookup,
     select_hermes_tools,
@@ -253,6 +254,7 @@ class SubprocessAgentRunner:
         *,
         allowed_tools: frozenset[str],
         correlation_id: str | None = None,
+        chat_id: int | None = None,
     ) -> AgentRunResult:
         """Run one turn whose inherited MCP server exposes only ``allowed_tools``."""
 
@@ -260,6 +262,7 @@ class SubprocessAgentRunner:
             prompt,
             allowed_tools=allowed_tools,
             correlation_id=correlation_id,
+            chat_id=chat_id,
         )
 
     def run_conversation(self, prompt: str) -> AgentRunResult:
@@ -289,6 +292,7 @@ class SubprocessAgentRunner:
         model: str | None = None,
         correlation_id: str | None = None,
         timeout_seconds: float | None = None,
+        chat_id: int | None = None,
     ) -> AgentRunResult:
         started = self._monotonic()
         effective_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
@@ -331,12 +335,14 @@ class SubprocessAgentRunner:
             # A console child would otherwise open a terminal for every turn;
             # closing that window terminates Hermes with 0xC000013A.
             run_arguments["creationflags"] = subprocess.CREATE_NO_WINDOW
-        if allowed_tools is not None or correlation_id is not None:
+        if allowed_tools is not None or correlation_id is not None or chat_id is not None:
             environment = os.environ.copy()
             if allowed_tools is not None:
                 environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))
             if correlation_id is not None:
                 environment[WORKFLOW_TURN_ID_ENV] = correlation_id
+            if chat_id is not None:
+                environment[HERMES_TELEGRAM_CHAT_ID_ENV] = str(chat_id)
             run_arguments["env"] = environment
         try:
             completed = self._runner(argv, **run_arguments)
@@ -542,6 +548,7 @@ class HermesBridge:
                 history=history,
                 casual=casual,
                 correlation_id=external_id,
+                chat_id=event["chat_id"] if isinstance(event.get("chat_id"), int) else None,
             )
             agent_ms = max(0, round((self._monotonic() - agent_started) * 1000))
         text = result.text if result.ok else self.failure_reply
@@ -774,6 +781,7 @@ class HermesBridge:
         history: list[dict[str, str]],
         casual: bool = False,
         correlation_id: str | None = None,
+        chat_id: int | None = None,
     ) -> AgentRunResult:
         # Only a request too short to stand on its own inherits the previous
         # exchange. Scanning all of history for tool selection created a
@@ -811,6 +819,7 @@ class HermesBridge:
                     prompt,
                     allowed_tools=allowed_tools,
                     correlation_id=correlation_id,
+                    chat_id=chat_id,
                 )
             return run_scoped(prompt, allowed_tools=allowed_tools)
         return self.agent(prompt)
@@ -884,7 +893,10 @@ class HermesBridge:
                     "into a work check-in.\n"
                     f"current message: {request}"
                 )
-            return request
+            return (
+                f"{self._scheduling_runtime_line(event)}\n"
+                f"current request: {request}"
+            )
 
         # Escape angle brackets so a malicious synced subject/snippet cannot
         # manufacture a closing context tag. JSON unicode escapes preserve the
@@ -935,8 +947,30 @@ class HermesBridge:
             "asks for it. before proposing or taking an action, require an unambiguous target and "
             "intent; a short confirmation may refer to one precise proposal in recent_conversation, "
             "but a vague or multi-option offer requires clarification.\n"
+            f"{self._scheduling_runtime_line(event)}\n"
             f"<alfred_context>{packed}</alfred_context>\n"
             f"current request: {request}"
+        )
+
+    @staticmethod
+    def _scheduling_runtime_line(event: dict[str, Any]) -> str:
+        """Trusted clock and chat id for reminder_set / task_schedule.
+
+        Those tools need an ISO-8601 run_at and a paired chat_id. Leaving them
+        out of the work prompt is why "remind me tomorrow night" either failed
+        or ran immediately: the model had to invent both.
+        """
+        local_now = datetime.now().astimezone()
+        parts = [f"now={local_now.isoformat(timespec='seconds')}"]
+        zone = getattr(local_now.tzinfo, "key", None)
+        if isinstance(zone, str) and zone:
+            parts.append(f"timezone={zone}")
+        chat_id = event.get("chat_id")
+        if isinstance(chat_id, int):
+            parts.append(f"chat_id={chat_id}")
+        return (
+            "this telegram chat is already paired. for reminder_set and "
+            f"task_schedule use {', '.join(parts)}."
         )
 
     def _academic_context(self, request: str) -> dict[str, Any] | None:

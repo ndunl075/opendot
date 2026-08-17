@@ -16,6 +16,7 @@ from alfred.hermes_bridge import (
 )
 from alfred.hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
+    HERMES_TELEGRAM_CHAT_ID_ENV,
     MAX_HERMES_TOOLS_PER_TURN,
     is_casual_conversation,
     select_hermes_tools,
@@ -179,7 +180,9 @@ def test_non_today_calendar_question_still_uses_the_agent(tmp_path: Path) -> Non
 
     HermesBridge(Database(database_path), agent).run_once()
 
-    assert agent.prompts == ["what's on my calendar tomorrow?"]
+    assert len(agent.prompts) == 1
+    assert "current request: what's on my calendar tomorrow?" in agent.prompts[0]
+    assert "chat_id=20" in agent.prompts[0]
     assert _replies(database_path) == [
         ("hermes-reply:2:0", "telegram:20", "tomorrow is clear.")
     ]
@@ -401,6 +404,21 @@ def test_a_follow_up_gets_the_recent_exchange_and_requires_a_precise_action(
     assert "want me to flag that?" in prompt
     assert "current request: yes do that" in prompt
     assert "a vague or multi-option offer requires clarification" in prompt
+    assert "chat_id=20" in prompt
+    assert "now=" in prompt
+
+
+def test_work_prompt_names_the_paired_chat_and_local_clock(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    _defer(database_path, _update(80, "remind me tomorrow night that im watching the odyssey"))
+    agent = FakeAgent(AgentRunResult(text="got it, i'll remind you tomorrow at 9", ok=True))
+
+    HermesBridge(Database(database_path), agent).run_once()
+
+    prompt = agent.prompts[0]
+    assert "chat_id=20" in prompt
+    assert "now=" in prompt
+    assert "current request: remind me tomorrow night that im watching the odyssey" in prompt
 
 
 def test_a_many_bubble_answer_is_reassembled_in_order_for_the_next_turn(
@@ -740,6 +758,25 @@ def test_subprocess_runner_passes_a_turn_local_tool_allowlist_to_hermes() -> Non
     assert result.ok is True
     assert calls[0]["env"][HERMES_MCP_TOOL_FILTER_ENV] == "agenda_get,task_upsert"
     assert HERMES_MCP_TOOL_FILTER_ENV not in __import__("os").environ
+
+
+def test_subprocess_runner_passes_telegram_chat_id_to_mcp() -> None:
+    calls: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(kwargs)
+        return _FakeCompleted(0, stdout="ok")
+
+    runner = SubprocessAgentRunner(command="hermes", profile="alfred", runner=fake_run)
+    result = runner.run_scoped(
+        "remind me tomorrow night",
+        allowed_tools=frozenset({"reminder_set"}),
+        chat_id=20,
+    )
+
+    assert result.ok is True
+    assert calls[0]["env"][HERMES_TELEGRAM_CHAT_ID_ENV] == "20"
+    assert HERMES_TELEGRAM_CHAT_ID_ENV not in __import__("os").environ
 
 
 def test_subprocess_runner_passes_a_private_turn_correlation_id_to_mcp() -> None:
