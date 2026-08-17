@@ -1,5 +1,6 @@
 .alfred/
 .claude/
+.worktrees/
 alfred-vault/
 .venv/
 __pycache__/
@@ -10,6 +11,9 @@ dist/
 build/
 *.egg-info/
 .env
+*.patch
+fixes.patch
+habits.patch
 deploy/couchdb/data/
 deploy/couchdb/config/
 .alfred/backup-verify.log

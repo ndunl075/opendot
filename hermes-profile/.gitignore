@@ -15,3 +15,8 @@ workspace/
 plans/
 home/
 *_cache/
+
+# Owner-only personality overrides. The tracked SOUL.md is the shareable
+# default; keep a personal copy as SOUL.local.md on your machine and copy it
+# over the installed profile when you want your own voice back.
+SOUL.local.md

@@ -6,6 +6,11 @@ an existing open-source agent runtime, and publish Alfred as a Hermes
 *profile distribution* that talks to `alfred-core` over local stdio MCP. This
 directory is that distribution.
 
+**Personal voice:** the tracked `SOUL.md` is the shareable default. Your machine
+can keep a private copy as `SOUL.local.md` (gitignored). After
+`hermes profile install` / `update`, copy it over the installed profile's
+`SOUL.md` when you want your own phrasing back — never commit that file.
+
 **Verification status:** installed and confirmed working end-to-end against
 a real Hermes build (v0.20.0) -- `hermes -p alfred chat` successfully calls
 Alfred Core's MCP tools. Three things turned out different from what
@@ -173,7 +178,7 @@ cutover, whenever you're ready for Hermes to own Telegram instead of Alfred
 Core's own poller:
 
 ```powershell
-alfred service-configure run --gmail-inbound-sender owner@example.com
+alfred service-configure run --gmail-inbound-sender you@example.com
 alfred-service restart
 ```
 

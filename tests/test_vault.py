@@ -175,20 +175,20 @@ def test_a_note_cannot_mint_a_second_owner(tmp_path: Path) -> None:
 def test_wiki_link_targets_ignores_display_text_and_headings() -> None:
     from alfred.vault import wiki_link_targets
 
-    body = "Talked to [[Alex Chen|Alex]] about [[Trayce#Roadmap]] and [[Alex Chen]] again."
+    body = "Talked to [[Alex Chen|Alex]] about [[Northwind#Roadmap]] and [[Alex Chen]] again."
 
     # Display text and heading are presentation and location; neither changes
     # which note is referenced. The repeat is emphasis, not new evidence.
-    assert wiki_link_targets(body) == ["Alex Chen", "Trayce"]
+    assert wiki_link_targets(body) == ["Alex Chen", "Northwind"]
 
 
 def test_a_wiki_link_records_provenance_against_the_named_entity(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     graph = MemoryGraph(database)
-    entity = graph.create_entity(entity_type="project", label="Trayce")
+    entity = graph.create_entity(entity_type="project", label="Northwind")
     vault = tmp_path / "vault"
     vault.mkdir()
-    (vault / "note.md").write_text("Shipped the [[Trayce]] rewrite today.\n", encoding="utf-8")
+    (vault / "note.md").write_text("Shipped the [[Northwind]] rewrite today.\n", encoding="utf-8")
 
     result = VaultImporter(database, vault).sync()
 
@@ -249,11 +249,11 @@ def test_links_in_alfreds_own_generated_notes_are_never_imported(tmp_path: Path)
     """Generated notes are Alfred's writing, not the owner's testimony."""
     database = Database(tmp_path / "alfred.db")
     graph = MemoryGraph(database)
-    entity = graph.create_entity(entity_type="project", label="Trayce")
+    entity = graph.create_entity(entity_type="project", label="Northwind")
     vault = tmp_path / "vault" / "Generated"
     vault.mkdir(parents=True)
     (vault / "gen.md").write_text(
-        "---\nmanaged: true\n---\n\nAbout [[Trayce]].\n", encoding="utf-8"
+        "---\nmanaged: true\n---\n\nAbout [[Northwind]].\n", encoding="utf-8"
     )
 
     result = VaultImporter(database, tmp_path / "vault").sync()
@@ -266,10 +266,10 @@ def test_a_wiki_link_never_creates_a_relationship_edge(tmp_path: Path) -> None:
     """What a bare link *means* is a typed, registry-validated decision."""
     database = Database(tmp_path / "alfred.db")
     graph = MemoryGraph(database)
-    entity = graph.create_entity(entity_type="project", label="Trayce")
+    entity = graph.create_entity(entity_type="project", label="Northwind")
     vault = tmp_path / "vault"
     vault.mkdir()
-    (vault / "note.md").write_text("Notes on [[Trayce]].\n", encoding="utf-8")
+    (vault / "note.md").write_text("Notes on [[Northwind]].\n", encoding="utf-8")
 
     VaultImporter(database, vault).sync()
 

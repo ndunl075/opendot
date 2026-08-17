@@ -361,7 +361,7 @@ def test_renaming_keeps_the_old_name_resolvable(tmp_path: Path) -> None:
     assert renamed.id == entity.id  # same entity, not a replacement
     assert graph.resolve_entity_by_name("J.T. Rivera") is not None
     assert graph.resolve_entity_by_name("relative@example.com") is not None
-    assert graph.search("Dunlap").entities  # findable under the new name
+    assert graph.search("Rivera").entities  # findable under the new name
 
 
 def test_renaming_to_the_same_name_is_a_no_op(tmp_path: Path) -> None:
