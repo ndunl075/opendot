@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from .destinations import resolve_destination
+
 
 class NagJob(BaseModel):
     id: str
@@ -48,12 +50,7 @@ class NagStore:
             raise ValueError("nag max_attempts must be at least 1")
         if attempt < 1:
             raise ValueError("nag attempt must be at least 1")
-        if destination is None:
-            if chat_id is None:
-                raise ValueError("nag destination is required")
-            destination = f"telegram:{chat_id}"
-        if not destination.strip() or ":" not in destination:
-            raise ValueError("nag destination must be a non-empty channel:recipient value")
+        destination = resolve_destination(destination, chat_id, noun="nag")
         schedule: dict[str, Any] = {"interval_hours": interval_hours}
         job_id = str(uuid4())
         payload: dict[str, Any] = {

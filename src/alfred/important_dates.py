@@ -20,8 +20,10 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from .db import Database
+from .destinations import resolve_destination
 from .events import EventStore
 from .tasks import TaskStore
+from .wall_clock import parse_hhmm
 
 DateKind = Literal["birthday", "anniversary", "other"]
 
@@ -125,12 +127,7 @@ class ImportantDateStore:
             raise ValueError("kind must be birthday, anniversary, or other")
         if year is not None and year < 1:
             raise ValueError("year must be a positive calendar year when set")
-        if destination is None:
-            if chat_id is None:
-                raise ValueError("important date destination is required")
-            destination = f"telegram:{chat_id}"
-        if not destination.strip() or ":" not in destination:
-            raise ValueError("destination must be a non-empty channel:recipient value")
+        destination = resolve_destination(destination, chat_id, noun="important date")
         # Validate the civil date once so Feb 29 is allowed and Apr 31 is refused.
         _validate_month_day(month, day)
         current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -289,7 +286,7 @@ class ImportantDateStore:
             int(schedule["day"]),
             after,
             timezone_name=str(schedule["timezone"]),
-            local_time=_parse_hhmm(str(schedule.get("time", "09:00"))),
+            local_time=parse_hhmm(str(schedule.get("time", "09:00"))),
         )
         year = payload.get("year")
         kind_raw = str(payload.get("date_kind", "other"))
@@ -334,9 +331,17 @@ def annual_task_ids(database: Database) -> set[str]:
     return {item.task_id for item in ImportantDateStore.list_all(database)}
 
 
-def _parse_hhmm(value: str) -> time:
-    hour_text, minute_text = value.split(":", maxsplit=1)
-    return time(int(hour_text), int(minute_text))
+def annual_label(kind: str, label: str, turns: int | None) -> str:
+    """Name an annual date the way both the reminder and the brief say it."""
+    if kind == "birthday":
+        if turns is not None:
+            return f"{label}'s birthday (turns {turns})"
+        return f"{label}'s birthday"
+    if kind == "anniversary":
+        if turns is not None:
+            return f"{label} anniversary ({turns} years)"
+        return f"{label} anniversary"
+    return label
 
 
 def _task_title(kind: str, label: str) -> str:
@@ -354,16 +359,7 @@ def _reminder_text(
     next_at: datetime,
     timezone_name: str,
 ) -> str:
-    turns = _turns(year, next_at, timezone_name)
-    if kind == "birthday":
-        if turns is not None:
-            return f"{label}'s birthday (turns {turns})"
-        return f"{label}'s birthday"
-    if kind == "anniversary":
-        if turns is not None:
-            return f"{label} anniversary ({turns} years)"
-        return f"{label} anniversary"
-    return label
+    return annual_label(kind, label, _turns(year, next_at, timezone_name))
 
 
 def _from_job_row(row: sqlite3.Row | Any) -> ImportantDate | None:

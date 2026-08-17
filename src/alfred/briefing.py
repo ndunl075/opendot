@@ -11,8 +11,9 @@ from pydantic import BaseModel
 from .academic_dedup import academic_item_signature
 from .audit import AuditEvent, AuditLog
 from .db import Database
-from .important_dates import ImportantDateStore, annual_task_ids
+from .important_dates import ImportantDateStore, annual_label, annual_task_ids
 from .models import TextGenerationProvider
+from .wall_clock import format_duration
 
 
 class BriefItem(BaseModel):
@@ -153,19 +154,7 @@ class BriefingService:
         ):
             # Prefer the reminder wording (includes "turns N" when known) over
             # the bare task title so the weekly window reads like a digest.
-            title = item.label
-            if item.kind == "birthday":
-                title = (
-                    f"{item.label}'s birthday (turns {item.turns})"
-                    if item.turns is not None
-                    else f"{item.label}'s birthday"
-                )
-            elif item.kind == "anniversary":
-                title = (
-                    f"{item.label} anniversary ({item.turns} years)"
-                    if item.turns is not None
-                    else f"{item.label} anniversary"
-                )
+            title = annual_label(item.kind, item.label, item.turns)
             brief.important_dates.append(
                 BriefItem(
                     title=title,
@@ -353,19 +342,9 @@ def _sleep_summary_for_night(rows: list[object], generated_at: datetime) -> str 
             stages.append(stage.strip().lower())
     if total <= timedelta():
         return None
-    summary = f"{_format_duration(total)} last night — Google Health"
+    summary = f"{format_duration(total)} last night — Google Health"
     if stages:
         # Prefer the longest-named common stage label without inventing quality.
         dominant = max(set(stages), key=stages.count)
         summary += f" (includes {dominant})"
     return summary
-
-
-def _format_duration(value: timedelta) -> str:
-    total_minutes = int(value.total_seconds() // 60)
-    hours, minutes = divmod(total_minutes, 60)
-    if hours and minutes:
-        return f"{hours}h {minutes}m"
-    if hours:
-        return f"{hours}h"
-    return f"{minutes}m"

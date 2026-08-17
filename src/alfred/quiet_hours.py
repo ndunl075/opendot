@@ -13,10 +13,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, model_validator
 
-
-def _parse_hhmm(value: str) -> time:
-    hour_text, minute_text = value.strip().split(":", maxsplit=1)
-    return time(int(hour_text), int(minute_text))
+from .wall_clock import parse_hhmm
 
 
 class QuietHours(BaseModel):
@@ -49,8 +46,8 @@ class QuietHours(BaseModel):
         if not start_raw and not end_raw:
             return cls.disabled()
         return cls(
-            start=_parse_hhmm(start_raw) if start_raw else None,
-            end=_parse_hhmm(end_raw) if end_raw else None,
+            start=parse_hhmm(start_raw) if start_raw else None,
+            end=parse_hhmm(end_raw) if end_raw else None,
             timezone=timezone,
         )
 

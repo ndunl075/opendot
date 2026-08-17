@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from .db import Database
+from .wall_clock import format_duration
 
 
 class BusyBlock(BaseModel):
@@ -68,7 +69,7 @@ class AvailabilityReport(BaseModel):
             for slot in self.free:
                 lines.append(
                     f"- {slot.start.strftime('%a %Y-%m-%d %H:%M')}–{slot.end.strftime('%H:%M')} "
-                    f"({_fmt_duration(slot.duration)})"
+                    f"({format_duration(slot.duration)})"
                 )
         else:
             lines.append("\nNo free gaps in this window.")
@@ -234,13 +235,3 @@ def _gaps(
             free.append(FreeSlot(start=cursor, end=end_bound))
         day += timedelta(days=1)
     return free
-
-
-def _fmt_duration(value: timedelta) -> str:
-    minutes = int(value.total_seconds() // 60)
-    hours, mins = divmod(minutes, 60)
-    if hours and mins:
-        return f"{hours}h {mins}m"
-    if hours:
-        return f"{hours}h"
-    return f"{mins}m"

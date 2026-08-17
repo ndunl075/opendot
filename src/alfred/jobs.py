@@ -11,6 +11,7 @@ from .audit import AuditEvent, AuditLog
 from .brief_schedule import next_daily_occurrence
 from .briefing import BriefingService
 from .db import Database
+from .destinations import destination_from_payload
 from .events import EventStore
 from .important_dates import ImportantDateStore
 from .nags import NagStore
@@ -62,7 +63,7 @@ class JobRunner:
                     if job["kind"] in {"reminder", "telegram_reminder"}:
                         prefix = f"Late reminder (scheduled {scheduled_at.isoformat()}): " if late else "Reminder: "
                         text = f"{prefix}{payload['text']}"
-                        destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
+                        destination = destination_from_payload(payload)
                         schedule = json.loads(job["schedule_json"])
                         # Wake-up / bedtime / study lock-in are just daily
                         # reminders: same delivery path as a one-shot, then
@@ -96,7 +97,7 @@ class JobRunner:
                             scheduled_at=scheduled_at if late else None,
                             timezone_name=schedule["timezone"],
                         ).render()
-                        destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
+                        destination = destination_from_payload(payload)
                         next_run_at = next_daily_occurrence(schedule, run_at).isoformat()
                         state = "active"
                     elif job["kind"] == "agent_task":
@@ -192,7 +193,7 @@ class JobRunner:
                             )
                             executed.append(ExecutedJob(id=job["id"], outbox_id=None, late=late))
                             continue
-                        destination = payload.get("destination") or f"telegram:{payload['chat_id']}"
+                        destination = destination_from_payload(payload)
                         if attempt >= max_attempts:
                             text = f"Last reminder ({attempt} of {max_attempts}): {payload['text']}"
                             next_run_at = None

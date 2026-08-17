@@ -7,6 +7,21 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Collapsed helpers that recent feature work had copy-pasted, with no change to
+  behavior or to any public name. `destinations.py` now owns the single
+  `channel:recipient` rule that `reminders`, `nags`, `important_dates`, and
+  `brief_schedule` each carried a copy of, plus the payload fallback `jobs.py`
+  repeated three times; `wall_clock.py` owns the one `HH:MM` parser and the one
+  duration formatter that `quiet_hours`/`important_dates` and
+  `availability`/`briefing` had duplicated; and `important_dates.annual_label`
+  is now the only place a birthday reads "turns N", so the reminder and the
+  brief cannot word it differently. One user-visible detail improved on the
+  way: an invalid important-date destination now says "important date
+  destination must be…" like its three siblings, instead of an unattributed
+  "destination must be…".
+
 ### Fixed
 
 - Annual birthday reminder roll-forward no longer loses the next year's

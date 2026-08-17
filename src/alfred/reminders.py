@@ -17,6 +17,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
+from .destinations import resolve_destination
+
 
 class ReminderJob(BaseModel):
     id: str
@@ -51,12 +53,7 @@ class ReminderStore:
         """
         if run_at.tzinfo is None:
             raise ValueError("reminder time must include a timezone")
-        if destination is None:
-            if chat_id is None:
-                raise ValueError("reminder destination is required")
-            destination = f"telegram:{chat_id}"
-        if not destination.strip() or ":" not in destination:
-            raise ValueError("reminder destination must be a non-empty channel:recipient value")
+        destination = resolve_destination(destination, chat_id, noun="reminder")
         schedule: dict[str, Any] = {"run_at": run_at.isoformat()}
         if daily:
             # Same refusal as daily agent tasks and morning briefs: Windows

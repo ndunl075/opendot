@@ -8,6 +8,8 @@ from datetime import UTC, datetime, time, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from .destinations import resolve_destination
+
 
 def create_daily(
     connection: sqlite3.Connection,
@@ -19,12 +21,7 @@ def create_daily(
     now: datetime | None = None,
 ) -> str:
     """Create one daily delivery schedule for an explicit channel destination."""
-    if destination is None:
-        if chat_id is None:
-            raise ValueError("morning brief destination is required")
-        destination = f"telegram:{chat_id}"
-    if not destination.strip() or ":" not in destination:
-        raise ValueError("morning brief destination must be a non-empty channel:recipient value")
+    destination = resolve_destination(destination, chat_id, noun="morning brief")
     timezone = ZoneInfo(timezone_name)
     current = (now or datetime.now(UTC)).astimezone(timezone)
     candidate = datetime.combine(current.date(), local_time, tzinfo=timezone)
