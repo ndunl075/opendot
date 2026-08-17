@@ -24,6 +24,16 @@ only bumps the minor version — see RELEASING.md).
 
 ### Fixed
 
+- Slack replies no longer arrive scrambled. The Slack outbox claim ordered
+  pending rows by `created_at, id`, and `id` is a random `uuid4` while
+  `created_at` only has second granularity — so every multi-part answer
+  enqueued in one second shipped in random order (reproduced: scrambled on
+  six of six trials). Now tie-broken on `rowid`, the same fix Telegram
+  already carried; the two delivery paths had drifted apart on it.
+- Conversation history no longer risks replaying a previous answer out of
+  order: reassembly tie-broke on `idempotency_key`, whose bubble index is
+  decimal, so bubble 10 sorted ahead of bubble 2. Latent at the four-bubble
+  default and wrong the moment that cap is raised; now insertion order.
 - Annual birthday reminder roll-forward no longer loses the next year's
   "turns N" payload: the shared job UPDATE after delivery was rewriting
   `payload_json` from the pre-delivery snapshot (introduced with nag jobs).

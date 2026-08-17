@@ -403,6 +403,34 @@ def test_a_follow_up_gets_the_recent_exchange_and_requires_a_precise_action(
     assert "a vague or multi-option offer requires clarification" in prompt
 
 
+def test_a_many_bubble_answer_is_reassembled_in_order_for_the_next_turn(
+    tmp_path: Path,
+) -> None:
+    """Regression: history reassembly tie-broke on `idempotency_key`, whose
+    bubble index is decimal, so bubble 10 sorted ahead of bubble 2 and the
+    previous answer was replayed to the model out of order. Latent at the
+    four-bubble default, wrong as soon as that cap is raised."""
+    database_path = tmp_path / "alfred.db"
+    paragraphs = [f"point{index:02d}" for index in range(12)]
+    first_agent = FakeAgent(AgentRunResult(text="\n\n".join(paragraphs), ok=True))
+    _defer(database_path, _update(80, "give me the full rundown"))
+    HermesBridge(
+        Database(database_path), first_agent, max_bubbles=len(paragraphs)
+    ).run_once()
+
+    _defer(database_path, _update(81, "yes do that"))
+    second_agent = FakeAgent(AgentRunResult(text="added it.", ok=True))
+    HermesBridge(
+        Database(database_path), second_agent, max_bubbles=len(paragraphs)
+    ).run_once()
+
+    # Position rather than an exact string: the assertion is about ordering,
+    # and lexicographic order would put point10/point11 before point02.
+    prompt = second_agent.prompts[0]
+    positions = [prompt.index(paragraph) for paragraph in paragraphs]
+    assert positions == sorted(positions)
+
+
 def test_confirmed_memory_is_prefetched_but_candidates_are_quarantined(tmp_path: Path) -> None:
     from alfred.memory_graph import MemoryGraph
 

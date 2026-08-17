@@ -5,6 +5,7 @@ import pytest
 
 from alfred.db import Database
 from alfred.jobs import JobRunner
+from alfred.outbox import Outbox
 from alfred.slack import SlackEvent, SlackGateway, SlackOutboxWorker, SlackPair
 
 
@@ -66,6 +67,30 @@ def test_slack_reminder_routes_back_to_the_paired_channel(tmp_path: Path) -> Non
     assert receipt.reminder_job_id is not None
     assert [item[0] for item in transport.sent] == ["D123", "D123"]
     assert len(result) == 2
+
+
+def test_bubbles_enqueued_in_one_second_deliver_in_order(tmp_path: Path) -> None:
+    """Regression: this path tie-broke on `id`, a random uuid4, while
+    created_at only has second granularity. A four-part agent answer
+    therefore shipped scrambled -- observed on all six trial runs -- the
+    same defect Telegram already fixed by ordering on rowid."""
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    expected = ["first", "second", "third", "fourth"]
+    with database.connect() as connection:
+        with database.transaction(connection):
+            for index, text in enumerate(expected):
+                Outbox.enqueue(
+                    connection,
+                    destination="slack:D123",
+                    payload={"text": text},
+                    idempotency_key=f"hermes-reply:99:{index}",
+                )
+    transport = FakeSlack()
+
+    SlackOutboxWorker(database, transport, {"D123"}).deliver_pending()
+
+    assert [text for _, text in transport.sent] == expected
 
 
 def test_slack_outbox_fails_closed_for_an_unpaired_channel(tmp_path: Path) -> None:

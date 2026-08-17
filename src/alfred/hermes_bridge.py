@@ -1042,11 +1042,16 @@ class HermesBridge:
                 metadata = json.loads(row["metadata_json"])
                 if metadata.get("chat_id") != event["chat_id"] or not metadata.get("agent_deferred"):
                     continue
+                # Insertion order, not key order: the bubble index is decimal
+                # inside the key, so a lexicographic tie-break puts bubble 10
+                # ahead of bubble 2 and reassembles the answer out of order.
+                # Unreachable at the current four-bubble cap, wrong the moment
+                # that cap is raised.
                 reply_rows = connection.execute(
                     """
                     SELECT idempotency_key, payload_json FROM outbox
                     WHERE idempotency_key LIKE ?
-                    ORDER BY created_at, idempotency_key
+                    ORDER BY created_at, rowid
                     """,
                     (f"hermes-reply:{row['external_id']}:%",),
                 ).fetchall()
