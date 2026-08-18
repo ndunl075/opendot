@@ -96,9 +96,47 @@ def test_status_is_non_sensitive(tmp_path: Path) -> None:
         "database_path": str(tmp_path / "alfred.db"),
         "schema_version": 17,
         "audit_event_count": 0,
+        "outbox_pending": 0,
+        "outbox_sending": 0,
+        "outbox_sent": 0,
+        "outbox_failed": 0,
+        "outbox_oldest_unfinished_claim_at": "",
+        "outbox_last_failure": "",
     }
 
 
+def test_status_surfaces_a_reply_stranded_by_an_unfinished_claim(tmp_path: Path) -> None:
+    """A claimed row nothing will retry is the one delivery failure with no symptom.
+
+    It is not pending, so no delivery pass sees it, and its stored bubble 0
+    tells the agent the message was already answered. Without this the only
+    evidence is a chat that stopped replying.
+    """
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO outbox (id, destination, payload_json, idempotency_key, state, attempts, created_at)
+                VALUES ('a', 'telegram:1', '{"text":"hi"}', 'hermes-reply:900:0', 'sending', 1, '2026-08-16 21:00:00')
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO outbox (id, destination, payload_json, idempotency_key, state, attempts, created_at, last_error)
+                VALUES ('b', 'telegram:1', '{"text":"yo"}', 'hermes-reply:901:0', 'failed', 1, '2026-08-16 22:00:00',
+                        'Telegram send failed: ReadTimeout')
+                """
+            )
+
+    status = database.status()
+
+    assert status["outbox_sending"] == 1
+    assert status["outbox_oldest_unfinished_claim_at"] == "2026-08-16 21:00:00"
+    assert status["outbox_failed"] == 1
+    assert status["outbox_last_failure"] == "Telegram send failed: ReadTimeout"
 def test_rebuilding_a_table_keeps_the_rows_it_already_had(tmp_path: Path) -> None:
     """Upgrade an existing install, not a fresh one.
 

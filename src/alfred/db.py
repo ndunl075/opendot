@@ -129,12 +129,45 @@ class Database:
             connection.commit()
 
     def status(self) -> dict[str, int | str]:
-        """Return non-sensitive local database status for CLI and MCP clients."""
+        """Return non-sensitive local database status for CLI and MCP clients.
+
+        Counts only, never destinations or message text, so this stays safe to
+        print and to hand to an MCP client.
+        """
         version = self.migrate()
         with self.connect() as connection:
             audit_count = connection.execute("SELECT COUNT(*) AS count FROM tool_runs").fetchone()["count"]
+            states = {
+                str(row["state"]): int(row["count"])
+                for row in connection.execute(
+                    "SELECT state, COUNT(*) AS count FROM outbox GROUP BY state"
+                ).fetchall()
+            }
+            # A row is claimed by moving it to 'sending', and only 'pending'
+            # rows are ever claimed, so a process that stops between the claim
+            # and the send leaves that row unreachable: no pass retries it, and
+            # the agent will not regenerate the answer either, because a stored
+            # bubble 0 is what marks the message as already answered. The reply
+            # exists, is addressed, and never arrives. Reporting the oldest one
+            # is what makes that state findable instead of silent.
+            stalled = connection.execute(
+                "SELECT created_at FROM outbox WHERE state = 'sending' ORDER BY created_at, rowid LIMIT 1"
+            ).fetchone()
+            failure = connection.execute(
+                """
+                SELECT last_error FROM outbox
+                WHERE state = 'failed' AND last_error IS NOT NULL
+                ORDER BY rowid DESC LIMIT 1
+                """
+            ).fetchone()
         return {
             "database_path": str(self.path),
             "schema_version": version,
             "audit_event_count": int(audit_count),
+            "outbox_pending": states.get("pending", 0),
+            "outbox_sending": states.get("sending", 0),
+            "outbox_sent": states.get("sent", 0),
+            "outbox_failed": states.get("failed", 0),
+            "outbox_oldest_unfinished_claim_at": str(stalled["created_at"]) if stalled else "",
+            "outbox_last_failure": str(failure["last_error"]) if failure else "",
         }

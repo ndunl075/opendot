@@ -7,6 +7,19 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+
+- `alfred status` (and the `system_status` MCP tool) now report outbox delivery
+  health: counts by state, the timestamp of the oldest unfinished claim, and the
+  most recent send failure. This exposes the one delivery failure that
+  previously had no symptom at all. Claiming a row moves it to `sending`, and
+  only `pending` rows are ever claimed, so a process that stops between the
+  claim and the send strands that row: nothing retries it, and the agent will
+  not rebuild the answer either, because a stored bubble 0 is precisely what
+  marks a message as already answered. The reply exists, is addressed, and never
+  arrives — and until now the only evidence was a chat that quietly stopped
+  replying. Counts only; no destinations or message text, so it stays safe to
+  print and to hand to an MCP client.
 ### Fixed
 
 - A database whose migration history diverged from the checked-out branch now
