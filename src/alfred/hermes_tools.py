@@ -46,8 +46,50 @@ _AWAITING_REPLY_TERMS = re.compile(
     r"\b(?:"
     r"awaiting(?:\s+my)?\s+reply|need(?:s)?\s+(?:a\s+)?reply|"
     r"waiting\s+(?:on|for)\s+(?:my\s+)?reply|threads?\s+awaiting|"
-    r"what(?:'s| is)?\s+waiting|who(?:'s| is)?\s+waiting"
+    r"what(?:'s| is)?\s+waiting|who(?:'s| is)?\s+waiting|"
+    # How the question is actually asked. Every phrasing below reached the
+    # casual lane with no tools and was answered from nothing: the model has
+    # no synced mail, so it invented a plausible reply about the owner's
+    # inbox. repl(?:y|ies) rather than repl\b -- there is no word boundary
+    # between "l" and "y", so \b never matched "reply" at all.
+    r"who\s+has(?:n.?t| not)\s+(?:replied|responded|answered|got back)|"
+    r"(?:what|which)\s+(?:emails?|messages?|threads?)\s+am\s+i\s+waiting\s+on|"
+    r"owe\s+(?:a\s+|an\s+)?(?:repl(?:y|ies)|answer|response)|"
+    r"went\s+quiet|go(?:ne)?\s+quiet|ghosted|"
+    r"unanswered|no\s+(?:repl(?:y|ies)|response|answer)"
     r")\b",
+    re.IGNORECASE,
+)
+
+#: "Is Alfred actually syncing?", narrowly enough to decide a lane. Naming
+#: the machinery explicitly, unlike _STATUS_TERMS, whose bare "status" and
+#: "working" belong to ordinary speech as much as to connectors.
+_CONNECTOR_HEALTH_TERMS = re.compile(
+    r"\b(?:"
+    r"connector|connectors|"
+    r"(?:are|is)\s+(?:all\s+)?(?:my\s+)?\w+\s+(?:still\s+)?(?:connected|syncing)|"
+    r"last\s+sync|syncing|out of sync|"
+    r"connector\s+(?:status|health)|system\s+status"
+    r")\b",
+    re.IGNORECASE,
+)
+
+#: Free time in the calendar. `availability_get` shipped without any routing
+#: at all, so "when am i free thursday" was answered by a model with no
+#: calendar -- confidently, and with nothing anywhere recording that it had
+#: guessed. Kept apart from the calendar *write* vocabulary: this asks what
+#: the calendar already says rather than asking to put something on it.
+_AVAILABILITY_TERMS = re.compile(
+    r"(?:"
+    r"(?:when|what times?)\s+(?:am|are)\s+(?:i|we)\s+free|"
+    r"(?:am|are)\s+(?:i|we)\s+(?:free|busy|available)|"
+    r"free\s+(?:time|slots?)|open\s+(?:slots?|time)|"
+    r"availabilit(?:y|ies)|"
+    r"do\s+(?:i|we)\s+have\s+(?:any\s+|some\s+)?time|"
+    r"gaps?\s+in\s+(?:my|the)\s+(?:calendar|day|schedule|week)|"
+    r"find\s+(?:me\s+)?(?:an?|some)\s+(?:hour|time|slot)|"
+    r"when\s+(?:can|could)\s+(?:i|we)\s+(?:meet|fit|do)"
+    r")",
     re.IGNORECASE,
 )
 _GITHUB_TERMS = re.compile(
@@ -91,7 +133,10 @@ _MEMORY_CORRECT_TERMS = re.compile(
 )
 _MEMORY_FORGET_TERMS = re.compile(r"\b(?:delete|forget|remove)\b", re.IGNORECASE)
 _STATUS_TERMS = re.compile(
-    r"\b(?:connected|connection|connector|online|schema|status|sync|working)\b",
+    # sync(?:ing|ed|s)? rather than sync: \bsync\b matches none of the forms
+    # people actually use ("is gmail still syncing", "when did it last sync"),
+    # the same word-boundary trap that made \breply\b miss "replied".
+    r"\b(?:connected|connection|connector|online|schema|status|sync(?:ing|ed|s)?|working)\b",
     re.IGNORECASE,
 )
 # Wearable / Google Health reads. Kept separate from _STATUS_TERMS so "connector
@@ -336,9 +381,18 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
         if _CALENDAR_WRITE_TERMS.search(topic_text):
             selected.add("calendar_event_propose")
 
+    # Top level, not nested under the mail vocabulary. "who hasn't replied to
+    # me" names no mail word at all -- and _MAIL_TERMS' own `\breply\b` does
+    # not match "replied" either, so the outer gate rejected the question
+    # before the inner test could ever see it. It is a question about who owes
+    # whom, which happens to be answered from mail.
+    if _AWAITING_REPLY_TERMS.search(topic_text):
+        selected.add("threads_awaiting_reply")
+
+    if _AVAILABILITY_TERMS.search(topic_text):
+        selected.add("availability_get")
+
     if _MAIL_TERMS.search(topic_text) or _EMAIL_ADDRESS.search(topic_text):
-        if _AWAITING_REPLY_TERMS.search(topic_text):
-            selected.add("threads_awaiting_reply")
         if _MAIL_DRAFT_TERMS.search(topic_text):
             selected.add("message_draft")
         if _MAIL_SEND_TERMS.search(topic_text):
@@ -437,6 +491,25 @@ def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool
     if _IMPORTANT_DATE_TERMS.search(request):
         return False
     if _MOOD_TERMS.search(request) or _GRATITUDE_TERMS.search(request) or _JOURNAL_TERMS.search(request):
+        return False
+    # These four read synced local data, and the casual lane carries none of
+    # it. Each one sounds like small talk -- "am i free thursday", "any prs
+    # waiting on me" -- which is exactly why they slipped through: a question
+    # phrased casually was routed casually and answered by a model with no
+    # calendar, no GitHub snapshot, and no mail. Nothing failed; the answer
+    # was simply invented, and no error was recorded anywhere.
+    if _AVAILABILITY_TERMS.search(request):
+        return False
+    if _AWAITING_REPLY_TERMS.search(request):
+        return False
+    if _PR_WATCH_TERMS.search(request):
+        return False
+    # Deliberately narrower than _STATUS_TERMS, which is fine for choosing a
+    # tool but far too broad to decide a lane: it matches "status", "working",
+    # "health", and "online" as bare words, so guarding on it sent "how should
+    # you write status updates?" -- a question about voice -- to the tool lane.
+    # A lane guard has to name the machinery explicitly.
+    if _CONNECTOR_HEALTH_TERMS.search(request):
         return False
     # Short follow-ups inherit a recent work topic ("why?", "yeah do that"),
     # while a new substantive message starts its own conversational turn.
