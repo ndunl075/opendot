@@ -24,6 +24,7 @@ _MODULE_TO_CONNECTOR = {
     "google_calendar": "google_calendar",
     "gmail": "gmail",
     "github": "github",
+    "composio": "composio",
 }
 
 
@@ -96,6 +97,7 @@ def test_writing_connectors_are_exactly_the_expected_set() -> None:
         "github",
         "telegram",
         "slack",
+        "composio",
     }
 
 

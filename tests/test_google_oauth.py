@@ -87,6 +87,7 @@ def test_oauth_client_refreshes_access_token_without_a_new_refresh_token() -> No
         body = request.read().decode("utf-8")
         assert "grant_type=refresh_token" in body
         assert "refresh_token=stored-refresh-token" in body
+        assert "scope=" not in body
         return httpx.Response(200, json={"access_token": "FRESH", "expires_in": 3600})
 
     client = GoogleOAuthClient("CLIENT_ID", "CLIENT_SECRET", transport=httpx.MockTransport(handler))
@@ -96,6 +97,21 @@ def test_oauth_client_refreshes_access_token_without_a_new_refresh_token() -> No
         client.close()
     assert token.access_token == "FRESH"
     assert token.refresh_token is None
+
+
+def test_oauth_client_can_downscope_a_refresh_to_a_subset_of_the_grant() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode("utf-8")
+        assert "grant_type=refresh_token" in body
+        assert "scope=health-a+health-b" in body or "scope=health-a%20health-b" in body
+        return httpx.Response(200, json={"access_token": "HEALTH", "expires_in": 3600, "scope": "health-a health-b"})
+
+    client = GoogleOAuthClient("CLIENT_ID", "CLIENT_SECRET", transport=httpx.MockTransport(handler))
+    try:
+        token = client.refresh_access_token("stored-refresh-token", scopes=("health-a", "health-b"))
+    finally:
+        client.close()
+    assert token.access_token == "HEALTH"
 
 
 def test_oauth_client_raises_on_an_error_response() -> None:

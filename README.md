@@ -83,12 +83,15 @@ approve: a human (or a trusted local channel outside the MCP client, e.g.
 | Canvas iCal | `alfred canvas-ical-setup` | dated assignments | — |
 | GitHub | `github-token` / `github-issue-token` | unread notifications | approval-gated issues |
 | Google Health | extra OAuth scopes | sleep, activity, metrics | — |
+| Composio | `alfred composio-setup` | overflow apps (Notion, Spotify, …) | approval-gated writes |
 
-Slack and Google Health are built and unit-tested against synthetic fixtures
-but have **not** been exercised against a real Slack app or wearable-linked
-account. Treat Health field names as unverified until someone does;
-`_normalize_data_point` in `google_health.py` never drops a point silently—the
-complete raw point is always kept in `metadata["raw"]`.
+Slack is built and unit-tested against synthetic fixtures but has **not**
+been exercised against a real Slack app. Google Health's list client now
+matches the published v4 shapes (typed filters, nested payloads, empty
+`name` on non-identifiable points, sleep page size 25); it still keeps the
+complete raw point in `metadata["raw"]` and still needs a live wearable-
+linked grant (`alfred google-auth --include-health`) before treating the
+connector as verified.
 
 `alfred connector-status` (or MCP `connector_status`) reports `ok`, `stale`
 (no success in 24 hours), `error`, or `never_synced` without exposing a
@@ -96,8 +99,8 @@ credential or synced content.
 
 `alfred connector-capabilities` answers what each connector is *allowed* to
 do: who can write, which OAuth scopes are actually requested, which stores
-`sensitive` data, and whether it polls, pushes, or is local. Today five can
-write (Calendar, Gmail, GitHub, Telegram, Slack) and exactly one stores
+`sensitive` data, and whether it polls, pushes, or is local. Today six can
+write (Calendar, Gmail, GitHub, Telegram, Slack, Composio) and exactly one stores
 `sensitive` data (Google Health, all three scopes read-only). "Can write"
 marks the approval boundary—nothing there runs unattended. The same table is
 on the admin dashboard and is cross-checked against the source by tests.
@@ -166,23 +169,25 @@ Alfred never replies by email from this path. Pass `--gmail-inbound-sender`
 continuously.
 
 Google Health reuses the same grant but needs extra scopes Calendar/Gmail do
-not request by default:
+not request by default. Enable the Google Health API on the Cloud project,
+add the three `googlehealth.*.readonly` scopes on the OAuth Data Access
+page, then:
 
 ```text
-alfred google-auth
-  --scope https://www.googleapis.com/auth/calendar.events
-  --scope https://www.googleapis.com/auth/gmail.readonly
-  --scope https://www.googleapis.com/auth/gmail.compose
-  --scope https://www.googleapis.com/auth/googlehealth.sleep.readonly
-  --scope https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
-  --scope https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly
+alfred google-auth --include-health
 ```
 
-The first three keep Calendar/Gmail working; all six come from one consent
-screen. Then `alfred health-sync` copies steps, sleep, and heart-rate points
-from the last 14 days (`--lookback-days` to change that) as `sensitive`-tagged
-events—health metrics never inherit `personal`'s default retrieval scope.
-Health writes stay disabled.
+That keeps every Calendar/Gmail default (including
+`calendar.calendarlist.readonly`) and adds sleep, activity, and vitals
+read-only. Health is never implied by a plain `google-auth`. Google Health
+rejects access tokens that also carry Calendar/Gmail scopes, so
+`alfred health-sync` refreshes a health-only subset of that grant. The
+Google account must also be linked to Fitbit (Google Health returns
+`ACCOUNT_NOT_LINKED` until it is). It copies the last 14 days (`--lookback-days` to change that) of steps, sleep
+sessions, and daily resting heart rate as `sensitive`-tagged events—health
+metrics never inherit `personal`'s default retrieval scope. Sample-level
+BPM is not stored; it is too dense for the event log. Health writes stay
+disabled.
 
 ### Canvas
 
@@ -236,6 +241,27 @@ during sync or without a fresh approval token. Each created issue includes an
 invisible Alfred recovery marker so a crash between GitHub accepting it and
 Alfred storing the receipt can still find that exact issue. PR comments use
 the same recovery process.
+
+### Composio (overflow apps)
+
+Use this for apps Alfred does not already own — Notion, Spotify, Linear,
+Discord, and the rest of Composio's catalog. Gmail, Calendar, GitHub, Slack,
+Telegram, and Fitbit stay first-party.
+
+1. Create a free project at [dashboard.composio.dev](https://dashboard.composio.dev)
+   (no card; new signups are hard-capped at 100k tool calls/month).
+2. Copy an API key from Settings and run `alfred composio-setup`.
+3. `alfred composio-connect notion` prints a Connect Link; open it, sign in,
+   then `alfred composio-search "list pages" --toolkit notion`.
+4. Grant Hermes the four tools (`composio_search`, `composio_status`,
+   `composio_connect`, `composio_execute`) on the existing `client-grant`.
+
+Reads run immediately. Writes still preview and wait for the Telegram
+approve button. Do not add Composio's hosted MCP URL to Hermes — every
+Telegram turn runs YOLO, so that path would auto-approve third-party writes.
+
+`alfred composio-status` shows connected accounts and this UTC month's local
+call count against the free-tier cap.
 
 ### Morning brief
 
@@ -368,7 +394,7 @@ tools per turn, and a fresh zero-tool ACP session exceeded 30 seconds before
 a prompt ran.
 
 - Work turns get a keyword acknowledgement first (`checking your agenda...`,
-  `checking your inbox...`); casual turns skip it. Acknowledgements are not
+  `drafting email to you@example.com...`); casual turns skip it. Acknowledgements are not
   model calls—they're produced inside the intake write transaction, and the
   agent turn has to wait until that transaction closes.
 - Telegram `typing...` is best effort and never blocks the durable answer.
@@ -564,13 +590,11 @@ After a conversational reply is delivered, Alfred runs a local learning pass:
   relevant/irrelevant/incorrect retrievals as append-only evaluation data
   and reorders only memories already selected for a matching query.
 
-Every successful Telegram answer ends with `helpful`, `missing context`, and
-`wrong context` buttons. A tap records one vote plus a content-free trace of
-source names, connector freshness, and opaque ranked IDs—neither prompt nor
-answer. Helpful/wrong can reorder Gmail or GitHub records only within their
-existing deterministic priority tier; `missing context` is an evaluation
-signal, not a guess at what was absent. Callbacks are paired to the original
-sender, accept one vote per response, and never approve or execute an action.
+Telegram no longer puts `helpful` / `missing context` / `wrong context`
+buttons on every reply. `response_context` is still stored; a later pass
+should infer those labels from the following conversation instead of asking
+the owner to tap them. Existing votes still reorder Gmail or GitHub records
+only within their deterministic priority tier.
 
 Calendar and Canvas history use a derived academic layer. Immutable connector
 events remain authoritative. After sync, Alfred deduplicates revisions into
@@ -644,6 +668,37 @@ pulled in transitively by the `mcp` package on Windows; if importing it
 fails, run `python .\.venv\Scripts\pywin32_postinstall.py -install` once.
 Installing, starting, stopping, and removing the service are Administrator
 actions you run yourself—Alfred never elevates or registers itself.
+
+### Restart Alfred from your phone
+
+When Alfred is running, Telegram accepts three operator commands from paired
+chats:
+
+- `/status` — is the loop alive, and when did it last cycle?
+- `/restart` — restart now
+- `/wake` — same as `/restart` when Alfred is down
+
+Register the watchdog once (Administrator PowerShell, after
+`service-configure`):
+
+```powershell
+.\scripts\register-watchdog.ps1
+```
+
+That creates two Task Scheduler entries:
+
+- **AlfredWatchdog** — every five minutes, runs `alfred watchdog-check`. If
+  the heartbeat is stale, it restarts the Windows service (or falls back to
+  the configured `alfred run` command from `.alfred/service.json`) and does
+  one Telegram poll for `/wake` or `/restart`.
+- **AlfredRestart** — on-demand restart used by `/restart` and the watchdog,
+  with highest privileges so your phone does not need an Administrator prompt
+  each time.
+
+The runner writes a heartbeat every cycle, so a hung or dead process is picked
+up automatically within a few minutes even if you do nothing. When Alfred is
+fully stopped, send `/wake` from Telegram; the next watchdog pass sees it and
+starts Alfred back up.
 
 ## Local memory graph
 

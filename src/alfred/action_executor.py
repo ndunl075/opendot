@@ -7,6 +7,7 @@ from typing import Any
 from .db import Database
 from .gmail import GmailActions, GmailClient, GmailSendActions
 from .github import GitHubActions, GitHubClient
+from .composio import ComposioActions, ComposioClient, SECRET_NAME as COMPOSIO_SECRET_NAME
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
 from .google_oauth import current_access_token
 from .memory_graph import MemoryActions
@@ -58,6 +59,14 @@ class ActionExecutor:
             client = GitHubClient(self.secrets.get_required("github-issue-token"))
             try:
                 return GitHubActions(self.database, self.approvals, client).execute(
+                    approval_id, actor=actor, token=token
+                ).model_dump(mode="json")
+            finally:
+                client.close()
+        if approval.action_type == "composio_tool_execute":
+            client = ComposioClient(self.secrets.get_required(COMPOSIO_SECRET_NAME), database=self.database)
+            try:
+                return ComposioActions(self.database, self.approvals, client).execute(
                     approval_id, actor=actor, token=token
                 ).model_dump(mode="json")
             finally:

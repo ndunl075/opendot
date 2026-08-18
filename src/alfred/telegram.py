@@ -169,11 +169,27 @@ class TelegramGateway:
     #: are single-intent and return on their own. Every write here is still
     #: preview-then-approve, so the wording says work is starting and never
     #: that anything was sent, created, or deleted.
+    #: Mail writes are handled in acknowledgement_for so a recipient address
+    #: can appear in the ack. "send it to mom@gmail.com" used to fall through
+    #: to the inbox read because "gmail" matched inside the address.
+    agent_ack_mail_actions: tuple[str, ...] = (
+        "draft",
+        "reply to",
+        "respond to",
+        "send an email",
+        "send email",
+        "send it",
+        "send this",
+        "send to",
+        "email him",
+        "email her",
+        "email them",
+    )
+    _EMAIL_ADDRESS = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.IGNORECASE)
+
     agent_ack_actions: tuple[tuple[tuple[str, ...], str], ...] = (
         (("search the web", "search online", "look it up", "look up online", "look online"),
          "searching the web..."),
-        (("draft", "reply to", "respond to", "send an email", "send email", "email him", "email her", "email them"),
-         "drafting that..."),
         (("schedule a", "schedule an", "book a", "book an", "put on my calendar", "add to my calendar",
           "add to calendar", "set up a meeting"), "setting that up..."),
         (("open an issue", "file an issue", "create an issue", "make an issue"), "writing that issue..."),
@@ -209,6 +225,11 @@ class TelegramGateway:
     def acknowledgement_for(cls, text: str) -> str:
         """Name what's being looked at, in the order the message mentions it."""
         haystack = f" {text.lower().strip()} "
+        if any(_contains_phrase(haystack, keyword) for keyword in cls.agent_ack_mail_actions):
+            addresses = cls._EMAIL_ADDRESS.findall(text)
+            if addresses:
+                return f"drafting email to {addresses[0]}..."
+            return "drafting that..."
         for keywords, ack in cls.agent_ack_actions:
             if any(_contains_phrase(haystack, keyword) for keyword in keywords):
                 return ack
@@ -516,7 +537,23 @@ class TelegramGateway:
                 # seconds and must not run inside this write transaction, so
                 # `hermes_bridge` sends the real answer as a second message.
                 return TelegramReceipt(text=self.acknowledgement_for(text), agent_deferred=True)
-            return TelegramReceipt(text=f"{parse_error} Use /task <title> or /remind <ISO-8601 time> <title>.")
+            return TelegramReceipt(
+                text=f"{parse_error} Use /task, /remind, /status, or /restart."
+            )
+
+        if parsed.command == "runtime_status":
+            from .runtime_control import format_runtime_status, runtime_status
+
+            return TelegramReceipt(text=format_runtime_status(runtime_status(self.database)))
+
+        if parsed.command == "runtime_restart":
+            from .runtime_control import _write_restart_request, restart_alfred
+
+            restart = restart_alfred()
+            if restart.ok:
+                return TelegramReceipt(text=f"restarting via {restart.method}.")
+            _write_restart_request(connection, requested_at=datetime.now(UTC))
+            return TelegramReceipt(text="restart queued. watchdog will pick it up shortly.")
 
         task = TaskStore.create(connection, title=parsed.title, source_event_id=event_id, due_at=parsed.due_at)
         if parsed.command == "task":
@@ -582,6 +619,11 @@ class TelegramGateway:
                 due_at=due_at,
                 remind_at=remind_at,
             )
+        lowered = normalized.casefold()
+        if lowered == "/status" or lowered.startswith("/status "):
+            return ParsedCommand("runtime_status", "")
+        if lowered in {"/restart", "/wake"} or lowered.startswith("/restart ") or lowered.startswith("/wake "):
+            return ParsedCommand("runtime_restart", "")
         raise ValueError("I do not understand that command.")
 
     @staticmethod

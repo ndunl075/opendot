@@ -1,4 +1,4 @@
-"""Read-only Google Health sync: steps, sleep, and heart rate.
+"""Read-only Google Health sync: steps, sleep, and daily resting heart rate.
 
 Decision 7 targets the Google Health API specifically, not the legacy
 Fitbit Web API (which the doc notes stops syncing in September 2026).
@@ -8,19 +8,25 @@ matching section 8's "Tag data public, personal, sensitive, or secret"
 rule, so MCP client scopes and vault export both keep it out of anywhere
 it isn't explicitly granted.
 
-Endpoint shapes, scopes, and field names below are sourced from Google's
-own v4 REST reference (developers.google.com/health) as of 2026-08 -- this
-project has no way to smoke-test against a real Google Health-linked
-wearable account. Like Slack Socket Mode, treat this as *built but
-unverified* until it has actually run against one; `_normalize_data_point`
-is deliberately defensive (it keeps the complete raw data point in
-`metadata["raw"]` alongside its best-effort summary) precisely because a
-field name here could be wrong and nothing should be silently lost if so.
+The v4 REST shapes come from developers.google.com/health. A DataPoint
+puts the typed payload (and its interval / sample time / civil date) in
+the union field -- `steps`, `sleep`, `heartRate`, `dailyRestingHeartRate`
+-- not at the top level. Most types are not identifiable, so `name` is
+often empty; sleep sessions are the exception. Sample `heart-rate` is
+supported by the client but is not part of the default sync: a 14-day
+lookback of wearable samples is too dense for the event log, and daily
+resting heart rate is the secretary-useful metric.
+
+`_normalize_data_point` still keeps the complete raw point in
+`metadata["raw"]` so a remaining field-name mismatch cannot silently drop
+the observation.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import hashlib
+import json
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -30,19 +36,54 @@ from .audit import AuditEvent, AuditLog
 from .connector_records import ConnectorRecordStore
 from .db import Database
 from .events import EventStore
+from .google_oauth import DEFAULT_SCOPES
+from .wall_clock import format_duration
 
-# Additional OAuth scopes beyond google_oauth.DEFAULT_SCOPES. Pass them
-# explicitly with repeated `alfred google-auth --scope` flags alongside the
-# defaults -- section 12 already treats the default grant as overridable/
-# extendable per operator, and health access should never be silently
-# bundled into the Calendar/Gmail consent screen everyone else gets.
+# Additional OAuth scopes beyond google_oauth.DEFAULT_SCOPES. Health access
+# is never silently bundled into the Calendar/Gmail consent screen; pass
+# `alfred google-auth --include-health` (or repeated `--scope` flags) so the
+# operator opts in on a distinct consent screen.
 SLEEP_SCOPE = "https://www.googleapis.com/auth/googlehealth.sleep.readonly"
 ACTIVITY_SCOPE = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly"
 VITALS_SCOPE = "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly"
 REQUIRED_SCOPES: tuple[str, ...] = (SLEEP_SCOPE, ACTIVITY_SCOPE, VITALS_SCOPE)
 
-DataTypeName = Literal["steps", "sleep", "heart-rate"]
-DATA_TYPES: tuple[DataTypeName, ...] = ("steps", "sleep", "heart-rate")
+
+class HealthAccountNotLinked(RuntimeError):
+    """The Google account has OAuth, but no Fitbit/Google Health link."""
+
+
+DataTypeName = Literal["steps", "sleep", "heart-rate", "daily-resting-heart-rate"]
+DATA_TYPES: tuple[DataTypeName, ...] = ("steps", "sleep", "daily-resting-heart-rate")
+
+# URL path segment -> union field, AIP-160 filter field, and list page size.
+# Sleep/exercise cap at 25; everything else truncates above 10_000.
+_PAYLOAD_FIELD: dict[str, str] = {
+    "steps": "steps",
+    "sleep": "sleep",
+    "heart-rate": "heartRate",
+    "daily-resting-heart-rate": "dailyRestingHeartRate",
+}
+_FILTER_FIELD: dict[str, str] = {
+    "steps": "steps.interval.start_time",
+    "sleep": "sleep.interval.end_time",
+    "heart-rate": "heart_rate.sample_time.physical_time",
+    "daily-resting-heart-rate": "daily_resting_heart_rate.date",
+}
+_PAGE_SIZE: dict[str, int] = {
+    "steps": 10_000,
+    "sleep": 25,
+    "heart-rate": 10_000,
+    "daily-resting-heart-rate": 90,
+}
+
+
+def google_auth_scopes(*, include_health: bool = False, requested: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Calendar/Gmail defaults, plus health scopes only when the operator asked."""
+    scopes = requested or DEFAULT_SCOPES
+    if include_health:
+        scopes = tuple(dict.fromkeys((*scopes, *REQUIRED_SCOPES)))
+    return scopes
 
 
 class HealthTransport(Protocol):
@@ -70,15 +111,21 @@ class GoogleHealthClient:
     def list_data_points(self, *, data_type: DataTypeName, since: datetime) -> list[dict[str, Any]]:
         """Return every data point of one type at/after `since`, paginating as needed."""
         params: dict[str, str | int] = {
-            "filter": f'interval.start_time >= "{_rfc3339(since)}"',
-            "pageSize": 10_000,
+            "filter": _list_filter(data_type, since),
+            "pageSize": _PAGE_SIZE.get(data_type, 1_440),
         }
         items: list[dict[str, Any]] = []
         for _ in range(50):
             response = self._client.get(f"/users/me/dataTypes/{data_type}/dataPoints", params=params)
+            if response.status_code in {401, 403}:
+                raise PermissionError(_denied_message(response))
+            if response.status_code == 400:
+                raise _bad_request_error(data_type, response)
             response.raise_for_status()
             payload = response.json()
-            page_items = payload.get("dataPoints")
+            page_items = payload.get("dataPoints", [])
+            if page_items is None:
+                page_items = []
             if not isinstance(page_items, list):
                 raise ValueError(f"Google Health {data_type} response has no 'dataPoints' list")
             items.extend(item for item in page_items if isinstance(item, dict))
@@ -97,7 +144,7 @@ class HealthSyncResult(BaseModel):
 
 
 class GoogleHealthSync:
-    """Snapshot the last `lookback_days` of steps/sleep/heart-rate as source events."""
+    """Snapshot the last `lookback_days` of steps/sleep/resting-HR as source events."""
 
     connector_name = "google_health"
     account_name = "self"
@@ -179,57 +226,195 @@ class GoogleHealthSync:
                 )
 
 
-def _point_id(point: dict[str, Any]) -> str | None:
-    """Extract the trailing dataPoint ID from a resource `name` like
-    'users/me/dataTypes/steps/dataPoints/{id}'."""
+def _error_info(response: httpx.Response) -> tuple[str, str, str]:
+    """Return (status, reason, first-clause message). Never a data payload."""
+    status = ""
+    reason = ""
+    message = ""
+    try:
+        error = response.json().get("error") or {}
+        if isinstance(error, dict):
+            status = str(error.get("status") or "")
+            message = str(error.get("message") or "").split(".")[0][:160]
+            details = error.get("details")
+            if isinstance(details, list) and details and isinstance(details[0], dict):
+                reason = str(details[0].get("reason") or "")
+    except ValueError:
+        pass
+    return status, reason, message
+
+
+def _denied_message(response: httpx.Response) -> str:
+    """Operator-facing 401/403 text: Google's status/reason, never a payload."""
+    status, reason, message = _error_info(response)
+    hint = "Enable the Google Health API, add the three googlehealth.*.readonly scopes on the OAuth Data Access page, and re-run `alfred google-auth --include-health`."
+    if reason == "SERVICE_DISABLED":
+        hint = "Enable the Google Health API on this Cloud project, then retry `alfred health-sync`."
+    elif reason == "DISALLOWED_OAUTH_SCOPES":
+        hint = (
+            "Google Health rejects Calendar/Gmail scopes on the same access token. "
+            "Alfred downscopes the refresh; if this persists, re-run `alfred google-auth --include-health`."
+        )
+    elif "insufficient authentication scopes" in message.lower():
+        hint = "Re-run `alfred google-auth --include-health` so the refresh token includes the health scopes."
+    detail = ", ".join(part for part in (status, reason) if part)
+    return f"Google Health denied the request ({detail or response.status_code}). {hint}"
+
+
+def _bad_request_error(data_type: DataTypeName, response: httpx.Response) -> Exception:
+    _, reason, message = _error_info(response)
+    if reason == "ACCOUNT_NOT_LINKED":
+        return HealthAccountNotLinked(
+            "This Google account is not linked to Fitbit/Google Health. "
+            "Sign into Fitbit with the same Google account, then retry `alfred health-sync`."
+        )
+    detail = reason or message or str(response.status_code)
+    return ValueError(f"Google Health rejected the {data_type} query ({detail})")
+
+
+def _list_filter(data_type: DataTypeName, since: datetime) -> str:
+    field = _FILTER_FIELD.get(data_type)
+    if field is None:
+        raise ValueError(f"unsupported Google Health data type: {data_type}")
+    if data_type == "daily-resting-heart-rate":
+        return f'{field} >= "{since.astimezone(UTC).date().isoformat()}"'
+    return f'{field} >= "{_rfc3339(since)}"'
+
+
+def _typed_payload(data_type: DataTypeName, point: dict[str, Any]) -> dict[str, Any]:
+    field = _PAYLOAD_FIELD.get(data_type)
+    nested = point.get(field) if field else None
+    return nested if isinstance(nested, dict) else {}
+
+
+def _point_id(data_type: DataTypeName, point: dict[str, Any]) -> str | None:
+    """Prefer the resource name; otherwise a stable hash of the typed payload.
+
+    Most Health data types are not identifiable -- `name` is empty -- so a
+    hash of the typed observation is the only idempotent key we can form.
+    """
     name = point.get("name")
-    if isinstance(name, str) and name:
+    if isinstance(name, str) and name.strip():
         return name.rsplit("/", maxsplit=1)[-1]
+    payload = _typed_payload(data_type, point)
+    if not payload:
+        return None
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return digest[:32]
+
+
+def _civil_date(value: object) -> date | None:
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    if isinstance(value, dict):
+        year, month, day = value.get("year"), value.get("month"), value.get("day")
+        if isinstance(year, int) and isinstance(month, int) and isinstance(day, int):
+            try:
+                return date(year, month, day)
+            except ValueError:
+                return None
     return None
 
 
-def _point_time(point: dict[str, Any]) -> datetime | None:
-    """Best-effort timestamp: an interval's start, a sample's own time, or the update time."""
-    interval = point.get("interval")
-    if isinstance(interval, dict):
-        start = interval.get("startTime")
-        if isinstance(start, str):
-            return _parse_rfc3339(start)
-    sample_time = point.get("sampleTime")
-    if isinstance(sample_time, dict):
-        physical_time = sample_time.get("physicalTime")
-        if isinstance(physical_time, str):
-            return _parse_rfc3339(physical_time)
-    for key in ("updateTime", "createTime"):
-        value = point.get(key)
-        if isinstance(value, str):
-            return _parse_rfc3339(value)
+def _point_time(data_type: DataTypeName, point: dict[str, Any]) -> datetime | None:
+    """Best-effort timestamp: typed interval/sample/date, then a top-level fallback."""
+    payload = _typed_payload(data_type, point)
+    candidates = (payload, point)
+    for source in candidates:
+        interval = source.get("interval")
+        if isinstance(interval, dict):
+            start = interval.get("startTime")
+            if isinstance(start, str):
+                parsed = _parse_rfc3339(start)
+                if parsed is not None:
+                    return parsed
+        sample_time = source.get("sampleTime")
+        if isinstance(sample_time, dict):
+            physical_time = sample_time.get("physicalTime")
+            if isinstance(physical_time, str):
+                parsed = _parse_rfc3339(physical_time)
+                if parsed is not None:
+                    return parsed
+        civil = _civil_date(source.get("date"))
+        if civil is not None:
+            return datetime(civil.year, civil.month, civil.day, tzinfo=UTC)
+        for key in ("updateTime", "createTime"):
+            value = source.get(key)
+            if isinstance(value, str):
+                parsed = _parse_rfc3339(value)
+                if parsed is not None:
+                    return parsed
     return None
+
+
+def _as_number(value: object) -> int | float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(value) if value.lstrip("-").isdigit() else float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _sleep_interval(payload: dict[str, Any]) -> tuple[datetime, datetime] | None:
+    interval = payload.get("interval")
+    if not isinstance(interval, dict):
+        return None
+    start = _parse_rfc3339(interval["startTime"]) if isinstance(interval.get("startTime"), str) else None
+    end = _parse_rfc3339(interval["endTime"]) if isinstance(interval.get("endTime"), str) else None
+    if start is None or end is None or end <= start:
+        return None
+    return start, end
 
 
 def _point_summary(data_type: DataTypeName, point: dict[str, Any]) -> str:
     """Best-effort one-line summary; the full point is always kept in metadata too."""
+    payload = _typed_payload(data_type, point)
     if data_type == "steps":
-        steps = point.get("steps")
-        count = steps.get("count") if isinstance(steps, dict) else point.get("count")
-        if isinstance(count, int | float):
+        count = _as_number(payload.get("count") if payload else None)
+        if count is None:
+            count = _as_number(point.get("count"))
+            steps = point.get("steps")
+            if count is None and isinstance(steps, dict):
+                count = _as_number(steps.get("count"))
+        if count is not None:
             return f"{int(count):,} steps"
-    if data_type == "heart-rate":
-        heart_rate = point.get("heartRate")
-        bpm = heart_rate.get("beatsPerMinute") if isinstance(heart_rate, dict) else point.get("beatsPerMinute")
-        if isinstance(bpm, int | float):
-            return f"{bpm:g} bpm"
+    if data_type in {"heart-rate", "daily-resting-heart-rate"}:
+        bpm = _as_number(payload.get("beatsPerMinute") if payload else None)
+        if bpm is None:
+            heart_rate = point.get("heartRate")
+            bpm = heart_rate.get("beatsPerMinute") if isinstance(heart_rate, dict) else point.get("beatsPerMinute")
+            bpm = _as_number(bpm)
+        if bpm is not None:
+            label = " bpm resting" if data_type == "daily-resting-heart-rate" else " bpm"
+            return f"{bpm:g}{label}"
     if data_type == "sleep":
-        sleep = point.get("sleep")
+        sleep = payload or (point.get("sleep") if isinstance(point.get("sleep"), dict) else {})
+        bounds = _sleep_interval(sleep) or _sleep_interval(point)
+        sleep_type = sleep.get("type") if isinstance(sleep.get("type"), str) else None
+        if bounds is not None:
+            summary = f"sleep: {format_duration(bounds[1] - bounds[0])}"
+            if sleep_type:
+                return f"{summary} ({sleep_type.lower()})"
+            return summary
         stage = sleep.get("stage") if isinstance(sleep, dict) else point.get("stage")
-        if isinstance(stage, str):
-            return f"sleep: {stage}"
+        if isinstance(stage, str) and stage.strip():
+            return f"sleep: {stage.strip().lower()}"
+        if sleep_type:
+            return f"sleep: {sleep_type.lower()}"
     return f"{data_type} data point"
 
 
 def _normalize_data_point(data_type: DataTypeName, point: dict[str, Any]) -> dict[str, Any] | None:
-    point_id = _point_id(point)
-    occurred_at = _point_time(point)
+    point_id = _point_id(data_type, point)
+    occurred_at = _point_time(data_type, point)
     if point_id is None or occurred_at is None:
         # Can't form a stable external_id or a timestamp -- skip rather than
         # guess; the caller's received count still reflects it was seen.
@@ -245,7 +430,7 @@ def _normalize_data_point(data_type: DataTypeName, point: dict[str, Any]) -> dic
 
 
 def _rfc3339(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_rfc3339(value: str) -> datetime | None:

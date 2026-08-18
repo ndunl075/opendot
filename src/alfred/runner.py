@@ -22,6 +22,7 @@ from .audit import AuditEvent, AuditLog
 from .db import Database
 from .jobs import JobRunner
 from .quiet_hours import QuietHours
+from .runtime_control import clear_restart_request, record_heartbeat, restart_alfred, restart_pending
 from .telegram import TelegramPair
 from .telegram_actions import TelegramActionWorker
 from .telegram_runtime import (
@@ -124,6 +125,8 @@ class AlfredRunner:
         while (iterations is None or count < iterations) and not stop_check():
             report = self.run_once()
             count += 1
+            if self._restart_requested():
+                break
             if (iterations is None or count < iterations) and not stop_check():
                 poll_failed = any(error.startswith("telegram_poll:") for error in report.errors)
                 # A failed long poll has already spent its timeout waiting.
@@ -223,6 +226,7 @@ class AlfredRunner:
         else:
             synced = self._sync_connectors(self.connectors, errors)
 
+        record_heartbeat(self.database)
         return RunOnceReport(
             telegram_polled=telegram_polled,
             jobs_executed=jobs_executed,
@@ -336,3 +340,14 @@ class AlfredRunner:
             )
             print(f"[alfred run] {context} failed: {reason}")
             return False, None
+
+    def _restart_requested(self) -> bool:
+        if not restart_pending(self.database):
+            return False
+        clear_restart_request(self.database)
+        restart = restart_alfred()
+        if restart.ok:
+            print(f"[alfred run] restart requested via {restart.method}")
+        else:
+            print(f"[alfred run] restart requested but {restart.detail}")
+        return True

@@ -34,8 +34,12 @@ _CALENDAR_WRITE_TERMS = re.compile(
     r"\b(?:add|book|create|move|reschedule|schedule|set up)\b", re.IGNORECASE
 )
 _MAIL_TERMS = re.compile(r"\b(?:email|gmail|inbox|mail|message|reply)\b", re.IGNORECASE)
+_EMAIL_ADDRESS = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.IGNORECASE)
 _MAIL_DRAFT_TERMS = re.compile(r"\b(?:compose|draft|reply|respond|write)\b", re.IGNORECASE)
-_MAIL_SEND_TERMS = re.compile(r"\b(?:send|email them|message them)\b", re.IGNORECASE)
+_MAIL_SEND_TERMS = re.compile(
+    r"\b(?:send(?:\s+(?:it|this|that|to|an?\s+email|email))?|email them|message them)\b",
+    re.IGNORECASE,
+)
 # Distinct from a plain inbox check: the bridge already prefetches unread mail,
 # so threads_awaiting_reply is only offered when the user asks for that report.
 _AWAITING_REPLY_TERMS = re.compile(
@@ -51,6 +55,20 @@ _GITHUB_TERMS = re.compile(
 )
 _GITHUB_WRITE_TERMS = re.compile(
     r"\b(?:create|file|open|report)\b.*\bissue\b|\bissue\b.*\b(?:create|file|open|report)\b",
+    re.IGNORECASE,
+)
+# Overflow apps Alfred does not own first-party. Kept off Gmail/Calendar/GitHub
+# on purpose: those have dedicated connectors and must not route here.
+_COMPOSIO_TERMS = re.compile(
+    r"\b(?:"
+    r"composio|notion|spotify|linear|jira|asana|trello|todoist|"
+    r"discord|zoom|figma|airtable|hubspot|salesforce|linkedin|"
+    r"instagram|youtube|reddit|dropbox|box.com|onedrive"
+    r")\b",
+    re.IGNORECASE,
+)
+_COMPOSIO_CONNECT_TERMS = re.compile(
+    r"\b(?:connect|sign in|sign into|link|authorize|auth)\b",
     re.IGNORECASE,
 )
 _PR_WATCH_TERMS = re.compile(
@@ -73,7 +91,16 @@ _MEMORY_CORRECT_TERMS = re.compile(
 )
 _MEMORY_FORGET_TERMS = re.compile(r"\b(?:delete|forget|remove)\b", re.IGNORECASE)
 _STATUS_TERMS = re.compile(
-    r"\b(?:connected|connection|connector|health|online|schema|status|sync|working)\b",
+    r"\b(?:connected|connection|connector|online|schema|status|sync|working)\b",
+    re.IGNORECASE,
+)
+# Wearable / Google Health reads. Kept separate from _STATUS_TERMS so "connector
+# health" still maps to connector_status while "how did I sleep" maps here.
+_HEALTH_TERMS = re.compile(
+    r"\b(?:"
+    r"health|steps|step count|sleep|slept|resting heart|heart rate|bpm|fitbit|wearable|"
+    r"activity(?:\s+data)?|workout|last night(?:'s)?\s+sleep"
+    r")\b",
     re.IGNORECASE,
 )
 _DAY_PLANNING_TERMS = re.compile(
@@ -86,10 +113,11 @@ _SOCIAL_GREETING = re.compile(
 )
 _EXPLICIT_WORK_TERMS = re.compile(
     r"\b(?:agenda|anniversary|assignment|bedtime|birthday|calendar|canvas|class|connector|"
-    r"course|deadline|due|email|gmail|github|health|inbox|issue|lock[\s-]?in|mail|meeting|"
-    r"gratitude|journal|memory|mood|nag|note|pull request|remind(?:er|ing|s)?|repo|schedule|"
-    r"search the web|slack|task|"
-    r"to-?do|wake(?:\s+me)?\s*up|wake-up|web search|workout)\b",
+    r"airtable|asana|composio|course|deadline|discord|due|email|figma|gmail|github|health|hubspot|inbox|issue|jira|linear|"
+    r"linkedin|lock[\s-]?in|mail|meeting|notion|"
+    r"gratitude|journal|memory|mood|nag|note|pull request|remind(?:er|ing|s)?|repo|salesforce|schedule|"
+    r"search the web|slack|sleep|spotify|steps|task|todoist|trello|"
+    r"to-?do|wake(?:\s+me)?\s*up|wake-up|web search|workout|zoom)\b",
     re.IGNORECASE,
 )
 
@@ -231,6 +259,8 @@ _TOOL_PRIORITY = (
     "message_draft",
     "message_send_propose",
     "github_issue_propose",
+    "composio_execute",
+    "composio_connect",
     "important_date_set",
     "mood_record",
     "gratitude_record",
@@ -254,6 +284,8 @@ _TOOL_PRIORITY = (
     "connector_status",
     "system_status",
     "connector_records_get",
+    "composio_search",
+    "composio_status",
 )
 
 
@@ -304,7 +336,7 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
         if _CALENDAR_WRITE_TERMS.search(topic_text):
             selected.add("calendar_event_propose")
 
-    if _MAIL_TERMS.search(topic_text):
+    if _MAIL_TERMS.search(topic_text) or _EMAIL_ADDRESS.search(topic_text):
         if _AWAITING_REPLY_TERMS.search(topic_text):
             selected.add("threads_awaiting_reply")
         if _MAIL_DRAFT_TERMS.search(topic_text):
@@ -312,12 +344,33 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
         if _MAIL_SEND_TERMS.search(topic_text):
             selected.add("message_send_propose")
 
+    if _HEALTH_TERMS.search(topic_text):
+        # brief_get folds last night's sleep when synced; connector_records_get
+        # reaches google_health snapshots when the user wants detail.
+        selected.update({"brief_get", "connector_records_get"})
+
     if _GITHUB_TERMS.search(topic_text) and _GITHUB_WRITE_TERMS.search(topic_text):
-        selected.update({"github_issue_propose", "action_commit"})
+        # Deliberately only the proposal. action_commit used to be added here
+        # and was kept out of the model's hands solely by being absent from
+        # _TOOL_PRIORITY, so a security property section 7 states outright --
+        # "the conversational model never receives action_commit in its
+        # per-turn tool list" -- rested on an ordering table one well-meaning
+        # edit could undo. It is not selected at all now, so the trim is no
+        # longer load-bearing. This mattered more than it looked: until the
+        # turn handshake landed, the per-turn filter never reached the MCP
+        # server, so every tool really was exposed regardless.
+        selected.add("github_issue_propose")
     elif _PR_WATCH_TERMS.search(topic_text) or (
         _GITHUB_TERMS.search(topic_text) and re.search(r"\bopen\b", topic_text, re.IGNORECASE)
     ):
         selected.add("pull_requests_get")
+
+    if _COMPOSIO_TERMS.search(topic_text):
+        selected.update({"composio_search", "composio_execute"})
+        if _COMPOSIO_CONNECT_TERMS.search(topic_text):
+            selected.add("composio_connect")
+        if _STATUS_TERMS.search(topic_text):
+            selected.add("composio_status")
 
     if _MEMORY_TERMS.search(topic_text):
         selected.update({"memory_search", "profile_get"})
@@ -330,6 +383,27 @@ def select_hermes_tools(topic_text: str) -> frozenset[str]:
 
     ordered = [name for name in _TOOL_PRIORITY if name in selected]
     return frozenset(ordered[:MAX_HERMES_TOOLS_PER_TURN])
+
+
+def wants_mail_write(text: str) -> bool:
+    """True when this turn is drafting or sending mail, not reading the inbox."""
+    mailish = bool(_MAIL_TERMS.search(text) or _EMAIL_ADDRESS.search(text))
+    if _MAIL_SEND_TERMS.search(text) and (
+        mailish or re.search(r"\bsend\s+(?:it|this|that|to)\b", text, re.IGNORECASE)
+    ):
+        return True
+    return mailish and bool(_MAIL_DRAFT_TERMS.search(text))
+
+
+def is_fresh_mail_write(text: str) -> bool:
+    """True for a new send/draft that does not continue a previous letter."""
+    if not wants_mail_write(text):
+        return False
+    if _EMAIL_ADDRESS.search(text):
+        return False
+    return not bool(
+        re.search(r"\b(?:it|that|this|those|same)\b", text, re.IGNORECASE)
+    )
 
 
 def is_external_lookup(request: str) -> bool:

@@ -173,12 +173,22 @@ def test_every_selectable_tool_survives_the_priority_trim() -> None:
         assert tool_name in selected, f"{tool_name} missing for phrase: {phrase!r}"
         assert len(selected) <= MAX_HERMES_TOOLS_PER_TURN
 
-    # action_commit is added by the GitHub write router but is intentionally
-    # absent from _TOOL_PRIORITY, so it never survives the ordered trim. Do
-    # not add it ahead of safer write tools.
+    # action_commit is never selected at all -- not selected-then-trimmed.
+    # It used to be added by the GitHub write router and kept away from the
+    # model only by its absence from _TOOL_PRIORITY, which made a stated
+    # section 7 guarantee depend on an ordering table that one reasonable
+    # edit could undo. Asserted at the selector, so removing it from
+    # _TOOL_PRIORITY alone can no longer expose it.
     github_tools = select_hermes_tools("file a github issue about the bug")
     assert "github_issue_propose" in github_tools
     assert "action_commit" not in github_tools
+    from alfred import hermes_tools as _hermes_tools
+
+    selector_body = Path(_hermes_tools.__file__).read_text(encoding="utf-8")
+    selector_body = selector_body.split("def select_hermes_tools", 1)[1].split("\ndef ", 1)[0]
+    assert '"action_commit"' not in selector_body, (
+        "action_commit must not be selectable; the trim is not a safety boundary"
+    )
     broad = select_hermes_tools(
         "create a calendar event, remind me, send email, file a github issue, "
         "correct memory, and show connector status"

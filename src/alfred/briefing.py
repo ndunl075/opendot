@@ -321,7 +321,10 @@ def _sleep_summary_for_night(rows: list[object], generated_at: datetime) -> str 
         if not isinstance(payload, dict):
             continue
         raw = payload.get("raw") if isinstance(payload.get("raw"), dict) else payload
-        interval = raw.get("interval") if isinstance(raw.get("interval"), dict) else {}
+        sleep = raw.get("sleep") if isinstance(raw.get("sleep"), dict) else {}
+        interval = sleep.get("interval") if isinstance(sleep.get("interval"), dict) else {}
+        if not interval:
+            interval = raw.get("interval") if isinstance(raw.get("interval"), dict) else {}
         start = _parse_optional_timestamp(interval.get("startTime"))
         end = _parse_optional_timestamp(interval.get("endTime"))
         if start is None or end is None:
@@ -336,10 +339,12 @@ def _sleep_summary_for_night(rows: list[object], generated_at: datetime) -> str 
         if overlap_end <= overlap_start:
             continue
         total += overlap_end - overlap_start
-        sleep = raw.get("sleep") if isinstance(raw.get("sleep"), dict) else {}
         stage = sleep.get("stage") if isinstance(sleep, dict) else raw.get("stage")
         if isinstance(stage, str) and stage.strip():
             stages.append(stage.strip().lower())
+        for item in sleep.get("stages") or []:
+            if isinstance(item, dict) and isinstance(item.get("type"), str) and item["type"].strip():
+                stages.append(item["type"].strip().lower())
     if total <= timedelta():
         return None
     summary = f"{format_duration(total)} last night — Google Health"

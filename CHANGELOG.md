@@ -40,6 +40,24 @@ only bumps the minor version — see RELEASING.md).
 
 ### Changed
 
+<<<<<<< HEAD
+- Telegram no longer attaches `helpful` / `missing context` / `wrong context`
+  buttons to every reply. Context traces are still stored; inferring those
+  labels from later conversation is documented in ARCHITECTURE.md as a
+  follow-up, not a button.
+- "Send it to mom@gmail.com" is acknowledged as `drafting email to …`, not
+  `checking your inbox...`. `@gmail.com` no longer pretends to be an inbox
+  read, and a send with a recipient calls `message_send_propose` so Telegram
+  can attach approve/cancel instead of pasting the letter in chat. A bare
+  "send an email" no longer dumps the inbox or the previous letter into
+  context, and the prompt states Gmail is already connected so Hermes does
+  not ask to add a connector. Delivery also strips leftover
+  helpful/missing/wrong buttons from older outbox payloads.
+- Telegram `/status`, `/restart`, and `/wake` for paired chats, plus
+  `alfred watchdog-check` and `scripts/register-watchdog.ps1` to auto-restart
+  a stale runner and rescue `/wake` when Alfred is down.
+
+=======
 - Response feedback is now noticed instead of requested. The `helpful` /
   `missing context` / `wrong context` buttons under every successful answer are
   gone; two detectors produce the same three verdicts on their own. Named rules
@@ -55,6 +73,7 @@ only bumps the minor version — see RELEASING.md).
   down by how each verdict was reached, and report self-flagged answers apart
   from the helpful rate so a quiet connector does not read as a week of answers
   the owner disliked.
+>>>>>>> origin/main
 - Collapsed helpers that recent feature work had copy-pasted, with no change to
   behavior or to any public name. `destinations.py` now owns the single
   `channel:recipient` rule that `reminders`, `nags`, `important_dates`, and
@@ -70,6 +89,20 @@ only bumps the minor version — see RELEASING.md).
 
 ### Fixed
 
+- Google Health list requests now match the published v4 REST shapes:
+  typed AIP-160 filters (`steps.interval.start_time`, `sleep.interval.end_time`,
+  `daily_resting_heart_rate.date`), nested union payloads, int64-as-string
+  values, sleep page size 25, and a hashed id when `name` is empty (most
+  types are not identifiable). Default sync stores daily resting heart rate
+  instead of sample-level BPM. `alfred google-auth --include-health` adds
+  the three read-only health scopes without dropping Calendar/Gmail defaults.
+  Google Health rejects mixed Calendar/Gmail access tokens, so health-sync
+  refreshes a health-only subset of that grant.
+- Hermes routes sleep/steps questions to `brief_get` and
+  `connector_records_get`; the Hermes client grant needs `sensitive` for
+  `google_health`.
+- `alfred run --google-health` soft-fails with `HealthAccountNotLinked` until
+  Fitbit links instead of crashing the connector loop.
 - Slack replies no longer arrive scrambled. The Slack outbox claim ordered
   pending rows by `created_at, id`, and `id` is a random `uuid4` while
   `created_at` only has second granularity — so every multi-part answer
@@ -98,6 +131,11 @@ only bumps the minor version — see RELEASING.md).
 
 ### Added
 
+- Composio overflow connector on the free tier (`alfred composio-setup`):
+  search/connect/execute for apps Alfred does not own first-party. Writes
+  still go through Telegram approval. Gmail/Calendar/GitHub/Slack/Telegram/
+  Fitbit stay first-party. Local monthly call counting against the 100k
+  hard cap.
 - Morning brief optional sleep context from synced Google Health sleep
   records: when last night's segments overlap the local evening→noon window,
   the brief shows a duration line (and dominant stage when present). No sleep

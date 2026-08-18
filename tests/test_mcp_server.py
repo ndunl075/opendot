@@ -746,6 +746,8 @@ def test_reads_are_marked_read_only_and_writes_are_not(tmp_path: Path) -> None:
         "threads_awaiting_reply",
         "availability_get",
         "pull_requests_get",
+        "composio_search",
+        "composio_status",
     }
 
     for name, annotation in annotations.items():

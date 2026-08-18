@@ -132,6 +132,19 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         ),
     ),
     ConnectorCapability(
+        connector="composio",
+        rate_limit="100k tool calls per UTC month on the free tier (hard cap); locally counted in tool_runs",
+        summary="Overflow apps Composio hosts (Notion, Spotify, Linear, …), not first-party connectors.",
+        writes=True,
+        write_actions=("composio_execute",),
+        scopes=("Composio API key in the OS keyring; connected-account tokens stay at Composio",),
+        notes=(
+            "Gmail, Calendar, GitHub, Slack, Telegram, and Fitbit stay first-party. "
+            "Reads run now; writes preview and wait for Telegram approval. "
+            "Do not point Hermes at Composio's hosted MCP URL — YOLO would auto-approve."
+        ),
+    ),
+    ConnectorCapability(
         connector="google_health",
         rate_limit="one bounded lookback read per interval",
         summary="Sleep, activity, and heart metrics from a wearable-linked account.",
@@ -143,7 +156,8 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         sensitivity="sensitive",
         notes=(
             "The only connector storing `sensitive` data, so client scopes exclude it by default. "
-            "Built but never exercised against a real wearable-linked account."
+            "Opt in with `alfred google-auth --include-health`. Syncs steps, sleep sessions, and "
+            "daily resting heart rate -- not sample-level BPM, which is too dense for the event log."
         ),
     ),
     ConnectorCapability(

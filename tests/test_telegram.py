@@ -77,6 +77,44 @@ def test_unpaired_telegram_identity_cannot_create_records(tmp_path: Path) -> Non
         assert connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
 
 
+def test_status_command_reports_runtime_health(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    from alfred.runtime_control import record_heartbeat
+
+    record_heartbeat(database)
+    receipt = _gateway(database_path).handle(_update(50, "/status"))
+
+    assert "alfred is running" in receipt.text
+
+
+def test_restart_command_queues_recovery_when_restart_task_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "alfred.db"
+    monkeypatch.setattr(
+        "alfred.runtime_control.restart_alfred",
+        lambda: type("RestartResult", (), {"ok": False, "method": "none", "detail": "missing"})(),
+    )
+    receipt = _gateway(database_path).handle(_update(51, "/restart"))
+
+    assert "watchdog will pick it up" in receipt.text
+    from alfred.runtime_control import restart_pending
+
+    assert restart_pending(Database(database_path)) is True
+
+
+def test_wake_is_an_alias_for_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "alfred.runtime_control.restart_alfred",
+        lambda: type("RestartResult", (), {"ok": True, "method": "scheduled_task", "detail": "AlfredRestart"})(),
+    )
+    receipt = _gateway(tmp_path / "alfred.db").handle(_update(52, "/wake"))
+
+    assert "restarting via scheduled_task" in receipt.text
+
+
 def test_bad_command_gets_a_help_receipt_without_a_task(tmp_path: Path) -> None:
     database_path = tmp_path / "alfred.db"
     receipt = _gateway(database_path).handle(_update(4, "remember this forever"))
@@ -162,6 +200,7 @@ def test_action_phrasing_wins_over_the_read_topic_it_overlaps_with() -> None:
     assert ack("what's my schedule tomorrow") == "checking your agenda..."
 
     assert ack("draft an email to my advisor") == "drafting that..."
+    assert ack("send it to atmgd03@gmail.com that's my mom") == "drafting email to atmgd03@gmail.com..."
     assert ack("search the web for the latest Python release") == "searching the web..."
     assert ack("anything new in my email") == "checking your inbox..."
 

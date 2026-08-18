@@ -197,6 +197,19 @@ audited and requires two more examples before Alfred asks again. This slice
 deliberately has no activation or execution path: review can never change the
 Hermes profile while unattended.
 
+<<<<<<< HEAD
+**Built, then removed from chat:** Alfred still records a content-free
+`response_context` trace (source names, freshness, opaque record IDs) on
+every Telegram answer, and still accepts a `helpful` / `missing_context` /
+`wrong_context` vote if one arrives. The three inline buttons are gone —
+they were noise on every reply, including drafts. A later slice should
+*infer* those outcomes from the next messages instead of asking the owner
+to label them: a correction or "that's not what I meant" is `wrong_context`,
+a follow-up that has to restate missing facts is `missing_context`, and a
+short "thanks" / moving on is `helpful`. Until that classifier exists, do
+not put the buttons back. Ranking still uses whatever votes already landed;
+inferred votes would write the same `response_feedback` rows.
+=======
 **Built:** successful Telegram responses are graded helpful, missing-context, or
 wrong-context without anyone being asked. Two detectors reach that verdict: rule
 matching on the owner's next message ("you missed the one from sam", "that's the
@@ -214,6 +227,7 @@ actually waiting on the owner. An earlier slice asked for the same verdict with
 data was useful and the request was the problem, since a signal that only
 arrives when someone bothers mostly does not arrive. Taps on keyboards still
 sitting in chat history are honored.
+>>>>>>> origin/main
 
 **Built (read side):** every bullet above records evaluation data, but until
 now nothing read it back, so the data could not answer the question it was

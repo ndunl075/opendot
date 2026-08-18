@@ -119,18 +119,21 @@ as `deploy/openai-tunnel/README.md`'s `chatgpt-tunnel` grant, a client only
 gets what it's explicitly scoped for:
 
 ```powershell
-alfred client-grant --client-id hermes --sensitivity public --sensitivity personal `
+alfred client-grant --client-id hermes --sensitivity public --sensitivity personal --sensitivity sensitive `
   --tool agenda_get --tool brief_get --tool memory_search --tool remember `
   --tool memory_correct --tool memory_feedback `
   --tool connector_status --tool connector_records_get `
-  --tool task_upsert --tool task_complete --tool reminder_set `
+  --tool task_upsert --tool task_complete --tool reminder_set --tool task_schedule `
   --tool calendar_event_propose --tool message_draft --tool message_send_propose `
   --tool github_issue_propose --tool forget --tool action_commit `
+  --tool composio_search --tool composio_status --tool composio_connect --tool composio_execute `
   --allow-write
 ```
 
-This starts at `public`+`personal` sensitivity. Widen to `--sensitivity
-sensitive` later only if a specific skill actually needs it.
+`sensitive` is required for `connector_records_get` on `google_health`
+(sleep, steps, resting heart rate). Without it, health questions route
+correctly but the tool call is denied. The four `composio_*` tools are
+overflow apps only (Notion, Spotify, …) — not Gmail/Calendar/GitHub.
 
 ## 5. Register the MCP connection (required, not automatic)
 

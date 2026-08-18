@@ -309,3 +309,38 @@ def test_morning_brief_omits_sleep_when_google_health_has_no_night_data(tmp_path
 
     assert brief.sleep_summary is None
     assert "Sleep:" not in brief.render()
+
+
+def test_morning_brief_reads_nested_google_health_sleep_sessions(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    payload = {
+        "data_type": "sleep",
+        "raw": {
+            "name": "users/me/dataTypes/sleep/dataPoints/abc",
+            "sleep": {
+                "interval": {
+                    "startTime": "2026-08-13T23:00:00Z",
+                    "endTime": "2026-08-14T06:30:00Z",
+                },
+                "type": "STAGES",
+                "stages": [{"type": "DEEP"}, {"type": "DEEP"}, {"type": "REM"}, {"type": "LIGHT"}],
+            },
+        },
+    }
+    with database.connect() as connection:
+        with database.transaction(connection):
+            connection.execute(
+                """
+                INSERT INTO connector_records (
+                    connector, account, record_type, record_id,
+                    payload_json, observed_at, active
+                ) VALUES ('google_health', 'self', 'sleep', 'sleep:abc', ?, '2026-08-14T07:00:00+00:00', 1)
+                """,
+                (json.dumps(payload),),
+            )
+
+    brief = BriefingService(database).morning_brief(datetime(2026, 8, 14, 8, 0, tzinfo=UTC))
+
+    assert brief.sleep_summary == "7h 30m last night — Google Health (includes deep)"
+    assert "Sleep:\n- 7h 30m last night — Google Health (includes deep)" in brief.render()

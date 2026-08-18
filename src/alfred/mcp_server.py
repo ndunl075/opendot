@@ -30,6 +30,8 @@ from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
 from .action_executor import ActionExecutor
+from .composio import SECRET_NAME as COMPOSIO_SECRET_NAME
+from .composio import ComposioActions, ComposioClient, ComposioError
 from .availability import AvailabilityService
 from .gmail import GmailActions, GmailSendActions
 from .github import GitHubActions
@@ -49,10 +51,12 @@ from .pull_requests import PullRequestService
 from .reminders import ReminderStore
 from .github import GitHubClient
 from .scheduled_tasks import ScheduledTaskStore
-from .secret_store import SystemKeyringSecretStore
+from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
 from .threads import ThreadService
-from .workflow_learning import WorkflowObservationStore, current_workflow_turn_id
+from .turn_handshake import read_tools as read_turn_tools
+from .turn_handshake import read_turn_id
+from .workflow_learning import WorkflowObservationStore
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
 MCP_TOOL_NAMES: frozenset[str] = frozenset(
@@ -86,6 +90,10 @@ MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "mood_record",
         "gratitude_record",
         "journal_get",
+        "composio_search",
+        "composio_status",
+        "composio_connect",
+        "composio_execute",
     }
 )
 
@@ -147,7 +155,7 @@ def create_server(
             @wraps(function)
             def observed(*args, **kwargs):
                 result = function(*args, **kwargs)
-                turn_id = current_workflow_turn_id()
+                turn_id = read_turn_id(settings.database_path)
                 if turn_id:
                     try:
                         bound = signature.bind(*args, **kwargs)
@@ -276,7 +284,7 @@ def create_server(
 
     @alfred_tool(destructive=False)
     def message_send_propose(to: str, subject: str, body: str) -> dict:
-        """Preview sending Gmail; a human must separately approve action_commit."""
+        """Preview sending Gmail. Telegram attaches approve/cancel; do not paste the letter in chat."""
         policy.require_write(client_id, "message_send_propose")
         return GmailSendActions(database, approvals).propose_send(
             actor=f"mcp:{client_id}", to=to, subject=subject, body=body
@@ -290,6 +298,65 @@ def create_server(
             actor=f"mcp:{client_id}", repository=repository, title=title, body=body
         )
         return approval.model_dump(mode="json")
+
+    def _with_composio(callback):
+        try:
+            api_key = SystemKeyringSecretStore().get_required(COMPOSIO_SECRET_NAME)
+        except SecretStoreError as error:
+            raise ComposioError("Composio API key is not stored. Run `alfred composio-setup`.") from error
+        client = ComposioClient(api_key, database=database)
+        try:
+            return callback(ComposioActions(database, approvals, client))
+        finally:
+            client.close()
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def composio_search(query: str, toolkit: str | None = None) -> dict:
+        """Find overflow-app tools on Composio's free tier (Notion, Spotify, Linear, …).
+
+        Do not use this for Gmail, Calendar, GitHub, Slack, Telegram, or Fitbit —
+        those are first-party Alfred connectors. Returns slugs, whether they write,
+        and required argument names. Then call composio_execute with a slug.
+        """
+        policy.require_read(client_id, "composio_search")
+        tools = _with_composio(lambda actions: actions.search(query, toolkit=toolkit))
+        return {"tools": [item.model_dump(mode="json") for item in tools]}
+
+    @alfred_tool(read_only=True, idempotent=True)
+    def composio_status() -> dict:
+        """Show Composio connected accounts and this UTC month's free-tier usage."""
+        policy.require_read(client_id, "composio_status")
+        return _with_composio(lambda actions: actions.status()).model_dump(mode="json")
+
+    @alfred_tool(destructive=False)
+    def composio_connect(toolkit: str) -> dict:
+        """Return a Composio Connect Link so the owner can sign into an overflow app.
+
+        Open the URL, finish sign-in, then retry the original request. Not for
+        Gmail/Calendar/GitHub/Slack/Telegram/Fitbit.
+        """
+        policy.require_write(client_id, "composio_connect")
+        return _with_composio(lambda actions: actions.connect(toolkit)).model_dump(mode="json")
+
+    @alfred_tool(destructive=False)
+    def composio_execute(slug: str, arguments_json: str = "{}") -> dict:
+        """Run a Composio read now, or preview a write for Telegram approval.
+
+        ``arguments_json`` is a JSON object matching the tool's input fields from
+        composio_search. Writes return needs_approval; never call action_commit.
+        """
+        policy.require_write(client_id, "composio_execute")
+        try:
+            arguments = json.loads(arguments_json) if arguments_json.strip() else {}
+        except json.JSONDecodeError as error:
+            raise ValueError(f"arguments_json must be a JSON object: {error.msg}") from error
+        if not isinstance(arguments, dict):
+            raise ValueError("arguments_json must be a JSON object")
+        return _with_composio(
+            lambda actions: actions.execute_or_propose(
+                actor=f"mcp:{client_id}", slug=slug, arguments=arguments
+            )
+        )
 
     @alfred_tool(destructive=True, idempotent=True, open_world=True)
     def action_commit(approval_id: str, token: str) -> dict:
@@ -738,7 +805,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     Claude/Cursor's default ``local-mcp`` grant.
     """
     args = parse_stdio_args(argv)
-    tool_filter = _tool_filter_from_environment()
+    # The environment is consulted first and still wins, so a direct run
+    # (Claude, Cursor, the OpenAI tunnel) is unchanged. The file exists for
+    # the Hermes path only, where Hermes strips the parent environment when
+    # it spawns a stdio server -- see turn_handshake for the measurement.
+    settings = Settings.from_environment(Path(args.db) if args.db else None)
+    tool_filter = read_turn_tools(settings.database_path)
     if tool_filter is None:
         create_server(args.db, client_id=args.client_id).run(transport="stdio")
     else:

@@ -151,15 +151,21 @@ class GoogleOAuthClient:
             }
         )
 
-    def refresh_access_token(self, refresh_token: str) -> TokenResponse:
-        return self._post(
-            {
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-            }
-        )
+    def refresh_access_token(
+        self, refresh_token: str, *, scopes: tuple[str, ...] = ()
+    ) -> TokenResponse:
+        data = {
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+        # Google Health rejects access tokens that also carry Calendar/Gmail
+        # scopes (DISALLOWED_OAUTH_SCOPES). A refresh can request a subset of
+        # the original grant so Health calls mint a health-only token.
+        if scopes:
+            data["scope"] = " ".join(scopes)
+        return self._post(data)
 
     def _post(self, data: dict[str, str]) -> TokenResponse:
         response = self._client.post(TOKEN_ENDPOINT, data=data)
@@ -204,18 +210,23 @@ def authorize_interactively(
         oauth_client.close()
 
 
-def current_access_token(secret_store: SecretStore) -> str:
+def current_access_token(secret_store: SecretStore, *, scopes: tuple[str, ...] = ()) -> str:
     """Mint a fresh access token from the stored refresh token; nothing is cached locally.
 
     Shared by every caller that needs a live Google credential -- the CLI's
     connector-sync commands and, now, MCP's action_commit for the calendar
     write -- so there is exactly one place that knows how to do this.
+    ``scopes`` requests a subset of the original grant (needed for Google
+    Health, which rejects mixed Calendar/Gmail tokens).
     """
     oauth_client = GoogleOAuthClient(
         secret_store.get_required("google-oauth-client-id"),
         secret_store.get_required("google-oauth-client-secret"),
     )
     try:
-        return oauth_client.refresh_access_token(secret_store.get_required("google-oauth-refresh-token")).access_token
+        return oauth_client.refresh_access_token(
+            secret_store.get_required("google-oauth-refresh-token"),
+            scopes=scopes,
+        ).access_token
     finally:
         oauth_client.close()

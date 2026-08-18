@@ -252,6 +252,64 @@ def test_bubbles_enqueued_in_one_second_deliver_in_order(tmp_path: Path) -> None
     assert [text for _, text, _ in fake.sent] == ["first", "second", "third", "fourth"]
 
 
+def test_outbox_worker_strips_feedback_buttons_but_keeps_approve(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            Outbox.enqueue(
+                connection,
+                destination="telegram:20",
+                payload={
+                    "text": "want me to send it?",
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {"text": "approve send email", "callback_data": "aa:1:y"},
+                                {"text": "cancel", "callback_data": "aa:1:n"},
+                            ],
+                            [{"text": "helpful", "callback_data": "af:40:h"}],
+                            [
+                                {"text": "missing context", "callback_data": "af:40:m"},
+                                {"text": "wrong context", "callback_data": "af:40:w"},
+                            ],
+                        ]
+                    },
+                },
+                idempotency_key="markup-strip",
+            )
+            Outbox.enqueue(
+                connection,
+                destination="telegram:20",
+                payload={
+                    "text": "plain answer",
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [{"text": "helpful", "callback_data": "af:41:h"}],
+                            [
+                                {"text": "missing context", "callback_data": "af:41:m"},
+                                {"text": "wrong context", "callback_data": "af:41:w"},
+                            ],
+                        ]
+                    },
+                },
+                idempotency_key="markup-strip-feedback-only",
+            )
+    fake = FakeTelegram()
+
+    TelegramOutboxWorker(database, fake, {20}).deliver_pending()
+
+    assert fake.sent[0][2] == {
+        "inline_keyboard": [
+            [
+                {"text": "approve send email", "callback_data": "aa:1:y"},
+                {"text": "cancel", "callback_data": "aa:1:n"},
+            ]
+        ]
+    }
+    assert fake.sent[1][1:] == ("plain answer", None)
+
+
 def test_feedback_callback_is_paired_content_free_and_one_vote_per_response(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 

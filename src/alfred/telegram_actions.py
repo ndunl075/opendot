@@ -20,6 +20,7 @@ ACTION_LABELS = {
     "gmail_draft_create": "email draft",
     "gmail_message_send": "send email",
     "github_issue_create": "GitHub issue",
+    "composio_tool_execute": "Composio action",
     "memory_forget": "forget request",
 }
 
@@ -206,6 +207,7 @@ class TelegramActionWorker:
             "gmail_draft_create": "done — the email draft is ready.",
             "gmail_message_send": "sent.",
             "github_issue_create": "done — the GitHub issue is open.",
+            "composio_tool_execute": "done — the Composio action finished.",
             "memory_forget": "done — I forgot it.",
         }
         return messages.get(action_type, "done.")

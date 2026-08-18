@@ -42,7 +42,7 @@ from .google_calendar import (
     GoogleCalendarSync,
     default_sync_window,
 )
-from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
+from .google_oauth import authorize_interactively, current_access_token
 from .canvas import CanvasClient, CanvasSync
 from .canvas_ical import (
     CanvasICalClient,
@@ -50,11 +50,27 @@ from .canvas_ical import (
     CanvasICalSyncResult,
     setup_canvas_ical_feed,
 )
-from .google_health import GoogleHealthClient, GoogleHealthSync
+from .google_health import (
+    REQUIRED_SCOPES,
+    GoogleHealthClient,
+    GoogleHealthSync,
+    HealthAccountNotLinked,
+    google_auth_scopes,
+)
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
+from .composio import (
+    SECRET_NAME as COMPOSIO_SECRET_NAME,
+    ComposioActions,
+    ComposioClient,
+    ComposioError,
+    ComposioStatus,
+    calls_this_month,
+    monthly_call_limit,
+)
 from .pull_requests import PullRequestService
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_backfill import GmailClientMetadataAdapter, GmailThreadBackfill
+from .hermes_mcp import register as register_hermes_mcp
 from .threads import ThreadService
 from .gmail_inbound import GmailInboundGateway
 from .hermes_bridge import HermesBridge, SubprocessAgentRunner
@@ -64,6 +80,12 @@ from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
 from .runner import AlfredRunner, ConnectorSync
+from .runtime_control import (
+    note_watchdog_result,
+    paired_chat_ids_from_config,
+    runtime_status,
+    watchdog_check,
+)
 from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
 from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
@@ -305,6 +327,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
+    hermes_mcp_register = subcommands.add_parser(
+        "hermes-mcp-register",
+        help="register Alfred's MCP server in a Hermes profile so the agent can see its tools",
+    )
+    hermes_mcp_register.add_argument("--profile", default="alfred")
+    hermes_mcp_register.add_argument(
+        "--config",
+        help="path to the profile's config.yaml; defaults to the Windows profile location",
+    )
+    hermes_mcp_register.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would change without writing",
+    )
     subcommands.add_parser(
         "academic-memory-rebuild",
         help="rebuild local Calendar/Canvas rollups and their provenance-linked semantic memories",
@@ -625,6 +661,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     google_auth.add_argument("--port", type=int, default=8765, help="local loopback redirect port")
     google_auth.add_argument("--scope", action="append", default=[], help="override the default OAuth scopes")
+    google_auth.add_argument(
+        "--include-health",
+        action="store_true",
+        help="add the three read-only Google Health scopes to this grant (never implied by the Calendar/Gmail defaults)",
+    )
     google_auth.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
     google_auth.add_argument("--timeout", type=int, default=300, help="seconds to wait for the browser redirect")
     calendar_sync = subcommands.add_parser("calendar-sync", help="read-sync Google Calendar into local source events")
@@ -655,9 +696,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     canvas_ical_setup.add_argument("--secret-name", default="canvas-ical-feed-url")
     health_sync = subcommands.add_parser(
-        "health-sync", help="read-sync Google Health steps/sleep/heart-rate; reuses the google-auth grant"
+        "health-sync", help="read-sync Google Health steps/sleep/resting-HR; reuses the google-auth grant"
     )
     health_sync.add_argument("--lookback-days", type=int, default=14, help="how many days back to fetch each sync")
+    composio_setup = subcommands.add_parser(
+        "composio-setup",
+        help="store a Composio API key in the OS keyring (free tier; no card required)",
+    )
+    composio_setup.add_argument("--secret-name", default=COMPOSIO_SECRET_NAME)
+    composio_setup.add_argument("--api-key", help="skip the prompt when the key is already in this shell")
+    composio_status = subcommands.add_parser(
+        "composio-status", help="show Composio connected accounts and this month's free-tier usage"
+    )
+    composio_status.add_argument("--secret-name", default=COMPOSIO_SECRET_NAME)
+    composio_search = subcommands.add_parser(
+        "composio-search", help="search overflow-app tools on Composio (not Gmail/Calendar/GitHub)"
+    )
+    composio_search.add_argument("query")
+    composio_search.add_argument("--toolkit", help="optional toolkit slug, e.g. notion")
+    composio_search.add_argument("--secret-name", default=COMPOSIO_SECRET_NAME)
+    composio_connect = subcommands.add_parser(
+        "composio-connect", help="print a Connect Link so you can sign into an overflow app"
+    )
+    composio_connect.add_argument("toolkit", help="toolkit slug, e.g. notion or spotify")
+    composio_connect.add_argument("--secret-name", default=COMPOSIO_SECRET_NAME)
+    composio_execute = subcommands.add_parser(
+        "composio-execute",
+        help="run a Composio read now, or preview a write that still needs approval",
+    )
+    composio_execute.add_argument("slug")
+    composio_execute.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
+    composio_execute.add_argument("--actor", default="user:cli")
+    composio_execute.add_argument("--secret-name", default=COMPOSIO_SECRET_NAME)
     github_sync = subcommands.add_parser("github-sync", help="read-sync unread GitHub notifications")
     github_sync.add_argument("--secret-name", default="github-token")
     github_issue_propose = subcommands.add_parser(
@@ -803,7 +873,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--google-health",
         action="store_true",
-        help="enables Google Health steps/sleep/heart-rate sync (reuses the google-auth grant; needs its health scopes)",
+        help="enables Google Health steps/sleep/resting-HR sync (reuses the google-auth grant; needs --include-health)",
     )
     run.add_argument("--google-health-lookback-days", type=int, default=14)
     run.add_argument(
@@ -897,6 +967,36 @@ def build_parser() -> argparse.ArgumentParser:
         "run_args",
         nargs=argparse.REMAINDER,
         help="everything after this is passed through verbatim, e.g. run --pair 123:456 --chat-id 123",
+    )
+    runtime_status_cmd = subcommands.add_parser(
+        "runtime-status",
+        help="show whether the always-on loop is alive and when it last cycled",
+    )
+    runtime_status_cmd.add_argument(
+        "--stale-seconds",
+        type=float,
+        default=300.0,
+        help="treat the runner as stalled after this many seconds without a cycle",
+    )
+    watchdog = subcommands.add_parser(
+        "watchdog-check",
+        help="restart Alfred when the heartbeat is stale and rescue /wake from Telegram",
+    )
+    watchdog.add_argument(
+        "--stale-seconds",
+        type=float,
+        default=300.0,
+        help="treat the runner as stalled after this many seconds without a cycle",
+    )
+    watchdog.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="report stale state without trying to restart Alfred",
+    )
+    watchdog.add_argument(
+        "--telegram-secret",
+        default="telegram-bot-token",
+        help="credential-manager key for the Telegram bot token used during rescue polling",
     )
     return parser
 
@@ -1345,11 +1445,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         config_path = configure_windows_service(args.run_args)
         print(json.dumps({"config_path": str(config_path), "args": args.run_args}))
         return 0
+    if args.command == "runtime-status":
+        print(json.dumps(runtime_status(database, stale_seconds=args.stale_seconds).model_dump(mode="json")))
+        return 0
+    if args.command == "watchdog-check":
+        token: str | None = None
+        chat_ids = paired_chat_ids_from_config()
+        try:
+            token = SystemKeyringSecretStore().get_required(args.telegram_secret)
+        except SecretStoreError:
+            token = None
+        result = watchdog_check(
+            database,
+            stale_seconds=args.stale_seconds,
+            auto_restart=not args.no_restart,
+            paired_chat_ids=chat_ids or None,
+            telegram_token=token,
+        )
+        note_watchdog_result(database, result)
+        print(result.model_dump_json())
+        return 0 if not result.was_stale or result.action not in {"failed", "none"} else 1
     if args.command == "google-auth":
         secret_store = SystemKeyringSecretStore()
         client_id = secret_store.get_required("google-oauth-client-id")
         client_secret = secret_store.get_required("google-oauth-client-secret")
-        scopes = tuple(args.scope) if args.scope else DEFAULT_SCOPES
+        scopes = google_auth_scopes(include_health=args.include_health, requested=tuple(args.scope))
         token = authorize_interactively(
             client_id=client_id,
             client_secret=client_secret,
@@ -1447,12 +1567,62 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.model_dump_json())
         return 0
     if args.command == "health-sync":
-        client = GoogleHealthClient(_google_access_token())
+        client = GoogleHealthClient(_google_health_access_token())
         try:
             result = GoogleHealthSync(database, client, lookback_days=args.lookback_days).sync()
+        except HealthAccountNotLinked as error:
+            raise SystemExit(str(error)) from error
         finally:
             client.close()
         print(result.model_dump_json())
+        return 0
+    if args.command == "composio-setup":
+        api_key = args.api_key or getpass.getpass("Paste the Composio API key, then press Enter. ")
+        if not api_key.strip():
+            raise SystemExit("Composio API key cannot be empty")
+        SystemKeyringSecretStore().store(args.secret_name, api_key.strip())
+        print(json.dumps({"secret_name": args.secret_name, "configured": True}))
+        return 0
+    if args.command == "composio-status":
+        print(_composio_status(database, args.secret_name).model_dump_json())
+        return 0
+    if args.command == "composio-search":
+        client = _composio_client(database, args.secret_name)
+        try:
+            tools = ComposioActions(database, approvals, client).search(args.query, toolkit=args.toolkit)
+        except ComposioError as error:
+            raise SystemExit(str(error)) from error
+        finally:
+            client.close()
+        print(json.dumps([item.model_dump(mode="json") for item in tools]))
+        return 0
+    if args.command == "composio-connect":
+        client = _composio_client(database, args.secret_name)
+        try:
+            link = ComposioActions(database, approvals, client).connect(args.toolkit)
+        except ComposioError as error:
+            raise SystemExit(str(error)) from error
+        finally:
+            client.close()
+        print(link.model_dump_json())
+        return 0
+    if args.command == "composio-execute":
+        try:
+            arguments = json.loads(args.arguments)
+        except json.JSONDecodeError as error:
+            raise SystemExit(f"invalid arguments JSON: {error.msg}") from error
+        if not isinstance(arguments, dict):
+            raise SystemExit("--arguments must be a JSON object")
+        client = _composio_client(database, args.secret_name)
+        try:
+            result = ComposioActions(database, approvals, client).execute_or_propose(
+                actor=args.actor, slug=args.slug, arguments=arguments
+            )
+        except ComposioError as error:
+            raise SystemExit(str(error)) from error
+        finally:
+            client.close()
+        print(json.dumps(result))
         return 0
     if args.command == "github-sync":
         client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
@@ -1491,6 +1661,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = GmailSync(database, client, limit=args.limit).sync()
         finally:
             client.close()
+        print(result.model_dump_json())
+        return 0
+    if args.command == "hermes-mcp-register":
+        result = register_hermes_mcp(
+            profile=args.profile,
+            config_path=Path(args.config) if args.config else None,
+            dry_run=args.dry_run,
+        )
         print(result.model_dump_json())
         return 0
     if args.command == "gmail-thread-backfill":
@@ -1603,6 +1781,43 @@ def _google_access_token() -> str:
     return current_access_token(SystemKeyringSecretStore())
 
 
+def _google_health_access_token() -> str:
+    """Health API rejects Calendar/Gmail scopes on the same access token."""
+    return current_access_token(SystemKeyringSecretStore(), scopes=REQUIRED_SCOPES)
+
+
+def _composio_client(database: Database, secret_name: str) -> ComposioClient:
+    try:
+        api_key = SystemKeyringSecretStore().get_required(secret_name)
+    except SecretStoreError as error:
+        raise SystemExit("Composio API key is not stored. Run `alfred composio-setup`.") from error
+    return ComposioClient(api_key, database=database)
+
+
+def _composio_status(database: Database, secret_name: str) -> ComposioStatus:
+    used = calls_this_month(database)
+    limit = monthly_call_limit()
+    remaining = max(0, limit - used)
+    try:
+        api_key = SystemKeyringSecretStore().get_optional(secret_name)
+    except SecretStoreError:
+        api_key = None
+    if not api_key:
+        return ComposioStatus(
+            configured=False,
+            monthly_limit=limit,
+            calls_this_month=used,
+            remaining=remaining,
+        )
+    client = ComposioClient(api_key, database=database)
+    try:
+        return ComposioActions(database, ApprovalService(database), client).status()
+    except ComposioError as error:
+        raise SystemExit(str(error)) from error
+    finally:
+        client.close()
+
+
 def _calendar_sync_once(database: Database, calendar_id: str) -> None:
     client = GoogleCalendarClient(_google_access_token())
     try:
@@ -1704,9 +1919,14 @@ def _canvas_ical_sync_once(database: Database, secret_name: str) -> CanvasICalSy
 
 
 def _health_sync_once(database: Database, lookback_days: int) -> None:
-    client = GoogleHealthClient(_google_access_token())
+    client = GoogleHealthClient(_google_health_access_token())
     try:
         GoogleHealthSync(database, client, lookback_days=lookback_days).sync()
+    except HealthAccountNotLinked:
+        # Fitbit not linked yet: sync() already recorded HealthAccountNotLinked
+        # in sync_state; the runner should back off quietly, not treat this as
+        # a crash loop.
+        pass
     finally:
         client.close()
 

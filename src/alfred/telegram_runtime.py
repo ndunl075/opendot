@@ -232,6 +232,32 @@ class TelegramLongPoller:
         )
 
 
+def _without_feedback_buttons(markup: object) -> object:
+    """Drop leftover helpful/missing/wrong rows. Approve/cancel stays."""
+    if markup is None:
+        return None
+    if not isinstance(markup, dict):
+        return markup
+    keyboard = markup.get("inline_keyboard")
+    if not isinstance(keyboard, list):
+        return markup
+    kept: list[list[dict[str, str]]] = []
+    for row in keyboard:
+        if not isinstance(row, list):
+            continue
+        filtered = [
+            button
+            for button in row
+            if isinstance(button, dict)
+            and not str(button.get("callback_data") or "").startswith("af:")
+        ]
+        if filtered:
+            kept.append(filtered)
+    if not kept:
+        return None
+    return {"inline_keyboard": kept}
+
+
 class TelegramOutboxWorker:
     """Deliver only locally allowed Telegram messages; ambiguous failures never retry automatically."""
 
@@ -269,7 +295,7 @@ class TelegramOutboxWorker:
                 results.append(self._fail(outbox_id, "outbox payload has no text message"))
                 continue
             try:
-                reply_markup = payload.get("reply_markup")
+                reply_markup = _without_feedback_buttons(payload.get("reply_markup"))
                 if reply_markup is not None and not isinstance(reply_markup, dict):
                     results.append(self._fail(outbox_id, "outbox reply markup is invalid"))
                     continue

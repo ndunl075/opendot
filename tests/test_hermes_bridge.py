@@ -14,12 +14,15 @@ from alfred.hermes_bridge import (
     enforce_style,
     split_into_bubbles,
 )
+from alfred.outbox import Outbox
 from alfred.hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
     HERMES_TELEGRAM_CHAT_ID_ENV,
     MAX_HERMES_TOOLS_PER_TURN,
     is_casual_conversation,
+    is_fresh_mail_write,
     select_hermes_tools,
+    wants_mail_write,
 )
 from alfred.workflow_learning import WORKFLOW_TURN_ID_ENV
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -384,6 +387,80 @@ def test_inbox_and_github_are_prefetched_while_bulk_mail_stays_out_of_the_prompt
     assert "Project Northwind" not in context_row["items_json"]
     # No keyboard on an ordinary answer: buttons are for approvals now.
     assert "reply_markup" not in reply_payload
+
+
+def test_sending_to_a_gmail_address_does_not_prefetch_the_inbox(tmp_path: Path) -> None:
+    """@gmail.com used to match the inbox keyword and dump unread mail into a send."""
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            ConnectorRecordStore.replace_snapshot(
+                connection,
+                connector="gmail",
+                account="self",
+                record_type="unread_message",
+                records={
+                    "important": {
+                        "subject": "Project Northwind will be paused",
+                        "from": "Supabase <notifications@supabase.com>",
+                        "snippet": "Take action to prevent your project from being paused.",
+                        "label_ids": ["INBOX", "CATEGORY_UPDATES"],
+                    }
+                },
+            )
+    _defer(database_path, _update(41, "send it to atmgd03@gmail.com that's my mom"))
+    agent = ScopedFakeAgent(AgentRunResult(text="draft ready.", ok=True))
+
+    HermesBridge(database, agent).run_once()
+
+    assert agent.tool_scopes == [frozenset({"message_send_propose"})]
+    assert "Project Northwind" not in agent.prompts[0]
+
+
+def test_send_an_email_without_a_recipient_does_not_prefetch_inbox(tmp_path: Path) -> None:
+    database_path = tmp_path / "alfred.db"
+    database = Database(database_path)
+    database.migrate()
+    with database.connect() as connection:
+        with database.transaction(connection):
+            ConnectorRecordStore.replace_snapshot(
+                connection,
+                connector="gmail",
+                account="self",
+                record_type="unread_message",
+                records={
+                    "important": {
+                        "subject": "Project Northwind will be paused",
+                        "from": "Supabase <notifications@supabase.com>",
+                        "snippet": "Take action to prevent your project from being paused.",
+                        "label_ids": ["INBOX", "CATEGORY_UPDATES"],
+                    }
+                },
+            )
+    _defer(
+        database_path,
+        _update(41, "send it to atmgd03@gmail.com that's my mom"),
+    )
+    with database.connect() as connection:
+        with database.transaction(connection):
+            Outbox.enqueue(
+                connection,
+                destination="telegram:20",
+                payload={"text": "Hi Mom, just checking in. Love you."},
+                idempotency_key="hermes-reply:41:0",
+            )
+    _defer(database_path, _update(42, "can you draft and send an email"))
+    agent = ScopedFakeAgent(AgentRunResult(text="who should it go to?", ok=True))
+
+    HermesBridge(database, agent).run_once()
+
+    assert "message_send_propose" in agent.tool_scopes[0]
+    assert "Project Northwind" not in agent.prompts[0]
+    assert "Hi Mom, just checking in." not in agent.prompts[0]
+    assert '"connected":true' in agent.prompts[0]
+    assert "never ask to add an email connector" in agent.prompts[0]
 
 
 def test_a_follow_up_gets_the_recent_exchange_and_requires_a_precise_action(
@@ -835,6 +912,12 @@ def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
     assert select_hermes_tools("draft a reply to that email") == {
         "message_draft",
     }
+    assert select_hermes_tools("send it to atmgd03@gmail.com that's my mom") == {
+        "message_send_propose",
+    }
+    assert wants_mail_write("send an email") is True
+    assert is_fresh_mail_write("send an email") is True
+    assert is_fresh_mail_write("send it to atmgd03@gmail.com that's my mom") is False
     assert select_hermes_tools("remember that I prefer short answers") == {
         "memory_search",
         "profile_get",
@@ -848,6 +931,31 @@ def test_tool_selection_is_bounded_and_omits_prefetched_read_tools() -> None:
     assert "action_commit" not in broad
     assert "calendar_event_propose" in broad
     assert "message_send_propose" in broad
+
+
+def test_health_questions_route_to_brief_and_google_health_records() -> None:
+    assert select_hermes_tools("how did I sleep last night?") == {
+        "brief_get",
+        "connector_records_get",
+    }
+    assert select_hermes_tools("steps today?") == {"brief_get", "connector_records_get"}
+    assert select_hermes_tools("how's my health") == {"brief_get", "connector_records_get"}
+    assert select_hermes_tools("connector health") == {
+        "brief_get",
+        "connector_records_get",
+        "connector_status",
+        "system_status",
+    }
+
+
+def test_overflow_apps_route_to_composio_not_first_party_gmail() -> None:
+    assert select_hermes_tools("what's on my notion?") == {"composio_search", "composio_execute"}
+    assert select_hermes_tools("connect spotify") == {
+        "composio_search",
+        "composio_execute",
+        "composio_connect",
+    }
+    assert "composio_execute" not in select_hermes_tools("draft a reply to that email")
 
 
 def test_casual_routing_separates_chat_from_work_and_inherits_short_followups() -> None:

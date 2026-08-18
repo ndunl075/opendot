@@ -64,6 +64,57 @@ def test_cli_exposes_opt_in_canvas_ical_sync_without_a_url_argument() -> None:
     assert continuous.canvas_ical_interval == 900.0
 
 
+def test_cli_exposes_opt_in_google_health_grant_without_replacing_calendar_scopes() -> None:
+    default_grant = build_parser().parse_args(["google-auth"])
+    health_grant = build_parser().parse_args(["google-auth", "--include-health"])
+    continuous = build_parser().parse_args(["run", "--google-health"])
+
+    assert default_grant.include_health is False
+    assert health_grant.include_health is True
+    assert continuous.google_health is True
+    assert continuous.google_health_lookback_days == 14
+
+
+def test_cli_exposes_composio_free_tier_commands_without_a_key_argument() -> None:
+    setup = build_parser().parse_args(["composio-setup"])
+    status = build_parser().parse_args(["composio-status"])
+    search = build_parser().parse_args(["composio-search", "pages", "--toolkit", "notion"])
+    connect = build_parser().parse_args(["composio-connect", "spotify"])
+
+    assert setup.secret_name == "composio-api-key"
+    assert status.secret_name == "composio-api-key"
+    assert search.toolkit == "notion"
+    assert connect.toolkit == "spotify"
+
+
+def test_health_sync_once_soft_fails_when_fitbit_is_not_linked(tmp_path: Path, monkeypatch) -> None:
+    from alfred.cli import _health_sync_once
+    from alfred.google_health import GoogleHealthSync, HealthAccountNotLinked
+
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+
+    class FakeClient:
+        def close(self) -> None:
+            return None
+
+    def sync_raises(self) -> None:
+        self._store_error("HealthAccountNotLinked")
+        raise HealthAccountNotLinked("not linked")
+
+    monkeypatch.setattr("alfred.cli.GoogleHealthClient", lambda token: FakeClient())
+    monkeypatch.setattr("alfred.cli._google_health_access_token", lambda: "TOKEN")
+    monkeypatch.setattr(GoogleHealthSync, "sync", sync_raises)
+
+    _health_sync_once(database, 14)
+
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT last_error FROM sync_state WHERE connector = 'google_health'"
+        ).fetchone()
+    assert row["last_error"] == "HealthAccountNotLinked"
+
+
 def test_cli_exposes_windows_safe_hermes_python_launch() -> None:
     args = build_parser().parse_args(
         ["run", "--hermes-profile", "alfred", "--hermes-python", r"C:\Hermes\python.exe"]
