@@ -6,6 +6,7 @@ from pathlib import Path
 from alfred.db import Database
 from alfred.connector_records import ConnectorRecordStore
 from alfred.hermes_bridge import (
+    PROVIDER_API_KEY_ENV,
     TELEGRAM_MAX_MESSAGE_CHARS,
     AgentRunResult,
     HermesBridge,
@@ -15,6 +16,7 @@ from alfred.hermes_bridge import (
     split_into_bubbles,
 )
 from alfred.outbox import Outbox
+from alfred.secret_store import SecretStoreError
 from alfred.hermes_tools import (
     HERMES_MCP_TOOL_FILTER_ENV,
     HERMES_TELEGRAM_CHAT_ID_ENV,
@@ -26,6 +28,18 @@ from alfred.hermes_tools import (
 )
 from alfred.workflow_learning import WORKFLOW_TURN_ID_ENV
 from alfred.telegram import TelegramGateway, TelegramPair, TelegramUpdate
+
+
+def _without_usage_file(argv: list[str]) -> list[str]:
+    """Drop the per-turn --usage-file pair; its path is a random temp name.
+
+    The flag is how Alfred learns what a turn actually cost, so it rides on
+    every invocation -- but asserting on a uuid would pin nothing useful.
+    """
+    if "--usage-file" not in argv:
+        return argv
+    index = argv.index("--usage-file")
+    return argv[:index] + argv[index + 2 :]
 
 
 class FakeAgent:
@@ -781,7 +795,9 @@ def test_subprocess_runner_builds_the_documented_hermes_invocation() -> None:
     assert result.ok is True
     assert result.text == "the answer"  # stripped
     argv, kwargs = calls[0]
-    assert argv == ["hermes", "-p", "alfred", "-z", "what's on my agenda?"]
+    assert _without_usage_file(argv) == ["hermes", "-p", "alfred", "-z", "what's on my agenda?"]
+    # Cost accounting rides on every turn, including the free lane.
+    assert "--usage-file" in argv
     assert kwargs["timeout"] == 42.0
     # Windows would otherwise decode Hermes's em dashes and emoji with the ANSI codepage.
     assert kwargs["encoding"] == "utf-8"
@@ -807,7 +823,7 @@ def test_subprocess_runner_can_bypass_the_windows_console_launcher() -> None:
     )
 
     assert runner("hi").ok is True
-    assert calls == [
+    assert [_without_usage_file(argv) for argv in calls] == [
         [
             r"C:\Hermes\venv\Scripts\python.exe",
             "-m",
@@ -892,7 +908,7 @@ def test_subprocess_runner_uses_no_reasoning_and_no_mcp_tools_for_conversation()
 
     assert result.ok is True
     argv, kwargs = calls[0]
-    assert argv == [
+    assert _without_usage_file(argv) == [
         "hermes",
         "-p",
         "alfred",
@@ -1131,3 +1147,364 @@ def test_subprocess_runner_treats_a_nonzero_exit_and_empty_output_as_failures() 
     empty = SubprocessAgentRunner(profile="alfred", runner=silent)("hi")
     assert empty.ok is False
     assert "no output" in empty.detail
+
+
+class _FakeSecretStore:
+    """Stand-in for the OS keyring; raises the same error a missing entry does."""
+
+    def __init__(self, secrets: dict[str, str] | None = None) -> None:
+        self.secrets = secrets or {}
+        self.reads: list[str] = []
+
+    def get_required(self, name: str) -> str:
+        self.reads.append(name)
+        if name not in self.secrets:
+            raise SecretStoreError(f"missing local credential-store secret: {name}")
+        return self.secrets[name]
+
+
+def test_work_turns_stay_on_the_free_profile_model_by_default() -> None:
+    """The $0 ceiling is the default: no work model means today's behaviour."""
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _FakeCompleted(0, stdout="the answer")
+
+    runner = SubprocessAgentRunner(profile="alfred", runner=fake_run)
+    assert runner.run_scoped("what's due?", allowed_tools=frozenset({"agenda_get"})).ok
+
+    argv, kwargs = calls[0]
+    assert "-m" not in argv
+    assert PROVIDER_API_KEY_ENV not in kwargs["env"]
+
+
+def test_a_configured_work_model_and_key_reach_the_hermes_subprocess() -> None:
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _FakeCompleted(0, stdout="the answer")
+
+    secrets = _FakeSecretStore({"openrouter-api-key": "sk-or-v1-secret"})
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        work_model="google/gemini-2.5-flash",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=secrets,
+        runner=fake_run,
+    )
+
+    assert runner.run_scoped("who's playing?", allowed_tools=frozenset()).ok
+
+    argv, kwargs = calls[0]
+    argv = _without_usage_file(argv)
+    # The provider rides alongside the model: without it Hermes keeps the one
+    # pinned in config.yaml and routes a Google model to Nous Portal.
+    assert argv[:8] == [
+        "hermes", "-p", "alfred",
+        "-m", "google/gemini-2.5-flash",
+        "--provider", "openrouter",
+        "-z",
+    ]
+    assert kwargs["env"][PROVIDER_API_KEY_ENV] == "sk-or-v1-secret"
+    assert secrets.reads == ["openrouter-api-key"]
+
+
+def test_the_provider_key_never_appears_in_the_process_arguments() -> None:
+    """argv is world-readable in a process listing; the environment is not."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompleted(0, stdout="ok")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        work_model="google/gemini-2.5-flash",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=_FakeSecretStore({"openrouter-api-key": "sk-or-v1-secret"}),
+        runner=fake_run,
+    )
+    assert runner("hi").ok
+
+    assert not any("sk-or-v1-secret" in argument for argument in calls[0])
+
+
+def test_an_unreadable_key_degrades_to_the_free_model_rather_than_failing() -> None:
+    """A locked keyring or revoked key is a slow day, not an outage."""
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _FakeCompleted(0, stdout="the answer")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        work_model="google/gemini-2.5-flash",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=_FakeSecretStore({}),  # nothing stored yet
+        runner=fake_run,
+    )
+
+    result = runner.run_scoped("who's playing?", allowed_tools=frozenset({"agenda_get"}))
+
+    assert result.ok is True
+    argv, kwargs = calls[0]
+    assert "-m" not in argv
+    assert PROVIDER_API_KEY_ENV not in kwargs["env"]
+
+
+def test_a_work_model_without_a_key_name_is_not_enough_to_leave_the_free_tier() -> None:
+    """Paid inference takes two deliberate steps, not one."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompleted(0, stdout="the answer")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        work_model="google/gemini-2.5-flash",
+        runner=fake_run,
+    )
+    assert runner("hi").ok
+
+    assert "-m" not in calls[0]
+
+
+def test_the_casual_lane_keeps_its_own_free_model_and_no_paid_key() -> None:
+    """Small talk has no tools and nothing to look up, so it stays free."""
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _FakeCompleted(0, stdout="yo")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        conversation_model="poolside/laguna-xs-2.1:free",
+        work_model="google/gemini-2.5-flash",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=_FakeSecretStore({"openrouter-api-key": "sk-or-v1-secret"}),
+        runner=fake_run,
+    )
+
+    assert runner.run_conversation("yo").ok
+
+    argv, kwargs = calls[0]
+    assert "poolside/laguna-xs-2.1:free" in argv
+    assert "google/gemini-2.5-flash" not in argv
+    assert PROVIDER_API_KEY_ENV not in kwargs.get("env", {})
+
+
+def test_a_work_model_carries_its_provider_or_hermes_routes_it_to_the_wrong_vendor() -> None:
+    """The model name alone does not switch providers.
+
+    Hermes keeps the provider pinned in config.yaml (nous), so passing a
+    Google model without --provider sent it to Nous Portal, which does not
+    serve it -- and the failure came back as a billing error from a vendor
+    the owner had never configured.
+    """
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompleted(0, stdout="ok")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        work_model="google/gemini-2.5-flash",
+        work_provider="openrouter",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=_FakeSecretStore({"openrouter-api-key": "sk-or-v1-secret"}),
+        runner=fake_run,
+    )
+    assert runner.run_scoped("hi", allowed_tools=frozenset()).ok
+
+    argv = calls[0]
+    assert "-m" in argv and argv[argv.index("-m") + 1] == "google/gemini-2.5-flash"
+    assert "--provider" in argv and argv[argv.index("--provider") + 1] == "openrouter"
+
+
+def test_no_provider_flag_is_passed_when_the_free_model_serves_the_turn() -> None:
+    """Passing --provider on a free turn would override the profile's own
+    provider for a model that belongs to it."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompleted(0, stdout="ok")
+
+    # Work model configured but no key, so the turn degrades to the free tier.
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        work_model="google/gemini-2.5-flash",
+        work_provider="openrouter",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=_FakeSecretStore({}),
+        runner=fake_run,
+    )
+    assert runner.run_scoped("hi", allowed_tools=frozenset()).ok
+
+    assert "--provider" not in calls[0]
+    assert "-m" not in calls[0]
+
+
+def test_the_casual_lane_never_gets_the_paid_provider() -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeCompleted(0, stdout="yo")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred",
+        conversation_model="poolside/laguna-xs-2.1:free",
+        work_model="google/gemini-2.5-flash",
+        work_provider="openrouter",
+        provider_key_secret_name="openrouter-api-key",
+        secret_store=_FakeSecretStore({"openrouter-api-key": "sk-or-v1-secret"}),
+        runner=fake_run,
+    )
+    assert runner.run_conversation("yo").ok
+
+    assert "--provider" not in calls[0]
+    assert "poolside/laguna-xs-2.1:free" in calls[0]
+
+
+def test_a_provider_error_printed_as_output_is_not_delivered_as_an_answer() -> None:
+    """Hermes exits zero and prints upstream failures, so an outage looks
+    exactly like an answer. This shipped: a misrouted model produced billing
+    text naming a vendor the owner had never configured, and it would have
+    arrived as Alfred's own reply."""
+    def fake_run(argv, **kwargs):
+        return _FakeCompleted(
+            0,
+            stdout="API call failed after 3 retries: HTTP 404: Model 'x' requires available credits",
+        )
+
+    result = SubprocessAgentRunner(profile="alfred", runner=fake_run)("hi")
+
+    assert result.ok is False
+    assert result.text == ""
+    assert "provider failure reported as output" in result.detail
+
+
+def test_an_answer_that_merely_mentions_an_error_is_still_delivered() -> None:
+    """The guard is anchored at the start for this reason: suppressing any
+    reply containing error-ish words would silently eat real answers."""
+    def fake_run(argv, **kwargs):
+        return _FakeCompleted(
+            0, stdout="your bank's api call failed after 3 retries. want me to flag it?"
+        )
+
+    result = SubprocessAgentRunner(profile="alfred", runner=fake_run)("hi")
+
+    assert result.ok is True
+    assert result.text.startswith("your bank's")
+
+
+def test_a_billable_failure_counts_against_the_monthly_cap(tmp_path: Path) -> None:
+    """A turn that reached the provider costs money whether or not Alfred got
+    a usable answer, so it has to consume budget. Counting only successes let
+    a retry loop bill indefinitely while the counter stood still."""
+    database = Database(tmp_path / "alfred.db")
+
+    def timing_out(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="hermes", timeout=1)
+
+    runner = SubprocessAgentRunner(
+        profile="alfred", database=database, monthly_call_limit=2, runner=timing_out
+    )
+    assert runner("one").ok is False
+    assert runner("two").ok is False
+
+    # Both failures were billable, so the third turn is refused by the cap.
+    third = runner("three")
+    assert third.ok is False
+    assert "monthly Hermes call limit reached" in third.detail
+
+
+def test_a_missing_binary_does_not_consume_the_monthly_budget(tmp_path: Path) -> None:
+    """Nothing ran and nothing was billed. Counting it would let one restart
+    loop burn the whole month's allowance without a single model call."""
+    database = Database(tmp_path / "alfred.db")
+
+    def missing(argv, **kwargs):
+        raise FileNotFoundError(2, "not found")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred", database=database, monthly_call_limit=2, runner=missing
+    )
+    for _ in range(4):
+        assert runner("hi").ok is False
+
+    with database.connect() as connection:
+        counted = connection.execute(
+            "SELECT COUNT(*) FROM tool_runs WHERE tool = 'hermes_subprocess_call'"
+        ).fetchone()[0]
+    assert counted == 0
+
+
+def test_a_dollar_budget_stops_further_turns(tmp_path: Path) -> None:
+    """A call count assumes every turn costs the same. Measured turns varied
+    by an order of magnitude in tokens, so only a dollar figure bounds spend."""
+    import tempfile
+    database = Database(tmp_path / "alfred.db")
+
+    def spending(argv, **kwargs):
+        # Hermes writes its usage report to the path it was handed.
+        usage = Path(argv[argv.index("--usage-file") + 1])
+        usage.write_text('{"estimated_cost_usd": 0.02}', encoding="utf-8")
+        return _FakeCompleted(0, stdout="answered")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred", database=database, monthly_budget_usd=0.05, runner=spending
+    )
+    assert runner("one").ok is True
+    assert runner("two").ok is True
+
+    # $0.04 spent; the third turn is still under and runs, taking it to $0.06.
+    assert runner("three").ok is True
+    refused = runner("four")
+
+    assert refused.ok is False
+    assert "monthly Hermes budget reached" in refused.detail
+
+
+def test_a_failed_turn_still_counts_its_cost(tmp_path: Path) -> None:
+    """Hermes writes the usage report even when the run fails, which is
+    exactly when accounting matters -- a failed turn still billed."""
+    database = Database(tmp_path / "alfred.db")
+
+    def failing_but_billed(argv, **kwargs):
+        usage = Path(argv[argv.index("--usage-file") + 1])
+        usage.write_text('{"estimated_cost_usd": 0.03}', encoding="utf-8")
+        return _FakeCompleted(1, stdout="", stderr="boom")
+
+    runner = SubprocessAgentRunner(
+        profile="alfred", database=database, monthly_budget_usd=0.05, runner=failing_but_billed
+    )
+    assert runner("one").ok is False
+    assert runner("two").ok is False
+
+    refused = runner("three")
+    assert refused.ok is False
+    assert "budget reached" in refused.detail
+
+
+def test_an_unreadable_usage_report_does_not_fail_the_turn(tmp_path: Path) -> None:
+    """The answer is already produced and paid for by the time cost is read;
+    refusing to deliver it would waste the spend it meant to account for."""
+    database = Database(tmp_path / "alfred.db")
+
+    def no_usage_written(argv, **kwargs):
+        return _FakeCompleted(0, stdout="the answer")
+
+    result = SubprocessAgentRunner(
+        profile="alfred", database=database, monthly_budget_usd=1.0, runner=no_usage_written
+    )("hi")
+
+    assert result.ok is True
+    assert result.text == "the answer"

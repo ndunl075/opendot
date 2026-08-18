@@ -122,6 +122,10 @@ def test_cli_exposes_windows_safe_hermes_python_launch() -> None:
 
     assert args.hermes_python == r"C:\Hermes\python.exe"
     assert args.hermes_conversation_model == "poolside/laguna-xs-2.1:free"
+    # Paid inference is opt-in on both halves, so the documented $0 running
+    # cost is what you get from a bare `alfred run`.
+    assert args.hermes_work_model is None
+    assert args.hermes_provider_key_secret is None
 
 
 def test_cli_imports_a_vault_note_as_a_confirmed_memory(tmp_path: Path, capsys) -> None:

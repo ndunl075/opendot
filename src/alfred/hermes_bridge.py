@@ -35,9 +35,12 @@ import os
 import random
 import re
 import subprocess
+import tempfile
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -58,8 +61,16 @@ from .outbox import Outbox
 from .memory_graph import MemoryGraph
 from .models import Redactor
 from .response_feedback import ResponseFeedbackService
+from .secret_store import SecretStore, SecretStoreError
 from .telegram_actions import action_keyboard
 from .workflow_learning import WORKFLOW_TURN_ID_ENV, WorkflowObservationStore
+
+#: Hermes reads its paid-provider credential from the environment under this
+#: name. Alfred injects it per turn from the OS keyring rather than writing it
+#: into ``hermes-profile/config.yaml``, which is version-controlled -- a key in
+#: that file would be committed. Nothing persists the value: it goes keyring ->
+#: subprocess environment -> gone, and never reaches SQLite or the audit log.
+PROVIDER_API_KEY_ENV = "OPENROUTER_API_KEY"
 
 #: Telegram rejects a sendMessage payload over 4096 characters outright, so a
 #: long agent answer is truncated rather than lost to a failed delivery.
@@ -154,6 +165,51 @@ _BULK_MAIL = re.compile(
     re.IGNORECASE,
 )
 
+#: Hermes reports an upstream provider failure by printing it and exiting
+#: zero, so from Alfred's side an outage is indistinguishable from an answer
+#: -- both are just text on stdout. This shipped: a misrouted model produced
+#: "API call failed after 3 retries: HTTP 404: Model ... requires available
+#: credits", and that string would have been delivered to the owner as
+#: Alfred's own reply, naming a vendor they had never configured.
+#:
+#: Anchored at the start of the output rather than searched anywhere within
+#: it, so an answer that merely discusses an error is not suppressed. The
+#: asymmetry justifies the heuristic: a false positive costs one honest
+#: "couldn't reach my model" and a retry, while a false negative hands the
+#: owner raw vendor billing text as though Alfred had written it.
+_PROVIDER_FAILURE = re.compile(
+    r"^\s*(?:"
+    r"API call failed after \d+ retr"
+    r"|(?:HTTP )?[45]\d\d:\s"
+    r"|(?:Error|Exception):\s"
+    r"|No (?:API key|credentials) (?:found|configured)"
+    r"|Model '[^']+' (?:requires|is not)"
+    r")",
+    re.IGNORECASE,
+)
+
+def _read_usage_cost(path: Path) -> float | None:
+    """Read Hermes's per-turn cost estimate, then delete the report.
+
+    Returns None rather than raising on anything unexpected. A cost figure
+    that cannot be read must not fail the turn -- the answer is already
+    produced and paid for by then, so refusing to deliver it would waste the
+    spend it was meant to account for. The call cap still bounds an
+    unreadable run.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        cost = payload.get("estimated_cost_usd")
+        return float(cost) if isinstance(cost, (int, float)) else None
+    except (OSError, ValueError, TypeError):
+        return None
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 _TRUNCATION_NOTE = "\n\n[truncated]"
 
 #: SOUL.md forbids em/en dashes, and the model breaks that rule anyway --
@@ -232,11 +288,17 @@ class SubprocessAgentRunner:
         command_prefix: tuple[str, ...] = (),
         profile: str,
         conversation_model: str | None = None,
+        work_model: str | None = None,
+        work_provider: str | None = "openrouter",
+        provider_key_secret_name: str | None = None,
+        provider_key_env: str = PROVIDER_API_KEY_ENV,
+        secret_store: SecretStore | None = None,
         timeout_seconds: float = 120.0,
         conversation_timeout_seconds: float = 45.0,
         redact_outbound: bool = True,
         database: Database | None = None,
         monthly_call_limit: int | None = None,
+        monthly_budget_usd: float | None = None,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         monotonic: Callable[[], float] = time.perf_counter,
     ) -> None:
@@ -244,17 +306,23 @@ class SubprocessAgentRunner:
         self.command_prefix = command_prefix
         self.profile = profile
         self.conversation_model = conversation_model
+        self.work_model = work_model
+        self.work_provider = work_provider
+        self.provider_key_secret_name = provider_key_secret_name
+        self.provider_key_env = provider_key_env
+        self.secret_store = secret_store
         self.timeout_seconds = timeout_seconds
         self.conversation_timeout_seconds = conversation_timeout_seconds
         self.redact_outbound = redact_outbound
         self._redactor = Redactor()
         self.database = database
         self.monthly_call_limit = monthly_call_limit
+        self.monthly_budget_usd = monthly_budget_usd
         self._runner = runner
         self._monotonic = monotonic
 
     def __call__(self, prompt: str) -> AgentRunResult:
-        return self._run(prompt, allowed_tools=None)
+        return self._run(prompt, allowed_tools=None, **self._work_lane())
 
     def run_scoped(
         self,
@@ -271,7 +339,41 @@ class SubprocessAgentRunner:
             allowed_tools=allowed_tools,
             correlation_id=correlation_id,
             chat_id=chat_id,
+            **self._work_lane(),
         )
+
+    def _work_lane(self) -> dict[str, Any]:
+        """Model and credential overrides for a work turn, if a paid one is set up.
+
+        Returns nothing at all unless a work model is configured *and* its key
+        is actually readable. Both halves matter: the free Nous Portal default
+        in ``hermes-profile/config.yaml`` is what keeps Alfred's running cost at
+        $0, so paid inference has to be opted into twice (a model name and a
+        stored key) and any gap silently leaves the turn exactly as it is today.
+
+        Degrading rather than raising is deliberate. A key that is missing,
+        revoked, or unreadable because the keyring is locked would otherwise
+        break every work turn; instead the turn runs slower on the free tier,
+        which is a bad day rather than an outage.
+        """
+        if not self.work_model:
+            return {}
+        key = self._provider_api_key()
+        if key is None:
+            return {}
+        lane: dict[str, Any] = {"model": self.work_model, "provider_api_key": key}
+        if self.work_provider:
+            lane["provider"] = self.work_provider
+        return lane
+
+    def _provider_api_key(self) -> str | None:
+        """Read the paid-provider key, or None when it is not available."""
+        if not self.provider_key_secret_name or self.secret_store is None:
+            return None
+        try:
+            return self.secret_store.get_required(self.provider_key_secret_name)
+        except SecretStoreError:
+            return None
 
     def run_conversation(self, prompt: str) -> AgentRunResult:
         """Use the free fast model as a plain conversational model.
@@ -298,6 +400,8 @@ class SubprocessAgentRunner:
         allowed_tools: frozenset[str] | None,
         reasoning: str | None = None,
         model: str | None = None,
+        provider: str | None = None,
+        provider_api_key: str | None = None,
         correlation_id: str | None = None,
         timeout_seconds: float | None = None,
         chat_id: int | None = None,
@@ -306,8 +410,14 @@ class SubprocessAgentRunner:
         effective_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         tool_count = len(allowed_tools) if allowed_tools is not None else None
 
+        # Set the moment the subprocess is launched. Everything after that
+        # point may have cost money at the provider even if Alfred never got
+        # a usable answer, so those turns must be audited -- and therefore
+        # counted against the monthly cap -- exactly like successful ones.
+        spawned = False
+
         def result(text: str, ok: bool, detail: str = "") -> AgentRunResult:
-            return AgentRunResult(
+            completed_result = AgentRunResult(
                 text=text,
                 ok=ok,
                 detail=detail,
@@ -315,18 +425,70 @@ class SubprocessAgentRunner:
                 runtime="oneshot",
                 tool_count=tool_count,
             )
+            cost_usd = _read_usage_cost(usage_path) if spawned else None
+            if spawned and self.database is not None:
+                AuditLog(self.database).append(
+                    AuditEvent(
+                        actor="system:hermes",
+                        client="hermes_bridge",
+                        tool="hermes_subprocess_call",
+                        outcome="ok" if ok else "failed",
+                        result={
+                            "profile": self.profile,
+                            # The model name, never the credential. Recorded so
+                            # a paid model can be compared against the profile's
+                            # free default on real turns: both lanes write here,
+                            # so the latency question is a query over tool_runs
+                            # rather than a stopwatch. None means the profile's
+                            # own default ran.
+                            "model": model,
+                            "tool_count": tool_count,
+                            "tools": sorted(allowed_tools) if allowed_tools is not None else None,
+                            "duration_ms": completed_result.duration_ms,
+                            "runtime": completed_result.runtime,
+                            "detail": detail or None,
+                            # Hermes's own estimate, in dollars. This is what
+                            # the monthly budget sums; a call count was only
+                            # ever a proxy, and measured turns varied by an
+                            # order of magnitude in tokens.
+                            "estimated_cost_usd": cost_usd,
+                        },
+                    )
+                )
+            return completed_result
 
         if self.database is not None and self.monthly_call_limit is not None:
             if self._month_to_date_calls() >= self.monthly_call_limit:
                 return result("", False, "monthly Hermes call limit reached")
+        # The dollar cap is the one that means anything. A call count is a
+        # proxy that assumes every turn costs the same; turns measured on
+        # real traffic ranged over an order of magnitude in token count, so
+        # the proxy is only ever loosely related to the bill.
+        if self.database is not None and self.monthly_budget_usd is not None:
+            spent = self._month_to_date_spend_usd()
+            if spent >= self.monthly_budget_usd:
+                return result(
+                    "",
+                    False,
+                    f"monthly Hermes budget reached: ${spent:.4f} of ${self.monthly_budget_usd:.2f}",
+                )
         # Hermes owns its provider connection, so Alfred cannot wrap that HTTP
         # call with GuardedCloudProvider. Redaction must therefore happen at
         # this final process boundary, after every local context pack is built.
         if self.redact_outbound:
             prompt = self._redactor.redact(prompt)
-        argv = [self.command, *self.command_prefix, "-p", self.profile]
+        # Hermes writes this even when the run fails, which is exactly when
+        # cost accounting matters most: a failed turn still billed.
+        usage_path = Path(tempfile.gettempdir()) / f"alfred-hermes-usage-{uuid4().hex}.json"
+        argv = [self.command, *self.command_prefix, "-p", self.profile, "--usage-file", str(usage_path)]
         if model:
             argv.extend(["-m", model])
+        # Without this the model name alone is not enough: Hermes keeps the
+        # provider pinned in config.yaml (nous), so a Google model was routed
+        # to Nous Portal, which does not serve it. The failure came back as a
+        # billing error from the wrong vendor entirely.
+        if provider:
+            argv.extend(["--provider", provider])
         if reasoning:
             argv.extend(["--reasoning", reasoning])
         argv.extend(["-z", prompt])
@@ -343,7 +505,12 @@ class SubprocessAgentRunner:
             # A console child would otherwise open a terminal for every turn;
             # closing that window terminates Hermes with 0xC000013A.
             run_arguments["creationflags"] = subprocess.CREATE_NO_WINDOW
-        if allowed_tools is not None or correlation_id is not None or chat_id is not None:
+        if (
+            allowed_tools is not None
+            or correlation_id is not None
+            or chat_id is not None
+            or provider_api_key
+        ):
             environment = os.environ.copy()
             if allowed_tools is not None:
                 environment[HERMES_MCP_TOOL_FILTER_ENV] = ",".join(sorted(allowed_tools))
@@ -351,6 +518,8 @@ class SubprocessAgentRunner:
                 environment[WORKFLOW_TURN_ID_ENV] = correlation_id
             if chat_id is not None:
                 environment[HERMES_TELEGRAM_CHAT_ID_ENV] = str(chat_id)
+            if provider_api_key:
+                environment[self.provider_key_env] = provider_api_key
             run_arguments["env"] = environment
         # Hermes strips the parent environment when it spawns a stdio MCP
         # server, so the two variables above never reached Alfred's own server
@@ -366,12 +535,17 @@ class SubprocessAgentRunner:
         )
         try:
             with handshake:
+                spawned = True
                 completed = self._runner(argv, **run_arguments)
         except subprocess.TimeoutExpired:
             return result("", False, f"agent timed out after {effective_timeout:.0f}s")
         except OSError as error:
             # Most often the binary is not on PATH -- a real possibility when
             # the run loop is the Windows service rather than a login shell.
+            # Nothing ran and nothing was billed, so this must not consume
+            # the monthly budget: a missing binary would otherwise burn the
+            # whole month's allowance in one restart loop.
+            spawned = False
             return result("", False, f"{error.__class__.__name__}: {error}")
 
         stdout = (completed.stdout or "").strip()
@@ -380,24 +554,35 @@ class SubprocessAgentRunner:
             return result("", False, f"exit {completed.returncode}: {stderr[-300:]}")
         if not stdout:
             return result("", False, "agent produced no output")
-        completed_result = result(stdout, True)
-        if self.database is not None:
-            AuditLog(self.database).append(
-                AuditEvent(
-                    actor="system:hermes",
-                    client="hermes_bridge",
-                    tool="hermes_subprocess_call",
-                    outcome="ok",
-                    result={
-                        "profile": self.profile,
-                        "tool_count": tool_count,
-                        "tools": sorted(allowed_tools) if allowed_tools is not None else None,
-                        "duration_ms": completed_result.duration_ms,
-                        "runtime": completed_result.runtime,
-                    },
-                )
-            )
-        return completed_result
+        if _PROVIDER_FAILURE.match(stdout):
+            # Exit zero with an error printed as the answer. Treated as a
+            # failure so the bridge sends its own honest "couldn't reach my
+            # model" line under the same idempotency key, rather than
+            # forwarding the provider's text as if Alfred had written it.
+            return result("", False, f"provider failure reported as output: {stdout[:200]}")
+        return result(stdout, True)
+
+    def _month_to_date_spend_usd(self) -> float:
+        """Sum Hermes's own per-turn cost estimates for the current UTC month.
+
+        Reads the same audit rows the call cap counts, so a turn cannot be
+        billed by one guard and invisible to the other. Rows written before
+        cost was recorded contribute nothing rather than raising, which
+        degrades toward permitting -- the call cap still bounds those.
+        """
+        assert self.database is not None
+        self.database.migrate()
+        month = datetime.now(UTC).strftime("%Y-%m")
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT json_extract(result_json, '$.estimated_cost_usd') AS cost
+                FROM tool_runs
+                WHERE tool = 'hermes_subprocess_call' AND occurred_at LIKE ?
+                """,
+                (f"{month}%",),
+            ).fetchall()
+        return sum(float(row["cost"]) for row in rows if row["cost"] is not None)
 
     def _month_to_date_calls(self) -> int:
         assert self.database is not None

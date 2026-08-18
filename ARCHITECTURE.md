@@ -197,19 +197,6 @@ audited and requires two more examples before Alfred asks again. This slice
 deliberately has no activation or execution path: review can never change the
 Hermes profile while unattended.
 
-<<<<<<< HEAD
-**Built, then removed from chat:** Alfred still records a content-free
-`response_context` trace (source names, freshness, opaque record IDs) on
-every Telegram answer, and still accepts a `helpful` / `missing_context` /
-`wrong_context` vote if one arrives. The three inline buttons are gone —
-they were noise on every reply, including drafts. A later slice should
-*infer* those outcomes from the next messages instead of asking the owner
-to label them: a correction or "that's not what I meant" is `wrong_context`,
-a follow-up that has to restate missing facts is `missing_context`, and a
-short "thanks" / moving on is `helpful`. Until that classifier exists, do
-not put the buttons back. Ranking still uses whatever votes already landed;
-inferred votes would write the same `response_feedback` rows.
-=======
 **Built:** successful Telegram responses are graded helpful, missing-context, or
 wrong-context without anyone being asked. Two detectors reach that verdict: rule
 matching on the owner's next message ("you missed the one from sam", "that's the
@@ -227,7 +214,6 @@ actually waiting on the owner. An earlier slice asked for the same verdict with
 data was useful and the request was the problem, since a signal that only
 arrives when someone bothers mostly does not arrive. Taps on keyboards still
 sitting in chat history are honored.
->>>>>>> origin/main
 
 **Built (read side):** every bullet above records evaluation data, but until
 now nothing read it back, so the data could not answer the question it was
@@ -377,9 +363,19 @@ Rules:
 - Escalate to the configured cloud model only for turns that need Hermes; deterministic calendar reads, filtering, sync, ranking, and memory extraction remain local. **Built:** the bridge applies `Redactor` at its final subprocess boundary, enforces a 1,000-call monthly cap, and records successful external turns. `models.GuardedCloudProvider` remains the stricter cost-estimating wrapper for cloud providers Alfred Core calls directly.
 - Track input/output tokens and estimated cost per run. Default monthly cloud budget is `$0`; fail closed when the configured cap is reached. **Built:** `GuardedCloudProvider` checks month-to-date spend (summed from its own audit records) before every call and refuses once the cap is already met, defaulting to `$0` so an unconfigured instance never calls out. This checks the cap before each call, not a per-call ceiling, so a single very large call can still exceed the cap within one run.
 
+**Two holes in that accounting, both closed after the first live paid turn.** The monthly Hermes call cap counted only *successful* turns, because the audit row it reads was written on the success path alone. A turn that reached the provider and then timed out, exited non-zero, or produced nothing had already cost money and consumed no budget — and since one Hermes failure can be three billable retries, a failing model could bill indefinitely while the counter stood still. Every turn that actually spawned the subprocess is now audited and counted; a missing binary still is not, since nothing ran and counting it would let one restart loop burn a month's allowance without a single model call.
+
+Separately, Hermes reports an upstream failure by printing it and exiting zero, so from Alfred's side an outage was indistinguishable from an answer — both are text on stdout. The misrouted-provider bug produced exactly this: `API call failed after 3 retries: HTTP 404: Model ... requires available credits` would have been delivered to the owner as Alfred's own reply, naming a vendor never configured. Output matching a provider-failure shape *at its start* is now treated as a failed turn, so the bridge sends its honest "couldn't reach my model" line instead. Anchoring matters: a reply that merely discusses an error is still delivered, and the asymmetry justifies the heuristic — a false positive costs one retry, a false negative hands over raw vendor billing text.
+
 Local software can cost `$0/month`; electricity, existing subscriptions, a domain, or optional cloud inference are not free. The PC must be awake for live replies and scheduled work. Persistent jobs run missed executions once after restart and label the result late.
 
-**Deferred:** real Claude/OpenAI model access (as opposed to Nous Portal's free tier) for stronger reasoning/tool-calling. Technically simple — Hermes already supports a paid `fallback_model` (OpenRouter, routing to any model including Claude or GPT, needs `OPENROUTER_API_KEY`) — but deliberately not configured: it breaks the $0 cloud-spend ceiling above, and whether it becomes the primary model (better quality on every turn) or fallback-only (paid only on Nous outage/rate limit) is a real cost decision, not a technical one. Revisit once there's an actual key and a chosen tier.
+**Built, opt-in:** a paid model for *work* turns only, off unless every one of `--hermes-work-model`, `--hermes-work-provider`, and `--hermes-provider-key-secret` is supplied and the key is readable; anything missing degrades silently to the free tier rather than failing a turn. Casual turns stay on the free conversational model, so the common "yo" costs nothing.
+
+The cost decision this note previously deferred has been made, on measurement rather than preference: the free tier answered in 43-105 seconds with the variance of a queue, while Gemini Flash through OpenRouter answered the same turns in about 6 seconds at roughly `$0.0026` each. The owner set a spend limit at the provider and accepted the trade for tool-calling latency.
+
+Two caps guard it locally, both reading the same audit rows: a monthly call count and a monthly dollar ceiling (`--hermes-monthly-budget-usd`), summed from Hermes's own per-turn usage report. A call count alone was only ever a proxy — measured turns varied by an order of magnitude in tokens — and every turn that actually spawned the subprocess is counted, including failures, since a failed turn is still billed and one Hermes failure can be three billable retries. A missing binary is deliberately not counted: nothing ran, and counting it would let a restart loop burn the month's allowance without a single model call.
+
+The credential never touches the repository. It goes OS keyring → subprocess environment → gone, never into `hermes-profile/config.yaml` (which is version-controlled), SQLite, or the audit log; the audit records the model name only. And a provider outage is not delivered as an answer: Hermes reports an upstream failure by printing it and exiting zero, so a misrouted model once produced "requires available credits" as Alfred's own reply, naming a vendor the owner had never configured. Output matching a provider-failure shape at the start of the response now fails the turn instead.
 
 **Built, worth flagging:** `hermes-profile/`'s `hermes-telegram` toolset is Hermes's own default and already includes full `terminal`/`process` tools and, for a while, a BrowserOS neo MCP connection (installed, verified driving a real page, then deliberately disconnected: its server injects ~2,900 characters of instructions into *every* Hermes turn plus its tool schemas, paid on "yo" as much as on real browser work, while Alfred already reaches Gmail/Calendar/GitHub/Canvas through checked, approvable connectors. Re-add when a task genuinely needs a logged-in page.) — real shell execution and real browser automation against whatever you're logged into, reachable by anything that can message this Telegram bot. Neither goes through Alfred Core's own policy-gated, propose/approve MCP surface (section 7-8) — that boundary only covers tools Alfred Core itself exposes. Compounding that: every Telegram turn runs Hermes one-shot (`hermes -z`, no TTY), which unconditionally sets `HERMES_YOLO_MODE=1` and so auto-approves the entire normal "dangerous command" tier (`rm -rf`, `chmod -R 777`, `git reset --hard`, `curl | sh`, ...) with zero confirmation. The only floor that survives yolo is the tiny code-shipped hardline blocklist plus `config.yaml`'s own `approvals.deny` — now populated with ~70 broad substring patterns covering the categories above (see `hermes-profile/README.md` points 8-9). Neither BrowserOS nor the terminal tools' *reach* is scoped down by this — only specific destructive commands are blocked outright.
 
@@ -456,7 +452,11 @@ The morning brief gathers data without an LLM, ranks due/overdue items using tim
 
 The first acceptance path is now deterministic and covered through intake: “my paper is due Friday; remind me Thursday” creates one source-linked task with a Friday deadline, a Thursday reminder, and an explicit provenance-linked deadline memory without spending a model call. Automated tests cover parsing, persistence, memory extraction, missed-run recovery, and briefing after restart. The remaining operator check is the real-time wait for an actual Thursday delivery.
 
+<<<<<<< HEAD
 **Current deployment:** the repaired environment passes 383 tests. Alfred runs as a hidden per-user `Alfred` logon task because this session cannot control the installed administrator-owned Windows service; a duplicate runtime was removed and Telegram returned healthy. A separate `Alfred Backup` task creates an encrypted timestamped backup daily at 02:30, with the key in Windows Credential Manager. The first encrypted backup and an isolated restore/integrity drill both completed successfully. Calendar path IDs are now URL-encoded, so the `#` in Google's US Holidays calendar no longer truncates its REST path; a live current and three-year history refresh completed with all 17 connector-health entries green. Generic same-day calendar checks now render a compact three-item agenda without raw provider links or timestamps. Calendar/Gmail/GitHub proposals have durable Telegram approve/cancel controls, and Hermes web search is configured through DDGS. Casual Telegram messages use Telegram's native typing status instead of synthetic progress text, use Laguna XS with extended continuity and fast exact-memory recall, and reserve Step plus hybrid vector recall for tool-backed or explicit memory work. Connector batches run off the chat path, and a hung Telegram poll now times out near 12 seconds and retries after one second; tool-backed replies end with one relevant follow-up question.
+=======
+**Current deployment:** the repaired environment passes 592 tests. Alfred runs as a hidden per-user `Alfred` logon task because this session cannot control the installed administrator-owned Windows service; a duplicate runtime was removed and Telegram returned healthy. A separate `Alfred Backup` task creates an encrypted timestamped backup daily at 02:30, with the key in Windows Credential Manager. The first encrypted backup and an isolated restore/integrity drill both completed successfully. Calendar path IDs are now URL-encoded, so the `#` in Google's US Holidays calendar no longer truncates its REST path; a live current and three-year history refresh completed with all 17 connector-health entries green. Generic same-day calendar checks now render a compact three-item agenda without raw provider links or timestamps. Calendar/Gmail/GitHub proposals have durable Telegram approve/cancel controls, and Hermes web search is configured through DDGS. Casual Telegram messages use Telegram's native typing status instead of synthetic progress text, use Laguna XS with extended continuity and fast exact-memory recall, and reserve Step plus hybrid vector recall for tool-backed or explicit memory work. Connector batches run off the chat path, and a hung Telegram poll now times out near 12 seconds and retries after one second; tool-backed replies end with one relevant follow-up question.
+>>>>>>> 08570af (Count every billable turn, and stop delivering provider errors as answers)
 
 ## 11. Fork rule and escape hatch
 

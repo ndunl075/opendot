@@ -281,10 +281,15 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 command_prefix=hermes_command_prefix,
                 profile=args.hermes_profile,
                 conversation_model=args.hermes_conversation_model,
+                work_model=args.hermes_work_model,
+                work_provider=args.hermes_work_provider,
+                provider_key_secret_name=args.hermes_provider_key_secret,
+                secret_store=SystemKeyringSecretStore(),
                 timeout_seconds=args.hermes_timeout,
                 conversation_timeout_seconds=args.hermes_conversation_timeout,
                 database=database,
                 monthly_call_limit=args.hermes_monthly_call_limit,
+                monthly_budget_usd=args.hermes_monthly_budget_usd,
             ),
             memory_graph=memory_graph,
             telegram_transport=telegram_transport,
@@ -936,6 +941,48 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "fast model used only for casual no-tool conversation "
             "(default: poolside/laguna-xs-2.1:free)"
+        ),
+    )
+    run.add_argument(
+        "--hermes-work-model",
+        default=None,
+        help=(
+            "optional paid model for tool-backed and search turns, e.g. "
+            "google/gemini-2.5-flash. Unset (the default) leaves every turn on "
+            "the profile's free Nous Portal model, so Alfred still costs $0. "
+            "Requires --hermes-provider-key-secret; without a readable key the "
+            "turn silently stays on the free model"
+        ),
+    )
+    run.add_argument(
+        "--hermes-monthly-budget-usd",
+        type=float,
+        default=None,
+        help=(
+            "hard monthly spend cap for Hermes turns, summed from the per-turn "
+            "cost Hermes reports. Unset means no dollar cap and only the call "
+            "count bounds spend, which is a proxy: measured turns varied by an "
+            "order of magnitude in tokens"
+        ),
+    )
+    run.add_argument(
+        "--hermes-work-provider",
+        default="openrouter",
+        help=(
+            "Hermes provider serving --hermes-work-model (default: openrouter). "
+            "Required because the model name alone does not switch providers: "
+            "Hermes keeps the one pinned in config.yaml, so a Google model "
+            "would be routed to Nous Portal, which does not serve it"
+        ),
+    )
+    run.add_argument(
+        "--hermes-provider-key-secret",
+        default=None,
+        help=(
+            "name of the OS keyring entry holding the paid provider's API key "
+            "(store it with: keyring set alfred <name>). The value is read per "
+            "turn and passed to Hermes through the environment, never written "
+            "to config.yaml, SQLite, or the audit log"
         ),
     )
     run.add_argument(

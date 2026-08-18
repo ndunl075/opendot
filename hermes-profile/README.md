@@ -262,13 +262,48 @@ list`-style regeneration ever overwrites the live config with an older copy
 of this file, re-apply the `approvals:` block from this file's current
 version.
 
-## Deferred: real Claude/OpenAI model access
+## Optional: a paid model for work turns
 
 Nous Portal's free tier is deliberately primary (`config.yaml`, point 2
-above) to keep Alfred's operational cloud-spend ceiling at $0. Hermes
-supports paid providers as a `fallback_model` (see the commented block in
-`%LOCALAPPDATA%\hermes\config.yaml`) -- OpenRouter routes to any model,
-including real Claude or GPT, and needs an `OPENROUTER_API_KEY`. Deliberately
-not configured yet: it's a real per-token cost decision (primary vs.
-fallback-only), not a technical blocker, and it's the user's call once
-there's an actual key to point at.
+above) to keep Alfred's operational cloud-spend ceiling at $0. That stays the
+default. The plumbing for a paid model now exists but is **off unless two
+separate flags are set**, so nothing spends money by accident:
+
+```
+alfred run --hermes-work-model google/gemini-2.5-flash \
+           --hermes-provider-key-secret openrouter-api-key
+```
+
+Store the key first, on the machine that runs Alfred:
+
+```
+keyring set alfred openrouter-api-key
+```
+
+Three properties worth knowing:
+
+1. **The key is never written to this repo.** `config.yaml` is
+   version-controlled, so a provider block with an `api_key` in it would be
+   committed. Alfred instead reads the key from the OS keyring per turn and
+   passes it to the Hermes child process through the environment
+   (`OPENROUTER_API_KEY`), never through argv -- process listings are readable
+   by other users on the machine, environments are not.
+2. **A missing or unreadable key degrades, it does not fail.** A locked
+   keyring or a revoked key drops that turn back to the free profile model.
+   A slow answer beats an outage.
+3. **Only work turns are affected.** The casual lane keeps its own free model
+   (`--hermes-conversation-model`): it has no tools and looks nothing up, so
+   there is nothing to pay for.
+
+Every turn's model name is recorded in the `tool_runs` audit row (the
+credential is not), so comparing paid against free is a query over real
+traffic rather than a stopwatch:
+
+```sql
+SELECT json_extract(result_json, '$.model') AS model,
+       COUNT(*) AS turns,
+       ROUND(AVG(json_extract(result_json, '$.duration_ms'))) AS avg_ms
+FROM tool_runs WHERE tool = 'hermes_subprocess_call' GROUP BY model;
+```
+
+`NULL` in that `model` column means the profile's own free default ran.
