@@ -11,7 +11,7 @@ from alfred.connector_records import ConnectorRecordStore
 from alfred.db import Database
 from alfred.gmail import _draft_message_id
 from alfred.google_calendar import _calendar_event_id
-from alfred.hermes_tools import HERMES_MCP_TOOL_FILTER_ENV
+from alfred.hermes_tools import HERMES_MCP_TOOL_FILTER_ENV, HERMES_TELEGRAM_CHAT_ID_ENV
 from alfred.mcp_server import MCP_TOOL_NAMES, create_server, main, parse_stdio_args
 from alfred.policy import ApprovalService, PolicyStore
 
@@ -436,6 +436,50 @@ def test_reminder_set_creates_its_own_task_when_none_is_given(tmp_path: Path) ->
     with Database(database_path).connect() as connection:
         row = connection.execute("SELECT title, state FROM tasks WHERE id = ?", (job["task_id"],)).fetchone()
     assert (row["title"], row["state"]) == ("Call advisor", "open")
+
+
+def test_reminder_set_inherits_chat_id_from_the_hermes_turn_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"reminder_set"})
+    server = create_server(database_path)
+    monkeypatch.setenv(HERMES_TELEGRAM_CHAT_ID_ENV, "20")
+
+    job = _call(
+        server,
+        "reminder_set",
+        {"text": "Call advisor", "run_at": "2026-08-15T09:00:00-04:00"},
+    )
+
+    assert job["run_at"] == "2026-08-15T13:00:00Z"
+    with Database(database_path).connect() as connection:
+        payload = json.loads(
+            connection.execute("SELECT payload_json FROM jobs WHERE id = ?", (job["id"],)).fetchone()[0]
+        )
+    assert payload["destination"] == "telegram:20"
+
+
+def test_task_schedule_inherits_chat_id_from_the_hermes_turn_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "alfred.db"
+    _grant(database_path, allowed_tools={"task_schedule"})
+    server = create_server(database_path)
+    monkeypatch.setenv(HERMES_TELEGRAM_CHAT_ID_ENV, "20")
+
+    task = _call(
+        server,
+        "task_schedule",
+        {"prompt": "check the score", "run_at": "2026-08-15T15:00:00-04:00"},
+    )
+
+    assert task["chat_id"] == 20
+    with Database(database_path).connect() as connection:
+        payload = json.loads(
+            connection.execute("SELECT payload_json FROM jobs WHERE id = ?", (task["id"],)).fetchone()[0]
+        )
+    assert payload["destination"] == "telegram:20"
 
 
 def test_reminder_set_can_repeat_daily_at_a_local_wall_clock(tmp_path: Path) -> None:
