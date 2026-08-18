@@ -197,12 +197,23 @@ audited and requires two more examples before Alfred asks again. This slice
 deliberately has no activation or execution path: review can never change the
 Hermes profile while unattended.
 
-**Built:** successful Telegram responses expose explicit helpful, missing-context,
-and wrong-context feedback. Alfred stores one vote per response with only source
-names, freshness, and opaque ranked record IDs, never prompt or answer text.
-Feedback can make a bounded ordering adjustment within existing Gmail/GitHub
-priority tiers; it cannot select a new source, bypass low-priority-mail filters,
-or authorize any action.
+**Built:** successful Telegram responses are graded helpful, missing-context, or
+wrong-context without anyone being asked. Two detectors reach that verdict: rule
+matching on the owner's next message ("you missed the one from sam", "that's the
+wrong week", "thanks, perfect"), and a check of the reply's own context pack that
+flags a source with no successful sync behind it or one a full day stale. Alfred
+stores one verdict per detector per response with only source names, freshness,
+the name of the rule that fired, and opaque ranked record IDs, never prompt or
+answer text; ranking still counts each response once. A verdict can make a
+bounded ordering adjustment within existing Gmail/GitHub priority tiers; it
+cannot select a new source, bypass low-priority-mail filters, or authorize any
+action. Inline keyboards are reserved for approvals — the decisions Alfred is
+not permitted to make alone — so a keyboard appearing at all means something is
+actually waiting on the owner. An earlier slice asked for the same verdict with
+`helpful` / `missing context` / `wrong context` buttons under every answer; the
+data was useful and the request was the problem, since a signal that only
+arrives when someone bothers mostly does not arrive. Taps on keyboards still
+sitting in chat history are honored.
 
 **Built (read side):** every bullet above records evaluation data, but until
 now nothing read it back, so the data could not answer the question it was
@@ -213,9 +224,12 @@ promotion — plus which context sources were present when a vote landed, which
 is the join `response_context` and `response_feedback` were designed for.
 Deliberately association rather than attribution: a turn packs several sources
 at once, so a source appearing beside `wrong_context` is where to start
-looking, never proof it caused the miss. The report runs no model, writes
-nothing, and changes no ranking; deciding what to do about a bad number stays
-a human judgment. It is content-free like the tables it reads (outcomes,
+looking, never proof it caused the miss. Verdicts the owner reached — stated or
+inferred — carry the helpful rate and the source attribution; answers Alfred
+flagged against its own stale pack are counted apart, since a connector going
+quiet is connector health and folding it in would read as a week of disliked
+answers. The report runs no model, writes nothing, and changes no ranking;
+deciding what to do about a bad number stays a human judgment. It is content-free like the tables it reads (outcomes,
 counts, source names, opaque record IDs), so it is safe to paste into an
 issue. A metric with no votes yet reports null rather than zero — an unmeasured
 system must not read as a failing one.
@@ -398,7 +412,7 @@ Additional invariants:
 - All mutations use idempotency keys and a transactional outbox; retry only safe/retriable failures.
 - Default-deny channel identity. Pair Telegram/Slack user IDs locally.
 - Every answer based on synced data includes source links and freshness; stale sync is explicit.
-- Response feedback is evaluation data only; no feedback control can approve, execute, or retry an action.
+- Response feedback is evaluation data only, whether stated or inferred; no verdict can approve, execute, or retry an action, and no detector may ask the model to reach one.
 
 ## 9. Connector order
 

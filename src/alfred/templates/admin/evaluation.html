@@ -42,6 +42,42 @@
   </div>
 
   <div class="section">
+    <p class="section-label">How that feedback was reached</p>
+    <div class="card">
+      {% for signal, count in report.response_feedback.signals.items() %}
+        <div class="row">
+          <div class="row-title">{{ signal|signal_label }}</div>
+          <div class="row-meta">{{ count }}</div>
+        </div>
+      {% endfor %}
+    </div>
+    <p class="section-note">
+      Nothing above was asked for: a verdict is read out of the next message you
+      send. Buttons only remain on answers sent before that change.
+    </p>
+  </div>
+
+  <div class="section">
+    <p class="section-label">Answers Alfred flagged against itself</p>
+    <div class="card">
+      {% for source, count in report.context_gaps.by_source.items() %}
+        <div class="row">
+          <div class="row-title">{{ source|connector_icon }} {{ source }}</div>
+          <div class="row-meta">{{ count }} answer{{ '' if count == 1 else 's' }}</div>
+        </div>
+      {% else %}
+        <div class="empty-state">No answer was built on stale context.</div>
+      {% endfor %}
+    </div>
+    <p class="section-note">
+      Replies that quoted a connector with no successful sync behind it. Nobody
+      judged these wrong; they were written from a state of the world Alfred had
+      already lost track of, which is why they are counted apart from the rates
+      above.
+    </p>
+  </div>
+
+  <div class="section">
     <p class="section-label">Context sources when feedback was given</p>
     <div class="card">
       {% for source in report.sources %}

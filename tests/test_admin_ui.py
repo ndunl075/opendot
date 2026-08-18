@@ -236,6 +236,7 @@ def test_evaluation_page_renders_with_no_feedback_yet(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "Evaluation" in response.text
     assert "nothing to attribute" in response.text
+    assert "No answer was built on stale context." in response.text
 
 
 def test_evaluation_page_shows_rates_and_source_attribution(tmp_path: Path) -> None:
@@ -261,14 +262,23 @@ def test_evaluation_page_shows_rates_and_source_attribution(tmp_path: Path) -> N
                     response_update_id=response_id,
                     outcome=outcome,
                 )
+            ResponseFeedbackService.record_coverage_signal_in_transaction(
+                connection,
+                response_update_id="700",
+                sources=["gmail"],
+                freshness={"gmail": None},
+            )
     client = _client(database)
     _login(client)
 
     response = client.get("/evaluation")
 
-    assert "75%" in response.text  # three helpful of four votes
+    assert "75%" in response.text  # three helpful of four votes, none inferred
     assert "gmail" in response.text
     assert "nothing to attribute" not in response.text
+    # Alfred's own flag is reported apart from the votes, not folded into them.
+    assert "1 answer" in response.text
+    assert "Read from what you said next" in response.text
 
 
 def test_audit_page_shows_redacted_records_never_raw_content(tmp_path: Path) -> None:

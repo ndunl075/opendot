@@ -26,10 +26,13 @@ ACTION_LABELS = {
 
 def action_keyboard(
     approvals: list[tuple[str, str]],
-    *,
-    existing_rows: list[list[dict[str, str]]] | None = None,
 ) -> dict[str, list[list[dict[str, str]]]]:
-    """Put consequential confirmation above the lower-priority feedback controls."""
+    """The only keyboard Alfred still sends: a write it may not perform alone.
+
+    This used to carry the response-feedback buttons underneath as well.
+    Ratings are now inferred from the conversation, so a keyboard appearing at
+    all means a decision is actually waiting on the owner.
+    """
     rows: list[list[dict[str, str]]] = []
     for approval_id, action_type in approvals[:3]:
         label = ACTION_LABELS.get(action_type, "action")
@@ -39,7 +42,6 @@ def action_keyboard(
                 {"text": "cancel", "callback_data": f"aa:{approval_id}:n"},
             ]
         )
-    rows.extend(existing_rows or [])
     return {"inline_keyboard": rows}
 
 

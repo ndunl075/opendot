@@ -405,6 +405,134 @@ delivered reply). Samples contain only an update ID, runtime/tool count,
 outcome, and timings. Telegram timestamps have one-second resolution, so
 treat end-to-end totals as operator-facing, not a microbenchmark.
 
+For inbox/GitHub questions, the bridge assembles a bounded context pack from
+the already-synced local records before starting Hermes. That avoids a second
+MCP discovery/tool-call loop on the cold path. Gmail's Promotions, Social,
+and Forums categories are counted but omitted from the pack by default, and
+two recent completed chat exchanges are included for work turns so a precise
+follow-up such as `yes, flag that` keeps its referent. Casual turns use up to
+eight completed exchanges from the last week, `poolside/laguna-xs-2.1:free`
+with reasoning disabled, exact local FTS memory recall, and an empty Alfred
+MCP tool surface. Skipping the optional vector lookup avoids waiting for an
+Ollama embedding on greetings; tool-backed and explicit memory questions keep
+hybrid vector recall and the profile's stronger `stepfun/step-3.7-flash:free`
+default. Override the casual model with `--hermes-conversation-model`. Synced
+message content remains untrusted data, and Gmail context is still
+headers/snippets only, never a full message body.
+
+The bridge also narrows Alfred's MCP surface independently for every Hermes
+turn. A deterministic classifier uses the current request plus the two recent
+exchanges to select at most eight task, calendar, communication, memory, or
+status tools. `alfred-mcp` registers only that allowlist in the child process;
+an inbox/GitHub read already satisfied by the context pack exposes no tools.
+This is defense in depth on top of the existing per-client policy checks and
+does not narrow Claude, Cursor, HTTP, or other MCP clients.
+
+`alfred latency-status --limit 20` reports content-free p50/p95 timing for the
+Telegram acknowledgement, local context assembly, Hermes call, response-ready
+point, and first delivered reply. Recent samples contain only an update ID,
+runtime/tool count, outcome, and timings; message and connector content never
+enters the report. Telegram's source timestamp has one-second resolution, so
+acknowledgement and delivered totals are best treated as operator-facing
+end-to-end measurements rather than a microbenchmark.
+
+`alfred evaluation-status --window-days 30` closes the other half of that loop.
+Alfred already recorded response feedback, memory retrieval outcomes, workflow
+proposal decisions, and implicit-candidate promotion; this reads them back as
+one summary instead of leaving four tables nobody queries. It also reports
+which context sources were present when each feedback vote landed — a starting
+point for "why was that answer wrong", not proof of cause, since a turn packs
+several sources at once. The same summary is a page in the admin UI. Nothing
+here runs a model, writes a row, or changes ranking, and the output is
+content-free (outcomes, counts, source names, opaque record IDs), so it is
+safe to paste into an issue. A metric with no votes yet reports `null` rather
+than `0` — a system nobody has rated is not a system that scored zero.
+
+Hermes ACP and `serve` were evaluated as ways to remove the one-shot process
+start. ACP passes its compatibility check, but its tool surface is fixed when
+a session is created, while Alfred narrows MCP tools for every turn. Creating
+a fresh zero-tool session preserved that boundary but exceeded 30 seconds in
+two bounded trials before a prompt even ran because Hermes constructs a fresh
+agent per session. Reusing one session would be faster only by retaining an
+unbounded hidden transcript and a fixed tool surface. Production therefore
+stays on the bounded, redacted one-shot runner until upstream exposes a
+per-prompt tool override or cheap isolated sessions; failures and timeouts
+continue to produce one honest reply without retrying.
+
+### Persistent learning
+
+When conversational replies are enabled, Alfred also runs a local learning
+pass after the reply has already been delivered. Explicit `remember that ...`
+statements become confirmed memories immediately. Ordinary preferences,
+identity facts, and goals enter as quarantined candidates and need the same
+fact in a separate source event before promotion. Sensitive candidates never
+auto-promote, recognizable secrets are not stored, and every observation
+keeps its immutable source-event provenance.
+
+Confirmed memories relevant to a request are placed directly in the bridge's
+bounded context pack, avoiding another agent tool round trip. Candidate,
+superseded, rejected, deleted, sensitive, and secret memories are excluded
+from that automatic path. `memory_correct` preserves the former version while
+installing a correction; `memory_feedback` records relevant, irrelevant, or
+incorrect retrievals as append-only evaluation data. That feedback now reorders
+only the memories already selected for a matching query; it cannot inject an
+unrelated popular memory into the candidate set.
+
+Alfred grades its own answers instead of asking you to. Every successful reply
+used to end with `helpful`, `missing context`, and `wrong context` buttons;
+rating a secretary after each answer is work, so they went mostly unpressed,
+and the correction was already in the chat anyway. Two detectors now produce
+the same three verdicts. The first reads your next message for an unambiguous
+reaction — "you missed the one from sam", "that's the wrong week", "thanks,
+that's perfect" — using named rules rather than a model call, so it can be
+read and argued with, and it stays silent on anything it does not clearly
+recognize. The second is something you could not notice at all: when a reply
+was built from a connector that has never synced or last synced a day ago, the
+answer was already missing context, and that turn is flagged as it is stored.
+
+Each verdict records a content-free trace of source names, connector freshness,
+the name of the rule that fired, and opaque ranked record IDs; neither the
+prompt nor the answer is stored. Helpful and wrong signals can reorder Gmail or
+GitHub records only within their existing deterministic priority tier, while
+`missing context` stays an evaluation signal instead of guessing what was
+absent. A response holds one verdict per detector and still counts once in
+ranking, inferred verdicts are attributed only to the paired sender's own
+recent turn, and none of this can approve or execute an action. Buttons are now
+reserved for exactly that: approving or cancelling a write.
+
+`alfred evaluation-status` and the admin UI say how each verdict was reached, so
+inferred signal is never mistaken for something you said. Answers Alfred flagged
+against itself are counted separately from your verdicts and kept out of the
+helpful rate — a connector going quiet is connector health, and folding it in
+would make a week of stale Gmail read as a week of answers you disliked.
+
+Calendar and Canvas history use a separate derived academic layer. Immutable
+connector events remain authoritative; after connector sync, Alfred
+deduplicates revisions into daily JSON rollups and course/calendar profiles,
+classifying exams, quizzes, assignments, and ordinary events while retaining
+each source-event ID. Academic questions retrieve only a few matching rollups
+(rather than scanning raw history), and rebuilding is skipped when the source
+fingerprint has not changed. A second deterministic pass promotes the current
+items into source-linked semantic memories, supersedes changed provider
+versions, and connects calendar/course entities to the owner graph. This
+background work never delays a chat reply.
+
+The continuous runner refreshes a three-year Calendar window weekly by
+default without replacing Calendar's live incremental cursor. Canvas keeps
+the small upcoming/missing read on the normal connector interval and scans
+accessible active/completed course assignments only once daily. Use
+`--calendar-history-days 0` to disable Calendar history, or tune
+`--calendar-history-interval` and `--canvas-history-interval` when needed.
+One-shot maintenance is available through `calendar-history-sync
+--all-selected --days 1095` and `academic-memory-rebuild`.
+
+The JSON in rollups is a replaceable cache, not the canonical archive. This
+keeps exports portable while preserving edits, cancellations, provenance, and
+forget/correction behavior in SQLite. Cognee is therefore not a source of
+truth for Alfred today: its graph/vector retrieval ideas are useful, but its
+LLM-backed ingestion and additional runtime/database surface are unnecessary
+for deterministic Calendar/Canvas facts. It can be evaluated later as an
+optional retrieval backend against the same source-linked memory tests.
 `alfred evaluation-status --window-days 30` summarizes response feedback,
 memory retrieval outcomes, workflow proposal decisions, and
 implicit-candidate promotion—plus which context sources were present when

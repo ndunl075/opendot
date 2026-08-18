@@ -195,6 +195,18 @@ def _outcome_label(outcome: str) -> str:
     return _OUTCOME_LABELS.get(outcome, outcome.replace("_", " ").title())
 
 
+# How a response verdict was reached, phrased so the page says who decided
+# rather than naming the column value.
+_SIGNAL_LABELS = {
+    "reply": "Read from what you said next",
+    "button": "Tapped on an older answer's buttons",
+}
+
+
+def _signal_label(signal: str) -> str:
+    return _SIGNAL_LABELS.get(signal, signal.replace("_", " ").title())
+
+
 def _rate(value: float | None) -> str:
     """Render a ratio as a percentage, distinguishing "none yet" from zero.
 
@@ -211,6 +223,7 @@ _env.filters["dt"] = _format_dt
 _env.filters["connector_icon"] = _connector_icon
 _env.filters["status_label"] = _status_label
 _env.filters["outcome_label"] = _outcome_label
+_env.filters["signal_label"] = _signal_label
 _env.filters["rate"] = _rate
 
 

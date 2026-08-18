@@ -9,6 +9,21 @@ only bumps the minor version — see RELEASING.md).
 
 ### Changed
 
+- Response feedback is now noticed instead of requested. The `helpful` /
+  `missing context` / `wrong context` buttons under every successful answer are
+  gone; two detectors produce the same three verdicts on their own. Named rules
+  read the owner's next message for an unambiguous reaction ("you missed the one
+  from sam", "that's the wrong week", "thanks, that's perfect") and stay silent
+  on everything else, and a coverage check flags any reply built from a
+  connector that has never synced or last synced a day ago — a gap the chat
+  gives no way to notice. Verdicts still store only source names, freshness, the
+  name of the rule that fired, and opaque record IDs. Inline keyboards are now
+  reserved for approvals, so a keyboard appearing at all means a write is
+  waiting on a decision. Taps on keyboards already sitting in chat history are
+  still honored. `alfred evaluation-status` and the admin UI break the counts
+  down by how each verdict was reached, and report self-flagged answers apart
+  from the helpful rate so a quiet connector does not read as a week of answers
+  the owner disliked.
 - Collapsed helpers that recent feature work had copy-pasted, with no change to
   behavior or to any public name. `destinations.py` now owns the single
   `channel:recipient` rule that `reminders`, `nags`, `important_dates`, and

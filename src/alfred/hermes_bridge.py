@@ -53,7 +53,7 @@ from .hermes_tools import (
 from .outbox import Outbox
 from .memory_graph import MemoryGraph
 from .models import Redactor
-from .response_feedback import ResponseFeedbackService, feedback_keyboard
+from .response_feedback import ResponseFeedbackService
 from .telegram_actions import action_keyboard
 from .workflow_learning import WORKFLOW_TURN_ID_ENV, WorkflowObservationStore
 
@@ -1258,6 +1258,19 @@ class HermesBridge:
                         freshness=dict(trace.get("freshness") or {}),
                         items=list(trace.get("items") or []),
                     )
+                    # An answer written from a connector that has not synced
+                    # in a day was already missing something, and that is
+                    # invisible from the chat: the reply reads fine, it just
+                    # describes a state of the world Alfred lost track of.
+                    # Recorded against the same trace the owner's own reaction
+                    # would land on, as its own signal so neither overwrites
+                    # the other.
+                    ResponseFeedbackService.record_coverage_signal_in_transaction(
+                        connection,
+                        response_update_id=external_id,
+                        sources=list(trace.get("sources") or []),
+                        freshness=dict(trace.get("freshness") or {}),
+                    )
                     if isinstance(user_id, int) and approval_requested_since:
                         rows = connection.execute(
                             """
@@ -1287,11 +1300,12 @@ class HermesBridge:
                     # Index 0 is what _pending()'s NOT EXISTS checks, so the
                     # whole set is claimed atomically with the first bubble.
                     payload: dict[str, Any] = {"text": bubble}
-                    if ok and index == len(bubbles) - 1:
-                        feedback_rows = feedback_keyboard(external_id)["inline_keyboard"]
-                        payload["reply_markup"] = action_keyboard(
-                            approvals, existing_rows=feedback_rows
-                        )
+                    # Buttons are now reserved for decisions Alfred is not
+                    # allowed to make alone. Rating an answer is not one of
+                    # them, so an ordinary reply arrives with no keyboard at
+                    # all rather than with a keyboard nobody presses.
+                    if ok and approvals and index == len(bubbles) - 1:
+                        payload["reply_markup"] = action_keyboard(approvals)
                     Outbox.enqueue(
                         connection,
                         destination=f"telegram:{chat_id}",

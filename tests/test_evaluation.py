@@ -13,6 +13,8 @@ def _feedback(
     outcome: str,
     sources: list[str],
     index: int,
+    signal: str = "button",
+    rule: str | None = None,
 ) -> None:
     with database.connect() as connection:
         with database.transaction(connection):
@@ -25,10 +27,12 @@ def _feedback(
             )
             ResponseFeedbackService.record_feedback_in_transaction(
                 connection,
-                callback_query_id=f"callback-{index}",
+                callback_query_id=f"callback-{index}" if signal == "button" else None,
                 feedback_update_id=str(900 + index),
                 response_update_id=response_id,
                 outcome=outcome,
+                signal=signal,
+                rule=rule,
             )
 
 
@@ -58,6 +62,53 @@ def test_every_known_outcome_is_reported_even_when_never_chosen(tmp_path: Path) 
         "wrong_context": 0,
     }
     assert report.response_feedback.positive_rate == 1.0
+
+
+def test_the_report_says_how_each_verdict_was_reached(tmp_path: Path) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    _feedback(database, response_id="15", outcome="helpful", sources=["gmail"], index=0)
+    _feedback(
+        database,
+        response_id="16",
+        outcome="wrong_context",
+        sources=["gmail"],
+        index=1,
+        signal="reply",
+    )
+
+    report = EvaluationService(database).report()
+
+    assert report.response_feedback.signals == {"button": 1, "reply": 1}
+    assert report.response_feedback.total == 2
+
+
+def test_a_quiet_connector_does_not_read_as_answers_the_owner_disliked(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    _feedback(database, response_id="17", outcome="helpful", sources=["gmail"], index=0, signal="reply")
+    for index, response_id in enumerate(["18", "19"], start=1):
+        _feedback(
+            database,
+            response_id=response_id,
+            outcome="missing_context",
+            sources=["gmail"],
+            index=index,
+            signal="coverage",
+            rule="stale:gmail",
+        )
+
+    report = EvaluationService(database).report()
+
+    # Alfred flagging its own stale pack is connector health, not a verdict on
+    # the answer, so it is counted apart and cannot drag the helpful rate down.
+    assert report.response_feedback.total == 1
+    assert report.response_feedback.positive_rate == 1.0
+    assert report.context_gaps.total == 2
+    assert report.context_gaps.by_source == {"gmail": 2}
+    assert [source.missing_context for source in report.sources] == [0]
 
 
 def test_positive_rate_counts_only_helpful_votes(tmp_path: Path) -> None:

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .events import EventStore
+from .implicit_feedback import SIGNAL_BUTTON
 from .outbox import Outbox
 from .response_feedback import ResponseFeedbackService
 from .reminders import ReminderStore
@@ -93,6 +94,8 @@ _WEEKDAYS = {
     "saturday": 5,
     "sunday": 6,
 }
+#: Only reachable from keyboards already sitting in chat history; Alfred stopped
+#: attaching feedback buttons to new answers.
 _FEEDBACK_CALLBACK = re.compile(r"^af:(?P<response_update_id>\d+):(?P<code>[hmw])$")
 _FEEDBACK_OUTCOME = {
     "h": "helpful",
@@ -305,6 +308,21 @@ class TelegramGateway:
                     chat_id=message.chat.id,
                     update_id=update.update_id,
                 )
+                # Feedback used to be three buttons under every answer. This
+                # reads the same verdict out of the message that was going to
+                # be sent anyway, so it belongs in intake's own transaction:
+                # rule matching costs microseconds, and recording it here
+                # means the next context pack is already ranked with it.
+                inferred = ResponseFeedbackService.record_reply_signal_in_transaction(
+                    connection,
+                    chat_id=message.chat.id,
+                    user_id=message.sender.id,
+                    feedback_update_id=str(update.update_id),
+                    text=text,
+                    now=event_time,
+                )
+                if inferred is not None and inferred.recorded:
+                    receipt = receipt.model_copy(update={"feedback_recorded": True})
                 if receipt.text:
                     Outbox.enqueue(
                         connection,
@@ -315,6 +333,16 @@ class TelegramGateway:
                 return receipt
 
     def _handle_feedback_callback(self, update: TelegramUpdate) -> TelegramReceipt:
+        """Honor a tap on a keyboard Alfred no longer sends.
+
+        New answers carry approval buttons only; a verdict now comes from what
+        the owner says next (``ResponseFeedbackService.record_reply_signal_in_transaction``).
+        Telegram keyboards live in chat history forever, though, so every
+        answer sent before that change still shows three buttons. Deleting
+        this path would answer a tap on one of them with a rejected update and
+        a silent audit line, which is a worse outcome than storing the vote
+        the owner just deliberately cast.
+        """
         callback = update.callback_query
         if callback is None or callback.message is None or not callback.data:
             raise ValueError("Telegram feedback callback is incomplete")
@@ -374,10 +402,11 @@ class TelegramGateway:
                     return TelegramReceipt(text="feedback already saved", duplicate=True)
                 feedback = ResponseFeedbackService.record_feedback_in_transaction(
                     connection,
-                    callback_query_id=callback.id,
-                    feedback_update_id=str(update.update_id),
                     response_update_id=response_update_id,
                     outcome=outcome,
+                    signal=SIGNAL_BUTTON,
+                    callback_query_id=callback.id,
+                    feedback_update_id=str(update.update_id),
                 )
                 if not feedback.recorded:
                     return TelegramReceipt(text="feedback already saved", duplicate=True)

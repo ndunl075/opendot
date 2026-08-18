@@ -378,11 +378,12 @@ def test_inbox_and_github_are_prefetched_while_bulk_mail_stays_out_of_the_prompt
     assert json.loads(context_row["items_json"]) == [
         {"rank": 0, "record_id": "important", "source": "gmail"}
     ]
+    # Northwind is main's scrubbed placeholder; the absent keyboard is this
+    # branch's change. Both belong: the rename came from the PII scrub, and
+    # the feedback buttons are gone now that the verdict is inferred.
     assert "Project Northwind" not in context_row["items_json"]
-    assert reply_payload["reply_markup"]["inline_keyboard"][0][0] == {
-        "callback_data": "af:40:h",
-        "text": "helpful",
-    }
+    # No keyboard on an ordinary answer: buttons are for approvals now.
+    assert "reply_markup" not in reply_payload
 
 
 def test_a_follow_up_gets_the_recent_exchange_and_requires_a_precise_action(

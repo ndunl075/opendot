@@ -104,9 +104,14 @@ def test_bridge_attaches_a_new_proposal_to_the_answer_keyboard(tmp_path: Path) -
         ).fetchone()
         link_count = connection.execute("SELECT COUNT(*) FROM telegram_action_links").fetchone()[0]
     payload = json.loads(row["payload_json"])
-    first_row = payload["reply_markup"]["inline_keyboard"][0]
+    keyboard = payload["reply_markup"]["inline_keyboard"]
+    first_row = keyboard[0]
     assert first_row[0]["text"] == "approve email draft"
     assert first_row[0]["callback_data"].startswith("aa:")
+    # The decision is the only thing left on a keyboard. Rating the answer is
+    # inferred from the conversation instead of asked for here.
+    assert [button["text"] for button in first_row] == ["approve email draft", "cancel"]
+    assert len(keyboard) == 1
     assert link_count == 1
 
 
