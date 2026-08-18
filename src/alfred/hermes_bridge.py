@@ -228,6 +228,19 @@ _MARKDOWN_EMPHASIS = re.compile(r"(\*{1,3}|_{2,3})(?=\S)(.+?)(?<=\S)\1", re.DOTA
 #: Leading "### " / "## " headings, which the model also reaches for.
 _MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
 
+#: An MCP tool identifier as the model sees it. Hermes namespaces Alfred's
+#: tools as ``mcp__alfred__availability_get``; the underscore-stripped
+#: ``mcpalfredavailability_get`` is the same name after markdown emphasis has
+#: eaten the ``__`` pairs, which is exactly how it reached the owner's phone.
+#: Both spellings are matched because either can arrive depending on whether
+#: emphasis stripping ran first.
+_TOOL_IDENTIFIER = re.compile(r"\bmcp(?:__)?alfred(?:__)?[a-z0-9_]+", re.IGNORECASE)
+
+#: A sentence, for removing the whole of one that names a tool. Splitting on
+#: terminal punctuation rather than parsing: the text being repaired is one
+#: or two chat sentences, not prose.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
 
 class AgentRunResult(BaseModel):
     """One completed agent invocation, successful or not."""
@@ -1172,7 +1185,19 @@ class HermesBridge:
             "letter in chat and ask whether to send it. telegram attaches approve/cancel. before "
             "proposing any other action, require an unambiguous target and intent; a short "
             "confirmation may refer to one precise proposal in recent_conversation, but a vague "
-            "or multi-option offer requires clarification.\n"
+            "or multi-option offer requires clarification. "
+            # The preamble opens by calling the pack "a completed tool read",
+            # which is true only for what the pack actually contains. It is
+            # frequently near-empty -- a calendar question packs no calendar --
+            # and the model read the claim as covering everything, decided it
+            # already had what it needed, and answered "still can't get to
+            # your calendar, bro" without ever calling a tool. Nothing failed;
+            # it inferred an outage from an empty pack. So the positive
+            # instruction has to be explicit.
+            "the context above covers only what it actually lists. if it does not already "
+            "answer the request, call the tool that does, in this turn. never say a "
+            "connector is unavailable or not talking to you unless a tool call actually "
+            "failed and you can quote the error.\n"
             f"{self._scheduling_runtime_line(event)}\n"
             f"<alfred_context>{packed}</alfred_context>\n"
             f"current request: {request}"
@@ -1626,8 +1651,44 @@ def enforce_style(text: str) -> str:
     # ".. " or "?. " behind.
     replaced = re.sub(r"([.!?])\.\s+", r"\1 ", replaced)
     replaced = _MARKDOWN_HEADING.sub("", replaced)
+    replaced = _strip_tool_narration(replaced)
     replaced = _MARKDOWN_EMPHASIS.sub(r"\2", replaced)
+    # Again after emphasis stripping: "mcp__alfred__x" only becomes the bare
+    # "mcpalfredx" spelling once the underscore pairs are eaten, so a single
+    # pass in either position misses one of the two forms.
+    replaced = _strip_tool_narration(replaced)
     return replaced
+
+
+def _strip_tool_narration(text: str) -> str:
+    """Remove sentences that name an internal MCP tool.
+
+    A tool name in a reply is narration by definition -- the owner asked what
+    their week looks like, not which function answers that -- and SOUL.md
+    already forbids surfacing runtime internals like job ids and gateways.
+    This is the same class and reached the phone anyway: "it looks like
+    mcp__alfred__availability_get is what i need" arrived as its own chat
+    bubble, in place of the answer.
+
+    The whole sentence goes rather than the identifier alone, because
+    deleting just the name leaves "it looks like is what i need". If every
+    sentence names a tool there is nothing worth keeping, so the identifiers
+    are dropped instead and whatever remains is returned -- an odd sentence
+    is still better than an empty reply.
+
+    Prompting handles the cause; this only guarantees the symptom cannot
+    reach the owner, which a prompt alone never can.
+    """
+    if not _TOOL_IDENTIFIER.search(text):
+        return text
+    kept = [
+        sentence
+        for sentence in _SENTENCE_SPLIT.split(text)
+        if sentence.strip() and not _TOOL_IDENTIFIER.search(sentence)
+    ]
+    if kept:
+        return " ".join(kept)
+    return re.sub(r"\s{2,}", " ", _TOOL_IDENTIFIER.sub("", text)).strip()
 
 
 def split_into_bubbles(
