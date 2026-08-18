@@ -1,7 +1,9 @@
 from importlib.resources import files
 from pathlib import Path
 
-from alfred.db import Database
+import pytest
+
+from alfred.db import Database, MigrationConflict
 
 
 def test_migrate_is_idempotent_and_enables_wal(tmp_path: Path) -> None:
@@ -31,6 +33,60 @@ def test_migrate_is_idempotent_and_enables_wal(tmp_path: Path) -> None:
         "mood_entries",
         "gratitude_entries",
     } <= tables
+
+
+def test_migrate_refuses_a_version_another_migration_already_recorded(tmp_path: Path) -> None:
+    """A diverged history must say what collided, not surface a UNIQUE constraint.
+
+    "Applied" is tracked by filename while the version is the primary key, so a
+    database carrying a migration this build does not ship can hold a version
+    one of ours also claims. Reported as its own error because the operator has
+    to choose which history wins; SQLite's own message names neither file.
+    """
+    database = Database(tmp_path / "alfred.db")
+    with database.connect() as connection:
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL UNIQUE,
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations (version, filename) VALUES (16, '0016_habits.sql')"
+        )
+
+    with pytest.raises(MigrationConflict) as error:
+        database.migrate()
+
+    message = str(error.value)
+    assert "0016_journal.sql" in message
+    assert "0016_habits.sql" in message
+
+    # The check covers the whole pending batch, so the fifteen migrations that
+    # would have applied cleanly before reaching the collision must not have
+    # run either: a refusal that half-migrates is worse than the crash it
+    # replaces.
+    with database.connect() as connection:
+        tables = {
+            row["name"]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    assert "events" not in tables
+
+
+def test_migrate_allows_a_recorded_migration_this_build_does_not_ship(tmp_path: Path) -> None:
+    """Divergence alone is not a conflict; only a contested version number is."""
+    database = Database(tmp_path / "alfred.db")
+    database.migrate()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO schema_migrations (version, filename) VALUES (94, '0094_local_only.sql')"
+        )
+
+    assert database.migrate() == 94
 
 
 def test_status_is_non_sensitive(tmp_path: Path) -> None:

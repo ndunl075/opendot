@@ -11,6 +11,19 @@ from typing import Iterator
 import sqlite_vec
 
 
+class MigrationConflict(RuntimeError):
+    """A packaged migration claims a schema version this database gave another file.
+
+    Raised instead of letting SQLite report a bare ``UNIQUE constraint failed:
+    schema_migrations.version``, which says nothing about which two migrations
+    collided or what to do about it.
+    """
+
+
+def _migration_version(filename: str) -> int:
+    return int(filename.split("_", maxsplit=1)[0])
+
+
 class Database:
     """A single-process SQLite owner with explicit migrations and transactions."""
 
@@ -42,18 +55,26 @@ class Database:
                 )
                 """
             )
-            applied = {
-                row["filename"]
-                for row in connection.execute("SELECT filename FROM schema_migrations")
+            recorded = {
+                int(row["version"]): str(row["filename"])
+                for row in connection.execute("SELECT version, filename FROM schema_migrations")
             }
+            applied = set(recorded.values())
             migration_root = files("alfred.migrations")
             migration_files = sorted(
                 path for path in migration_root.iterdir() if path.name.endswith(".sql")
             )
-            for migration in migration_files:
-                if migration.name in applied:
-                    continue
-                version = int(migration.name.split("_", maxsplit=1)[0])
+            pending = [path for path in migration_files if path.name not in applied]
+            # Checked for the whole batch before applying any of it, so a
+            # collision on a later file cannot leave earlier ones half-adopted.
+            # "Applied" is tracked by filename while the version is the primary
+            # key, so a database carrying a migration this build does not ship
+            # can hold a version number that one of ours also claims. Without
+            # this the only symptom is SQLite's bare UNIQUE constraint message
+            # at startup, which names neither file.
+            self._require_no_version_conflict(pending, recorded, migration_files)
+            for migration in pending:
+                version = _migration_version(migration.name)
                 script = migration.read_text(encoding="utf-8")
                 filename_literal = migration.name.replace("'", "''")
                 # ``executescript`` commits an already-open transaction, so the
@@ -67,6 +88,33 @@ class Database:
                 )
             row = connection.execute("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").fetchone()
             return int(row["version"])
+
+    @staticmethod
+    def _require_no_version_conflict(
+        pending: list,
+        recorded: dict[int, str],
+        migration_files: list,
+    ) -> None:
+        """Refuse to apply a migration whose version this database gave another file."""
+        packaged = {path.name for path in migration_files}
+        for migration in pending:
+            version = _migration_version(migration.name)
+            owner = recorded.get(version)
+            if owner is None or owner == migration.name:
+                continue
+            # The migrations this database applied that this build has no file
+            # for are the divergence, and naming them turns an unexplained
+            # startup crash into a list of rows an operator can act on.
+            foreign = sorted(name for name in recorded.values() if name not in packaged)
+            raise MigrationConflict(
+                f"cannot apply {migration.name}: this database already records schema "
+                f"version {version} as {owner}. A version number names exactly one "
+                f"migration, so these two histories have diverged and applying this "
+                f"file would contradict that record. Nothing has been changed. "
+                f"Applied here but absent from this build: "
+                f"{', '.join(foreign) if foreign else 'none'}. "
+                f"Inspect and repair with: python scripts/reconcile_migrations.py"
+            )
 
     @contextmanager
     def transaction(self, connection: sqlite3.Connection) -> Iterator[None]:

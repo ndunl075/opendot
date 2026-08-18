@@ -7,6 +7,24 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- A database whose migration history diverged from the checked-out branch now
+  explains itself instead of refusing to start with
+  `sqlite3.IntegrityError: UNIQUE constraint failed: schema_migrations.version`.
+  `migrate()` tracks what is applied by *filename* while the version number is
+  the primary key, so a database carrying a migration this build does not ship
+  can hold a version one of ours also claims — the packaged file can then never
+  be recorded, and Alfred will not launch. The collision is now detected across
+  the whole pending batch before any of it is applied (a refusal that
+  half-migrates would be worse than the crash it replaces) and raised as
+  `MigrationConflict`, naming both migrations and listing every record this
+  build has no file for. Divergence on its own is still fine; only a contested
+  version number is an error. Added `scripts/reconcile_migrations.py`, which
+  reports that state and, with `--apply`, removes the unshippable records;
+  leftover tables are reported but only dropped when named explicitly, and never
+  while they hold rows.
+
 ### Changed
 
 - Response feedback is now noticed instead of requested. The `helpful` /
