@@ -488,8 +488,22 @@ class SubprocessAgentRunner:
         # Hermes owns its provider connection, so Alfred cannot wrap that HTTP
         # call with GuardedCloudProvider. Redaction must therefore happen at
         # this final process boundary, after every local context pack is built.
+        #
+        # Everything except the owner's current message. Redacting that made
+        # sending an email impossible: "send an email to my mom
+        # (atmgd03@gmail.com)" arrived as "[REDACTED:email]", so Alfred asked
+        # for the address, and the reply -- just the address -- was scrubbed
+        # the same way. Observed as a loop the owner could not escape.
+        #
+        # The distinction is whose data it is. Redaction exists so Alfred's
+        # *stored* content about other people (synced subjects, snippets,
+        # notifications, recalled memories) does not reach a cloud model as a
+        # side effect of an unrelated question. A recipient the owner just
+        # typed is not a side effect: it is the argument to the thing they
+        # asked for, and scrubbing it does not protect them, it only stops
+        # the feature working while still sending the rest of the sentence.
         if self.redact_outbound:
-            prompt = self._redactor.redact(prompt)
+            prompt = _redact_except_current_request(prompt, self._redactor)
         # Hermes writes this even when the run fails, which is exactly when
         # cost accounting matters most: a failed turn still billed.
         usage_path = Path(tempfile.gettempdir()) / f"alfred-hermes-usage-{uuid4().hex}.json"
@@ -1658,6 +1672,30 @@ def enforce_style(text: str) -> str:
     # pass in either position misses one of the two forms.
     replaced = _strip_tool_narration(replaced)
     return replaced
+
+
+#: The final line of both prompt shapes, after which everything is the
+#: owner's own words for this turn.
+_CURRENT_REQUEST_MARKERS = ("\ncurrent request: ", "\ncurrent message: ")
+
+
+def _redact_except_current_request(prompt: str, redactor: Redactor) -> str:
+    """Scrub everything Alfred stored, and nothing the owner just typed.
+
+    Splitting on the marker rather than redacting the whole prompt: the
+    context pack above it is synced third-party content, while the request
+    below it is the sentence the owner wrote this turn, including any
+    recipient they named. Redacting both is what made sending an email
+    impossible.
+
+    Falls back to redacting everything if the marker is absent, so an
+    unexpected prompt shape fails closed rather than leaking the pack.
+    """
+    for marker in _CURRENT_REQUEST_MARKERS:
+        head, found, request = prompt.rpartition(marker)
+        if found:
+            return redactor.redact(head) + found + request
+    return redactor.redact(prompt)
 
 
 def _strip_tool_narration(text: str) -> str:

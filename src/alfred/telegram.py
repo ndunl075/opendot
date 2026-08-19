@@ -193,9 +193,21 @@ class TelegramGateway:
         (("schedule a", "schedule an", "book a", "book an", "put on my calendar", "add to my calendar",
           "add to calendar", "set up a meeting"), "setting that up..."),
         (("open an issue", "file an issue", "create an issue", "make an issue"), "writing that issue..."),
-        (("forget", "delete that", "scrub", "wipe"), "on it..."),
-        (("remind",), "on it..."),
+        (("forget", "delete that", "scrub", "wipe"), "forgetting that..."),
+        # Ordered before the plain reminder: a nag is a different promise, and
+        # "on it..." for both hid which one the owner actually got.
+        (("keep reminding", "nag me", "bug me", "dont let me forget",
+          "don't let me forget", "keep at me", "stay on me"), "i'll keep on you about it..."),
+        (("remind",), "setting that reminder..."),
         (("add a task", "new task", "add task"), "adding that..."),
+        (("mark", "done", "finished", "completed"), "marking that done..."),
+        # Journal writes. Phrased as recording rather than as an opinion:
+        # Alfred stores what was said, it does not assess it.
+        (("log my mood", "mood check", "feeling like a", "rate my day"), "logging that..."),
+        (("grateful for", "gratitude", "thankful for"), "writing that down..."),
+        (("birthday is", "anniversary is", "remember the date", "important date"),
+         "saving that date..."),
+        (("export", "spreadsheet", "csv", "send me a file"), "putting that together..."),
     )
 
     #: Read topics as (keywords, noun). Unlike the actions above, *all*
@@ -204,7 +216,27 @@ class TelegramGateway:
     #: question had been missed.
     agent_ack_reads: tuple[tuple[tuple[str, ...], str], ...] = (
         (("canvas", "assignment", "homework", "syllabus", "coursework", "class", "course", "exam", "quiz"), "canvas"),
-        (("github", "repo", "pull request", " pr ", " prs ", "ci ", "commit", "issue"), "github"),
+        # Before the general github entry, so "any prs waiting on me" names
+        # the actual question rather than the connector it happens to use.
+        (("open pr", "open prs", "stale pr", "my prs", "my pull requests", " prs ", " pr ",
+          "pull request", "pull requests", "pull requests awaiting", "needs my review",
+          "review requested"),
+         "your open pull requests"),
+        # PR wording deliberately lives above and not here: matching both left
+        # "checking your open pull requests and github...", naming the
+        # connector as if it were a second topic.
+        (("github", "repo", "ci ", "commit", "issue"), "github"),
+        # Likewise before the inbox entry: "who hasn't replied" is a question
+        # about who owes whom, not a request to read mail.
+        (("hasnt replied", "hasn't replied", "havent replied", "haven't replied",
+          "awaiting my reply", "waiting on my reply", "owe a reply", "owe them a reply",
+          "went quiet", "gone quiet", "ghosted", "unanswered", "no reply"),
+         "who's waiting on you"),
+        (("free time", "am i free", "are we free", "am i busy", "open slots", "availability",
+          "any time on", "gaps in my"), "when you're free"),
+        (("my mood", "mood been", "mood trend", "gratitude journal", "my journal"),
+         "your journal"),
+        (("birthday", "birthdays", "anniversary", "important dates"), "upcoming dates"),
         (("slack",), "slack"),
         (("steps", "sleep", "heart rate", "workout", "health", "fitness"), "your health data"),
         (("note", "notes", "obsidian", "vault"), "your notes"),
@@ -234,12 +266,20 @@ class TelegramGateway:
             if any(_contains_phrase(haystack, keyword) for keyword in keywords):
                 return ack
 
+        # Read topics are matched against the message with any email address
+        # removed. An address carries its own provider name, so "gmail" inside
+        # atmgd03@gmail.com counted as a request to read the inbox: answering
+        # Alfred's own "what's your mom's email?" with just the address was
+        # acknowledged "checking your inbox...". The write path above already
+        # guards this for "send it to x@y.com"; a bare address had no such
+        # guard because it names no verb at all.
+        read_haystack = f" {cls._EMAIL_ADDRESS.sub(' ', text.lower()).strip()} "
         matched: list[tuple[int, str]] = []
         for keywords, noun in cls.agent_ack_reads:
             positions = [
                 position
                 for keyword in keywords
-                if (position := _phrase_position(haystack, keyword)) is not None
+                if (position := _phrase_position(read_haystack, keyword)) is not None
             ]
             if positions:
                 matched.append((min(positions), noun))
