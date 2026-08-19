@@ -62,7 +62,7 @@ from .memory_graph import MemoryGraph
 from .models import Redactor
 from .response_feedback import ResponseFeedbackService
 from .secret_store import SecretStore, SecretStoreError
-from .telegram_actions import action_keyboard
+from .telegram_actions import action_keyboard, action_preview
 from .workflow_learning import WORKFLOW_TURN_ID_ENV, WorkflowObservationStore
 
 #: Hermes reads its paid-provider credential from the environment under this
@@ -1539,7 +1539,7 @@ class HermesBridge:
                     if isinstance(user_id, int) and approval_requested_since:
                         rows = connection.execute(
                             """
-                            SELECT id, action_type FROM approvals
+                            SELECT id, action_type, preview_json FROM approvals
                             WHERE actor = 'mcp:hermes'
                               AND state = 'pending'
                               AND requested_at >= ?
@@ -1550,6 +1550,23 @@ class HermesBridge:
                         ).fetchall()
                         now = datetime.now(UTC).isoformat()
                         approvals = [(str(row["id"]), str(row["action_type"])) for row in rows]
+                        # Show the letter, not a summary of it. The agent's
+                        # own prose named only the subject, so approving meant
+                        # sending something never read. Rendered from the same
+                        # record the executor consumes, so the preview and the
+                        # send cannot disagree.
+                        previews = [
+                            preview
+                            for row in rows
+                            if (
+                                preview := action_preview(
+                                    str(row["action_type"]),
+                                    json.loads(row["preview_json"] or "{}"),
+                                )
+                            )
+                        ]
+                        if previews:
+                            bubbles = bubbles + previews
                         for approval_id, action_type in approvals:
                             connection.execute(
                                 """

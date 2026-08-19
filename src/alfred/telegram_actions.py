@@ -25,6 +25,63 @@ ACTION_LABELS = {
 }
 
 
+#: How much of a body to show before trimming. Long enough for a real email
+#: to be read in full on a phone, short enough that the buttons stay on
+#: screen -- an approval the owner has to scroll past is one they approve
+#: without reading.
+PREVIEW_BODY_CHARS = 900
+
+
+def action_preview(action_type: str, preview: dict[str, Any]) -> str:
+    """Render what will actually happen, from the stored approval record.
+
+    The agent already describes its own proposal in prose, but that is the
+    model's account of what it did, written before the record existed and
+    free to differ from it. "i queued it up with the subject 'hi, it's
+    alfred'" told the owner the subject and nothing else, so approving meant
+    sending a letter they had never read.
+
+    This reads the record the executor will use, so what is shown and what is
+    sent cannot disagree.
+    """
+    if action_type in {"gmail_message_send", "gmail_draft_create"}:
+        lines = [f"to: {preview.get('to', '(no recipient)')}",
+                 f"subject: {preview.get('subject') or '(no subject)'}"]
+        body = str(preview.get("body") or "").strip()
+        if body:
+            lines.append("")
+            lines.append(_trim(body))
+        return "\n".join(lines)
+    if action_type == "calendar_event_create":
+        return "\n".join(
+            [
+                f"event: {preview.get('summary') or '(untitled)'}",
+                f"starts: {preview.get('start', '?')}",
+                f"ends: {preview.get('end', '?')}",
+            ]
+        )
+    if action_type == "github_issue_create":
+        lines = [f"repo: {preview.get('repository', '?')}",
+                 f"title: {preview.get('title') or '(untitled)'}"]
+        body = str(preview.get("body") or "").strip()
+        if body:
+            lines.append("")
+            lines.append(_trim(body))
+        return "\n".join(lines)
+    return ""
+
+
+def _trim(body: str) -> str:
+    if len(body) <= PREVIEW_BODY_CHARS:
+        return body
+    # Cut on a line break where possible so a trimmed letter still ends on a
+    # readable boundary rather than mid-word.
+    cut = body.rfind("\n", 0, PREVIEW_BODY_CHARS)
+    if cut < PREVIEW_BODY_CHARS // 2:
+        cut = PREVIEW_BODY_CHARS
+    return body[:cut].rstrip() + "\n[...]"
+
+
 def action_keyboard(
     approvals: list[tuple[str, str]],
 ) -> dict[str, list[list[dict[str, str]]]]:
@@ -35,12 +92,16 @@ def action_keyboard(
     all means a decision is actually waiting on the owner.
     """
     rows: list[list[dict[str, str]]] = []
-    for approval_id, action_type in approvals[:3]:
-        label = ACTION_LABELS.get(action_type, "action")
+    for approval_id, _action_type in approvals[:3]:
+        # Cancel first so approve sits on the right, under the thumb and away
+        # from it. The label is bare "approve" because the message above
+        # already says what is being approved -- "approve send email" next to
+        # "cancel" made the destructive-looking button the wide one and read
+        # like a second description rather than a choice.
         rows.append(
             [
-                {"text": f"approve {label}", "callback_data": f"aa:{approval_id}:y"},
                 {"text": "cancel", "callback_data": f"aa:{approval_id}:n"},
+                {"text": "approve", "callback_data": f"aa:{approval_id}:y"},
             ]
         )
     return {"inline_keyboard": rows}
