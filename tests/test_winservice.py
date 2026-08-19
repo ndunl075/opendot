@@ -4,7 +4,18 @@ from pathlib import Path
 
 import pytest
 
+import alfred.winservice
 from alfred.winservice import _repo_root, configure, load_configured_args
+
+
+def _is_source_install() -> bool:
+    """Whether alfred is importable from a checkout rather than site-packages.
+
+    Mirrors what `_repo_root` looks for, so a test guarded by this cannot
+    disagree with the function it is guarding.
+    """
+    module = Path(alfred.winservice.__file__).resolve()
+    return (module.parents[2] / "pyproject.toml").exists()
 
 
 def test_configure_writes_the_run_args_and_load_reads_them_back(tmp_path: Path) -> None:
@@ -65,7 +76,17 @@ def test_repo_root_locates_the_checkout_containing_pyproject_toml() -> None:
     %SystemRoot%\\System32), instead of the repository root `alfred
     service-configure` actually wrote it to -- so `service-configure` reported
     success, `alfred-service start` reported success, and the service still
-    died immediately with "`.alfred\\service.json` does not exist"."""
+    died immediately with "`.alfred\\service.json` does not exist".
+
+    Only meaningful against a source checkout. The release workflow installs
+    the built wheel and runs this suite against it, where `winservice.py`
+    lives in site-packages and has no repository above it -- so `_repo_root`
+    correctly raises instead, which the next test covers. Asserting the happy
+    path there failed the v0.2.0 release build, which is precisely what
+    testing the wheel rather than the source tree is for.
+    """
+    if not _is_source_install():
+        pytest.skip("installed as a wheel; the Windows service requires an editable install")
     root = _repo_root()
 
     assert (root / "pyproject.toml").exists()
