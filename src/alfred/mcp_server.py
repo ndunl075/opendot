@@ -45,6 +45,7 @@ from .journal import JournalStore
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
+from .owner_identity import unfilled_placeholders
 from .policy import ApprovalService, PolicyError, PolicyStore
 from .nags import NagStore
 from .pull_requests import PullRequestService
@@ -278,6 +279,16 @@ def create_server(
     def message_draft(to: str, subject: str, body: str) -> dict:
         """Preview a Gmail draft; nothing reaches Gmail until a human confirms it."""
         policy.require_write(client_id, "message_draft")
+        # Same guard as the send path: a draft is what the owner reviews and
+        # sends, so a placeholder here reaches the recipient just as surely,
+        # only later.
+        gaps = unfilled_placeholders(body) + unfilled_placeholders(subject)
+        if gaps:
+            raise ValueError(
+                "refusing to propose a message with unfilled placeholders: "
+                + ", ".join(sorted(set(gaps)))
+                + ". ask the owner for the missing detail, then propose again."
+            )
         actions = GmailActions(database, approvals)
         approval = actions.propose_draft(actor=f"mcp:{client_id}", to=to, subject=subject, body=body)
         return approval.model_dump(mode="json")
@@ -286,6 +297,17 @@ def create_server(
     def message_send_propose(to: str, subject: str, body: str) -> dict:
         """Preview sending Gmail. Telegram attaches approve/cancel; do not paste the letter in chat."""
         policy.require_write(client_id, "message_send_propose")
+        # A placeholder that reaches the recipient is unrecoverable, and the
+        # approval preview is not a reliable filter -- the owner taps approve
+        # because the letter is usually fine. Refused here, before an approval
+        # record exists, so the model has to ask rather than propose a gap.
+        gaps = unfilled_placeholders(body) + unfilled_placeholders(subject)
+        if gaps:
+            raise ValueError(
+                "refusing to propose a message with unfilled placeholders: "
+                + ", ".join(sorted(set(gaps)))
+                + ". ask the owner for the missing detail, then propose again."
+            )
         return GmailSendActions(database, approvals).propose_send(
             actor=f"mcp:{client_id}", to=to, subject=subject, body=body
         ).model_dump(mode="json")

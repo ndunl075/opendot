@@ -58,6 +58,7 @@ from .hermes_tools import (
     wants_mail_write,
 )
 from .outbox import Outbox
+from .owner_identity import owner_identity
 from .memory_graph import MemoryGraph
 from .models import Redactor
 from .response_feedback import ResponseFeedbackService
@@ -650,6 +651,7 @@ class HermesBridge:
         self.lookback_seconds = lookback_seconds
         self.max_per_run = max_per_run
         self.max_bubbles = max_bubbles
+        self._owner_line: str | None = None
         self.context_char_budget = context_char_budget
         self.memory_graph = memory_graph or MemoryGraph(database)
         self._monotonic = monotonic
@@ -1212,10 +1214,32 @@ class HermesBridge:
             "answer the request, call the tool that does, in this turn. never say a "
             "connector is unavailable or not talking to you unless a tool call actually "
             "failed and you can quote the error.\n"
+            f"{self._owner_identity_line()}"
             f"{self._scheduling_runtime_line(event)}\n"
             f"<alfred_context>{packed}</alfred_context>\n"
             f"current request: {request}"
         )
+
+    def _owner_identity_line(self) -> str:
+        """Tell the model whose assistant it is, or say nothing.
+
+        Without this Alfred wrote a letter introducing itself as "a personal
+        assistant that helps [name] manage emails". The model was not being
+        careless: nothing in the prompt named the owner, so it left a slot.
+
+        Cached for the process because it reads a few hundred rows and the
+        answer does not change between turns. Empty when nothing has been
+        sent yet, since a prompt with no name is recoverable and one with a
+        guessed name signs letters as somebody else.
+        """
+        if self._owner_line is None:
+            try:
+                self._owner_line = owner_identity(self.database).prompt_line()
+            except Exception:
+                # Identity is a nicety; failing to read it must not fail a
+                # turn that had nothing to do with mail.
+                self._owner_line = ""
+        return f"{self._owner_line}\n" if self._owner_line else ""
 
     @staticmethod
     def _scheduling_runtime_line(event: dict[str, Any]) -> str:
