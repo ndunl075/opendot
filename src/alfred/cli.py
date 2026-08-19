@@ -34,6 +34,7 @@ from .vault import VaultImporter, VaultProjector
 from .people import PeopleService
 from .policy import ApprovalService, PolicyStore
 from .policy_coverage import PolicyCoverageService
+from .preflight import preflight
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .google_calendar import (
     CalendarCatalogSync,
@@ -333,6 +334,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
+    preflight_parser = subcommands.add_parser(
+        "preflight",
+        help="can the agent actually reach Alfred's tools; names the broken link and its fix",
+    )
+    preflight_parser.add_argument("--profile", default="alfred")
     subcommands.add_parser(
         "policy-coverage",
         help="MCP tools no registered client can call; catches a grant that drifted behind the tool list",
@@ -1715,6 +1721,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
+    if args.command == "preflight":
+        report = preflight(database, profile=args.profile)
+        print(report.model_dump_json())
+        return 0 if report.ok else 1
     if args.command == "policy-coverage":
         report = PolicyCoverageService(database).report()
         print(report.model_dump_json())
