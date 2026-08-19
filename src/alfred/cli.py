@@ -33,6 +33,7 @@ from .tasks import UNSET, TaskStore
 from .vault import VaultImporter, VaultProjector
 from .people import PeopleService
 from .policy import ApprovalService, PolicyStore
+from .policy_coverage import PolicyCoverageService
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .google_calendar import (
     CalendarCatalogSync,
@@ -332,6 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
+    subcommands.add_parser(
+        "policy-coverage",
+        help="MCP tools no registered client can call; catches a grant that drifted behind the tool list",
+    )
     hermes_mcp_register = subcommands.add_parser(
         "hermes-mcp-register",
         help="register Alfred's MCP server in a Hermes profile so the agent can see its tools",
@@ -1710,6 +1715,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
+    if args.command == "policy-coverage":
+        report = PolicyCoverageService(database).report()
+        print(report.model_dump_json())
+        # Non-zero only for the actionable case: a served tool no active
+        # client can call. A narrow per-client grant is deliberate and
+        # must not fail a scheduled check.
+        return 1 if report.unreachable and not report.no_clients_registered else 0
     if args.command == "hermes-mcp-register":
         result = register_hermes_mcp(
             profile=args.profile,
