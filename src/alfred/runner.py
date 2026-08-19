@@ -21,6 +21,7 @@ from typing import Callable, TypeVar
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .jobs import JobRunner
+from .preflight import preflight
 from .quiet_hours import QuietHours
 from .runtime_control import clear_restart_request, record_heartbeat, restart_alfred, restart_pending
 from .telegram import TelegramPair
@@ -109,6 +110,53 @@ class AlfredRunner:
         self._connector_result: tuple[list[str], list[str]] | None = None
         self._connector_result_lock = Lock()
 
+    def _audit_preflight(self) -> None:
+        """Record on startup whether the agent can reach Alfred's tools.
+
+        Preflight only helps if it runs, and nobody runs a diagnostic on a
+        system that looks fine -- which is exactly how three separate outages
+        survived for weeks. Startup is the moment worth checking: it is when
+        the Hermes profile has most likely just been rewritten by an update
+        that dropped the mcp_servers key.
+
+        Audited, never fatal. A broken link means Alfred answers without
+        tools, which is degraded but still useful, so refusing to start would
+        turn a partial outage into a total one. The audit row is what makes
+        it findable afterwards rather than being inferred weeks later from a
+        model apologising for a connector it invented.
+        """
+        try:
+            report = preflight(self.database)
+        except Exception as error:
+            # A diagnostic must never be the thing that stops the loop.
+            AuditLog(self.database).append(
+                AuditEvent(
+                    actor="system:runner",
+                    client="runner",
+                    tool="preflight",
+                    outcome="error",
+                    result={"error": error.__class__.__name__},
+                )
+            )
+            return
+        broken = [check.name for check in report.checks if not check.ok]
+        AuditLog(self.database).append(
+            AuditEvent(
+                actor="system:runner",
+                client="runner",
+                tool="preflight",
+                outcome="ok" if report.ok else "degraded",
+                result={"broken": broken} if broken else {"checks": len(report.checks)},
+            )
+        )
+        for check in report.checks:
+            if not check.ok:
+                print(
+                    f"[alfred run] preflight: {check.name} -- {check.detail}"
+                    + (f" | fix: {check.fix}" if check.fix else ""),
+                    flush=True,
+                )
+
     def run_forever(
         self, *, iterations: int | None = None, stop_check: Callable[[], bool] = lambda: False
     ) -> None:
@@ -121,6 +169,7 @@ class AlfredRunner:
         existing caller (including `alfred run`'s own KeyboardInterrupt
         handling) is unaffected.
         """
+        self._audit_preflight()
         count = 0
         while (iterations is None or count < iterations) and not stop_check():
             report = self.run_once()
