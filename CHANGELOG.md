@@ -7,7 +7,60 @@ only bumps the minor version — see RELEASING.md).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-19
+
 ### Added
+
+- `alfred preflight` answers whether the agent can actually reach Alfred's
+  tools, and runs itself at startup. Three separate failures in one week each
+  left Alfred silently toolless — no MCP server registered in Hermes at all, a
+  policy grant drifted to 22 tools against 33 served, and a per-turn tool
+  filter that never crossed into the MCP subprocess. None of them raised
+  anything, because the policy boundary raises for *its caller*, the caller is
+  a language model, and a model that cannot reach a tool apologises for an
+  outage it invented rather than reporting a broken install. Every layer
+  worked in isolation and nothing could see the chain. The check walks the
+  links in order and names the broken one and the command that repairs it;
+  registration is the one worth having most, because `hermes profile update`
+  rewrites that config and nothing else would notice the key going missing.
+- `alfred hermes-mcp-register` writes the `mcp_servers` key a Hermes profile
+  needs, replacing a setup step the profile's own documentation said could not
+  be scripted past an interactive prompt — a step that therefore never
+  happened, leaving the entire MCP surface dark since install.
+- `alfred policy-coverage` reports MCP tools no active client can call. A
+  narrow per-client grant stays informational, since scoping is deliberate;
+  the actionable finding is a tool reachable by nobody.
+- The per-turn tool filter and workflow turn id now reach the MCP server
+  through a handshake file. Hermes strips the parent environment when it
+  spawns a stdio server, so both were dropped every time: the filter was inert
+  and every turn shipped the whole tool surface, and the learning loop could
+  never record anything.
+
+### Fixed
+
+- Sending an email was impossible. Redaction ran over the whole prompt, so a
+  recipient the owner had just typed reached the model as `[REDACTED:email]`;
+  Alfred asked for the address, and the reply — just the address — was
+  scrubbed identically, leaving a loop with no exit. Redaction now covers
+  everything above the current request and nothing below it: scrubbing exists
+  so Alfred's *stored* content about other people does not reach a cloud model
+  as a side effect, and a recipient the owner typed is the argument to their
+  request rather than a side effect.
+- Alfred wrote mail as `[name]`. Nothing in the prompt named the owner, so a
+  letter that needed a name had none. The name is now read from the From
+  header of the owner's own sent mail, and both propose tools refuse a subject
+  or body containing an unfilled placeholder — the approval preview is not a
+  reliable filter, because the owner taps approve *because* the letter is
+  usually fine.
+- Approving an email meant sending something never read. Recipient, subject,
+  and body are now rendered from the approval record itself and shown above
+  the buttons, so what is displayed and what is sent come from the same row.
+- Calendar, inbox, pull-request, and connector questions were answered with no
+  tools at all. The lane and the tools are chosen independently, and a casual
+  turn passes none, so a question that selected a tool and classified as
+  casual had its tools discarded before the model saw them — silently, since a
+  small model with no calendar simply answers anyway.
+
 
 - `alfred status` (and the `system_status` MCP tool) now report outbox delivery
   health: counts by state, the timestamp of the oldest unfinished claim, and the

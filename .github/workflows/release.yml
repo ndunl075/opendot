@@ -36,7 +36,7 @@ jobs:
           python -m pytest -q
 
       # Keyless, Sigstore-backed provenance for exactly these artifacts --
-      # no GPG key or long-lived secret for Nico to generate or protect.
+      # no GPG key or long-lived secret for a maintainer to generate or protect.
       # Verify a downloaded artifact with:
       #   gh attestation verify dist/<file> --repo ndunl075/alfred
       - name: Attest build provenance

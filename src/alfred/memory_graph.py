@@ -537,7 +537,7 @@ class MemoryGraph:
         textual: a memory is *about* someone when it came from an event they
         organized, not when their name happens to appear in its wording. The
         difference is not academic -- text matching would treat "lunch near
-        Alicia's office" as a memory about Alicia, which is fine for an
+        Robin's office" as a memory about Robin, which is fine for an
         export and wrong for a deletion.
 
         Coverage is therefore honest but partial: it answers for events with a

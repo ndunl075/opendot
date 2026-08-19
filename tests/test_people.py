@@ -121,7 +121,7 @@ def test_repeat_runs_converge_instead_of_accumulating(tmp_path: Path) -> None:
 def test_gmail_senders_are_not_a_source_of_people(tmp_path: Path) -> None:
     """Measured against the real corpus: 26 of 29 candidates were brands, and
     the human-looking names came from bulk mailers ("Jamie Rivera" via
-    evite@mailva.evite.com), which would be a false claim about identity."""
+    invites@invites.example), which would be a false claim about identity."""
     database = Database(tmp_path / "alfred.db")
     database.migrate()
     with database.connect() as connection:
@@ -132,7 +132,7 @@ def test_gmail_senders_are_not_a_source_of_people(tmp_path: Path) -> None:
                 account="self",
                 record_type="unread_message",
                 record_id="m1",
-                payload={"from": "Jamie Rivera <evite@mailva.evite.com>", "subject": "Party"},
+                payload={"from": "Jamie Rivera <invites@invites.example>", "subject": "Party"},
                 active=True,
             )
 
@@ -159,7 +159,7 @@ def test_gmail_supplies_a_name_for_a_person_calendar_could_not_name(tmp_path: Pa
     """Calendar often has the address but no displayName, which would leave a
     person labelled with an identifier nobody calls them."""
     database = Database(tmp_path / "alfred.db")
-    _event(database, "e1", organizer={"email": "alicia@example.com"})
+    _event(database, "e1", organizer={"email": "robin@example.com"})
     with database.connect() as connection:
         with database.transaction(connection):
             ConnectorRecordStore.upsert(
@@ -168,7 +168,7 @@ def test_gmail_supplies_a_name_for_a_person_calendar_could_not_name(tmp_path: Pa
                 account="self",
                 record_type="unread_message",
                 record_id="m1",
-                payload={"from": "Jamie Rivera <alicia@example.com>", "subject": "hi"},
+                payload={"from": "Jamie Rivera <robin@example.com>", "subject": "hi"},
                 active=True,
             )
 
@@ -179,10 +179,10 @@ def test_gmail_supplies_a_name_for_a_person_calendar_could_not_name(tmp_path: Pa
 
 def test_a_name_found_later_renames_a_person_without_losing_the_old_one(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
-    _event(database, "e1", organizer={"email": "alicia@example.com"})
+    _event(database, "e1", organizer={"email": "robin@example.com"})
     service = PeopleService(database)
     service.sync()
-    assert _people(database) == [("alicia@example.com", False)]
+    assert _people(database) == [("robin@example.com", False)]
 
     # The name turns up in a later mail sync.
     with database.connect() as connection:
@@ -193,7 +193,7 @@ def test_a_name_found_later_renames_a_person_without_losing_the_old_one(tmp_path
                 account="self",
                 record_type="unread_message",
                 record_id="m1",
-                payload={"from": "Jamie Rivera <alicia@example.com>", "subject": "hi"},
+                payload={"from": "Jamie Rivera <robin@example.com>", "subject": "hi"},
                 active=True,
             )
     result = service.sync()
@@ -201,7 +201,7 @@ def test_a_name_found_later_renames_a_person_without_losing_the_old_one(tmp_path
     assert result.named == 1
     assert _people(database) == [("Jamie Rivera", False)]
     # Renaming is not forgetting: the old label still resolves.
-    assert MemoryGraph(database).resolve_entity_by_name("alicia@example.com") is not None
+    assert MemoryGraph(database).resolve_entity_by_name("robin@example.com") is not None
     assert service.sync().named == 0  # and it settles
 
 
@@ -209,7 +209,7 @@ def test_an_archived_message_still_supplies_a_name(tmp_path: Path) -> None:
     """A message being read says nothing about whether its sender has a name --
     the one real correspondent in the live corpus was in the archived set."""
     database = Database(tmp_path / "alfred.db")
-    _event(database, "e1", organizer={"email": "alicia@example.com"})
+    _event(database, "e1", organizer={"email": "robin@example.com"})
     with database.connect() as connection:
         with database.transaction(connection):
             ConnectorRecordStore.upsert(
@@ -218,7 +218,7 @@ def test_an_archived_message_still_supplies_a_name(tmp_path: Path) -> None:
                 account="self",
                 record_type="unread_message",
                 record_id="m1",
-                payload={"from": "Jamie Rivera <alicia@example.com>", "subject": "hi"},
+                payload={"from": "Jamie Rivera <robin@example.com>", "subject": "hi"},
                 active=False,
             )
 
@@ -238,7 +238,7 @@ def test_a_gmail_name_never_creates_someone_calendar_did_not_vouch_for(tmp_path:
                 account="self",
                 record_type="unread_message",
                 record_id="m1",
-                payload={"from": "Amazon.com <store-news@amazon.com>", "subject": "deals"},
+                payload={"from": "Amazon.com <store-news@shop.example>", "subject": "deals"},
                 active=True,
             )
 

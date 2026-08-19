@@ -492,7 +492,7 @@ class SubprocessAgentRunner:
         #
         # Everything except the owner's current message. Redacting that made
         # sending an email impossible: "send an email to my mom
-        # (atmgd03@gmail.com)" arrived as "[REDACTED:email]", so Alfred asked
+        # (mom@example.com)" arrived as "[REDACTED:email]", so Alfred asked
         # for the address, and the reply -- just the address -- was scrubbed
         # the same way. Observed as a loop the owner could not escape.
         #

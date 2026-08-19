@@ -52,7 +52,7 @@ def test_a_whole_narrating_sentence_goes_not_just_the_name() -> None:
 def test_an_ordinary_answer_is_untouched() -> None:
     for reply in (
         "your thursday is open after 2pm.",
-        "you have 3 unread from alicia.",
+        "you have 3 unread from robin.",
         "nothing on the calendar tomorrow.",
     ):
         assert enforce_style(reply) == reply

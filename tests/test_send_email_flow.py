@@ -1,6 +1,6 @@
 """The send-an-email turn, from a live failure the owner hit on their phone.
 
-Asked to "send an email to my mom (atmgd03@gmail.com) and tell her who you
+Asked to "send an email to my mom (mom@example.com) and tell her who you
 are", Alfred replied "what's your mom's email? the address was redacted from
 what i see here". The owner sent the address on its own. Alfred answered
 "checking your inbox...". No email was ever drafted.
@@ -13,7 +13,7 @@ whole prompt, so the address the owner had just typed became
 scrubbed the same way -- so the loop had no exit.
 
 *A bare address read as an inbox request.* An email address carries its own
-provider name, so "gmail" inside ``atmgd03@gmail.com`` matched the inbox
+provider name, so "gmail" inside ``mom@example.com`` matched the inbox
 keyword. The send path already guarded that for "send it to x@y.com"; a bare
 address names no verb, so nothing guarded it.
 """
@@ -25,7 +25,7 @@ from alfred.hermes_bridge import _redact_except_current_request
 from alfred.models import Redactor
 from alfred.telegram import TelegramGateway
 
-ADDRESS = "atmgd03@gmail.com"
+ADDRESS = "mom@example.com"
 
 
 def _gateway() -> TelegramGateway:

@@ -11,10 +11,10 @@ does the reasonable thing and leaves a slot.
 
 Sent mail answers it without guessing. The From header on the owner's own
 outbound messages is how they already sign their email -- 195 of them read
-"Nicolas Dunlap <...>" on the live account -- so it is the owner's own choice
+"Alex Owner <...>" on the live account -- so it is the owner's own choice
 of name rather than an inference from an address. Calendar `displayName` was
 the other candidate and is much worse: the owner's calendars are named
-"FAMILY CAR", "Dunlap Family", and "Holidays in United States", none of which
+"FAMILY CAR", "Family", and "Holidays in United States", none of which
 is a person.
 
 Read-only, cached per process, and absent rather than wrong when there is no
@@ -35,7 +35,7 @@ from .db import Database
 #: needs enough to outvote a one-off alias.
 _SAMPLE = 300
 
-#: "Nicolas Dunlap <a@b.com>" -> name, address.
+#: "Alex Owner <a@b.com>" -> name, address.
 _FROM_HEADER = re.compile(r"^\s*(?P<name>[^<]*?)\s*<(?P<address>[^>]+)>\s*$")
 
 
@@ -80,7 +80,7 @@ def owner_identity(database: Database) -> OwnerIdentity:
             continue
         name = match.group("name").strip().strip('"').strip()
         # A From header whose "name" is just the address again carries no
-        # name at all, and signing "196128692+ndunl075@users.noreply.github.com," would be worse
+        # name at all, and signing "owner@example.com," would be worse
         # than signing nothing.
         if not name or "@" in name:
             continue

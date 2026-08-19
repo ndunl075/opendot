@@ -750,8 +750,8 @@ Bulk exports select a set rather than one record:
 
 `vault-export-person` defines "about a person" **structurally**: a memory is
 about someone when it came from an event they organized, not when their name
-appears in the wording. Text matching would treat "lunch near Alicia's
-office" as a memory *about* Alicia—tolerable for an export, wrong for a
+appears in the wording. Text matching would treat "lunch near Robin's
+office" as a memory *about* Robin—tolerable for an export, wrong for a
 deletion, and this selector serves both. Find the entity ID with
 `alfred memory-search "<name>"`.
 

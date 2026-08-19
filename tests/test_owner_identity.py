@@ -38,27 +38,27 @@ def test_the_name_comes_from_the_owners_own_sent_mail(tmp_path: Path) -> None:
     choice rather than an inference from an address."""
     database = Database(tmp_path / "alfred.db")
     for index in range(3):
-        _sent(database, "Nicolas Dunlap <196128692+ndunl075@users.noreply.github.com>", f"s{index}")
+        _sent(database, "Alex Owner <owner@example.com>", f"s{index}")
 
     who = owner_identity(database)
 
-    assert who.name == "Nicolas Dunlap"
-    assert who.address == "196128692+ndunl075@users.noreply.github.com"
+    assert who.name == "Alex Owner"
+    assert who.address == "owner@example.com"
 
 
 def test_the_most_used_header_wins_over_a_one_off_alias(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
     for index in range(4):
-        _sent(database, "Nicolas Dunlap <196128692+ndunl075@users.noreply.github.com>", f"main{index}")
-    _sent(database, "Nicolas Dunlap <office@usefrontierdigital.com>", "alias")
+        _sent(database, "Alex Owner <owner@example.com>", f"main{index}")
+    _sent(database, "Alex Owner <owner@work.example>", "alias")
 
-    assert owner_identity(database).address == "196128692+ndunl075@users.noreply.github.com"
+    assert owner_identity(database).address == "owner@example.com"
 
 
 def test_a_header_with_no_real_name_is_ignored(tmp_path: Path) -> None:
-    """Signing "196128692+ndunl075@users.noreply.github.com," is worse than signing nothing."""
+    """Signing "owner@example.com," is worse than signing nothing."""
     database = Database(tmp_path / "alfred.db")
-    _sent(database, "196128692+ndunl075@users.noreply.github.com <196128692+ndunl075@users.noreply.github.com>", "bare")
+    _sent(database, "owner@example.com <owner@example.com>", "bare")
 
     assert owner_identity(database).name is None
 
@@ -77,11 +77,11 @@ def test_no_sent_mail_means_no_claim(tmp_path: Path) -> None:
 
 def test_the_prompt_line_says_who_to_write_as(tmp_path: Path) -> None:
     database = Database(tmp_path / "alfred.db")
-    _sent(database, "Nicolas Dunlap <196128692+ndunl075@users.noreply.github.com>", "s1")
+    _sent(database, "Alex Owner <owner@example.com>", "s1")
 
     line = owner_identity(database).prompt_line()
 
-    assert "Nicolas Dunlap" in line
+    assert "Alex Owner" in line
     assert "sign mail as them" in line
     assert "[name]" in line, "the instruction names the exact failure it prevents"
 
@@ -115,6 +115,6 @@ def test_ordinary_bracketed_prose_is_left_alone() -> None:
 
 
 def test_a_finished_letter_passes() -> None:
-    body = "Hi Mom,\n\nI'm Alfred, the assistant Nicolas built. He asked me to say hello.\n\nNicolas"
+    body = "Hi Mom,\n\nI'm Alfred, the assistant Alex built. He asked me to say hello.\n\nAlex"
 
     assert unfilled_placeholders(body) == []

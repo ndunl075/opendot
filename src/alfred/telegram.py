@@ -268,7 +268,7 @@ class TelegramGateway:
 
         # Read topics are matched against the message with any email address
         # removed. An address carries its own provider name, so "gmail" inside
-        # atmgd03@gmail.com counted as a request to read the inbox: answering
+        # mom@example.com counted as a request to read the inbox: answering
         # Alfred's own "what's your mom's email?" with just the address was
         # acknowledged "checking your inbox...". The write path above already
         # guards this for "send it to x@y.com"; a bare address had no such

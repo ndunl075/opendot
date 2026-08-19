@@ -15,7 +15,7 @@ needs no name extraction from prose and makes no guess about who someone is.
 the real 629-message corpus, using Gmail to *create* people produced 29
 candidates of which 26 were brands (Amazon, Venmo, Pacsun, a16z), and the
 human-looking ones were the most dangerous: "Jamie Rivera" also arrives from
-``evite@mailva.evite.com`` and "Jordan Lee via LinkedIn" from
+``invites@invites.example`` and "Jordan Lee via LinkedIn" from
 ``messaging-digest-noreply@linkedin.com``. Keying a person to a bulk mailer
 is a false claim about who someone is, not merely noise, because a display
 name there is the sender's branding.
