@@ -24,7 +24,11 @@ TOKEN = "test-admin-token"
 
 
 def _client(database: Database) -> TestClient:
-    return TestClient(create_admin_app(database, bearer_token_value=TOKEN))
+    # https:// base_url: the session cookie is Secure-flagged, and httpx's
+    # cookie jar (like a real browser) won't send a Secure cookie back over
+    # plain http, so an http:// TestClient would silently fail every
+    # authenticated request after login.
+    return TestClient(create_admin_app(database, bearer_token_value=TOKEN), base_url="https://testserver")
 
 
 def _login(client: TestClient) -> None:

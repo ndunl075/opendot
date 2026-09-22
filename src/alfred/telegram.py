@@ -589,6 +589,11 @@ class TelegramGateway:
         if parsed.command == "runtime_restart":
             from .runtime_control import _write_restart_request, restart_alfred
 
+            if parsed.title.strip() != "confirm":
+                return TelegramReceipt(
+                    text="this restarts the whole Alfred process. reply /restart confirm (or /wake confirm) to do it."
+                )
+
             restart = restart_alfred()
             if restart.ok:
                 return TelegramReceipt(text=f"restarting via {restart.method}.")
@@ -662,8 +667,11 @@ class TelegramGateway:
         lowered = normalized.casefold()
         if lowered == "/status" or lowered.startswith("/status "):
             return ParsedCommand("runtime_status", "")
-        if lowered in {"/restart", "/wake"} or lowered.startswith("/restart ") or lowered.startswith("/wake "):
+        if lowered in {"/restart", "/wake"}:
             return ParsedCommand("runtime_restart", "")
+        if lowered.startswith("/restart ") or lowered.startswith("/wake "):
+            _, _, rest = lowered.partition(" ")
+            return ParsedCommand("runtime_restart", rest.strip())
         raise ValueError("I do not understand that command.")
 
     @staticmethod

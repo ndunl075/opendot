@@ -261,7 +261,12 @@ def create_admin_app(database: Database, *, bearer_token_value: str) -> Starlett
             if supplied and secrets.compare_digest(supplied, bearer_token_value):
                 response = RedirectResponse(url=str(form.get("next") or "/"), status_code=303)
                 response.set_cookie(
-                    _SESSION_COOKIE, supplied, httponly=True, samesite="strict", max_age=60 * 60 * 24 * 30
+                    _SESSION_COOKIE,
+                    supplied,
+                    httponly=True,
+                    samesite="strict",
+                    secure=True,
+                    max_age=60 * 60 * 24 * 30,
                 )
                 return response
             return _render("login.html", error="Incorrect token.", next=next_path)
@@ -346,6 +351,13 @@ def run_admin_ui(database: Database, *, port: int, bearer_token_value: str, host
     interface address (e.g. its Tailscale IP) instead, never ``0.0.0.0``
     unless you have your own firewall rules already restricting who can
     reach this port.
+
+    The session cookie is marked ``Secure``, so a non-loopback ``host``
+    needs a TLS-terminating reverse proxy in front of it (e.g. Tailscale
+    Serve) -- otherwise the browser will accept the login but silently
+    refuse to send the cookie back on the next request. Loopback access
+    works either way: browsers treat ``127.0.0.1``/``localhost`` as a
+    secure context regardless of scheme.
 
     Takes an already-resolved ``Database`` rather than a path, since the
     CLI caller has already resolved one via ``database_from_args``.

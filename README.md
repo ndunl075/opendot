@@ -1,13 +1,13 @@
 # Alfred
 
-Alfred is a local-first, open-source personal secretary that runs on your PC.
-It remembers what you tell it, keeps a typed temporal memory graph with
-evidence-backed provenance, briefs you from Calendar, Gmail, Canvas, and
-GitHub, and acts on your behalf—creating events, drafting and sending mail,
-filing issues—only after you preview and approve. SQLite owns memory, tasks,
-schedules, audit records, and connector state. Telegram, Slack, Claude,
-Cursor, ChatGPT, and the CLI are replaceable interfaces, not the source of
-truth.
+A self improving agentic personal secretary with persistent memory, a
+universal MCP tool surface, and fully local storage. It remembers what you
+tell it, keeps a typed temporal memory graph with evidence-backed
+provenance, briefs you from Calendar, Gmail, Canvas, and GitHub, and acts on
+your behalf—creating events, drafting and sending mail, filing issues—only
+after you preview and approve. SQLite owns memory, tasks, schedules, audit
+records, and connector state. Telegram, Slack, Claude, Cursor, ChatGPT, and
+the CLI are replaceable interfaces, not the source of truth.
 
 Credentials stay in the OS credential store. Tokens never land in the
 database, audit log, Markdown vault, or Git. Writes are preview-then-confirm.
@@ -675,8 +675,11 @@ When Alfred is running, Telegram accepts three operator commands from paired
 chats:
 
 - `/status` — is the loop alive, and when did it last cycle?
-- `/restart` — restart now
-- `/wake` — same as `/restart` when Alfred is down
+- `/restart confirm` — restart now (a bare `/restart` asks you to confirm first,
+  so one stray message can't bounce the process)
+- `/wake` — same as `/restart` when Alfred is down and the watchdog's rescue
+  poll picks the message up directly (no confirmation step there — Alfred
+  isn't running to be interrupted)
 
 Register the watchdog once (Administrator PowerShell, after
 `service-configure`):

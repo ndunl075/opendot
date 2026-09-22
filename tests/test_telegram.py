@@ -89,6 +89,22 @@ def test_status_command_reports_runtime_health(tmp_path: Path) -> None:
     assert "alfred is running" in receipt.text
 
 
+def test_bare_restart_asks_for_confirmation_without_restarting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called = False
+
+    def _fail_if_called() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr("alfred.runtime_control.restart_alfred", _fail_if_called)
+    receipt = _gateway(tmp_path / "alfred.db").handle(_update(51, "/restart"))
+
+    assert "confirm" in receipt.text
+    assert called is False
+
+
 def test_restart_command_queues_recovery_when_restart_task_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -97,7 +113,7 @@ def test_restart_command_queues_recovery_when_restart_task_missing(
         "alfred.runtime_control.restart_alfred",
         lambda: type("RestartResult", (), {"ok": False, "method": "none", "detail": "missing"})(),
     )
-    receipt = _gateway(database_path).handle(_update(51, "/restart"))
+    receipt = _gateway(database_path).handle(_update(51, "/restart confirm"))
 
     assert "watchdog will pick it up" in receipt.text
     from alfred.runtime_control import restart_pending
@@ -110,7 +126,7 @@ def test_wake_is_an_alias_for_restart(tmp_path: Path, monkeypatch: pytest.Monkey
         "alfred.runtime_control.restart_alfred",
         lambda: type("RestartResult", (), {"ok": True, "method": "scheduled_task", "detail": "AlfredRestart"})(),
     )
-    receipt = _gateway(tmp_path / "alfred.db").handle(_update(52, "/wake"))
+    receipt = _gateway(tmp_path / "alfred.db").handle(_update(52, "/wake confirm"))
 
     assert "restarting via scheduled_task" in receipt.text
 
