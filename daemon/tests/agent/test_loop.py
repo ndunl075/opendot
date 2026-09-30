@@ -518,3 +518,11 @@ def test_f12_uncertainty_survives_a_pause_before_the_rerun(tmp_path: Path) -> No
     assert restarted.loop.task(task_id).state is TaskState.HANDED_OFF
     assert restarted.approvals.list_pending() == []
     assert restarted.world.executed("reminder_set") == []
+
+
+def test_empty_catalog_at_startup_is_reread_on_the_first_request(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[text_turn("signed in now")])
+    stack.router.refresh([])  # the daemon started before the first ChatGPT sign-in
+    task_id, _ = stack.start_and_run("hello")
+    assert stack.loop.task(task_id).state is TaskState.COMPLETED
+    assert stack.provider.requests[0].model == "fake-luna"

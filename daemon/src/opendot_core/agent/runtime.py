@@ -21,6 +21,7 @@ from ..api.escrow import TokenEscrow
 from ..api.server import create_app
 from ..db import Database
 from ..policy import ApprovalService
+from ..providers.errors import ProviderError
 from ..providers.registry import DEFAULT_PROVIDER, ProviderRegistry
 from ..router import Router
 from ..rules import RuleEngine
@@ -69,7 +70,11 @@ def build_agent_runtime(
     approvals = ApprovalService(database)
     escrow = TokenEscrow()
     gated = ApprovalGatedTools(tools, ApprovalExecutor(approvals, escrow, actor=actor, execute=execute))
-    router = Router(registry.get(provider_name).list_models())
+    try:
+        catalog = registry.get(provider_name).list_models()
+    except ProviderError:
+        catalog = []  # not signed in yet: the loop re-reads the catalog on its first request
+    router = Router(catalog)
     meter = UsageMeter(database, budgets=budgets, clock=clock)
     rules = RuleEngine(database)
     reviewer = Reviewer(

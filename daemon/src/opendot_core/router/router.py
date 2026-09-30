@@ -60,10 +60,14 @@ class Router:
         auto_top: bool = False,
     ) -> None:
         self.auto_top = auto_top
-        self.tiers: dict[Tier, str] = discover_tiers(catalog)
+        self.overrides: dict[Tier, str] = {Tier(tier): model for tier, model in (overrides or {}).items()}
+        self.refresh(catalog)
+
+    def refresh(self, catalog: list[ModelInfo]) -> None:
+        """Re-read the account's catalog (for example after the first sign-in). Overrides still win."""
+        self.tiers = discover_tiers(catalog)
         # User overrides win per tier (this is the only way to reach Astra).
-        for tier, model in (overrides or {}).items():
-            self.tiers[Tier(tier)] = model
+        self.tiers.update(self.overrides)
 
     def _resolve(self, tier: Tier) -> tuple[Tier, str]:
         """Model for a tier, using the next tier UP when it is missing."""

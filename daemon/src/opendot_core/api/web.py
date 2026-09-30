@@ -1,0 +1,249 @@
+"""Serve the built UI and the API from one loopback origin (M3 task 3.5, ARCHITECTURE.md section 11).
+
+- Binds to 127.0.0.1 only; every request must also *address* a loopback host (the Host header),
+  which stops DNS-rebinding pages from talking to the daemon through a name they control.
+- ``/v1/*`` is the API app from ``api/server.py``: bearer token on every route, the chat
+  WebSocket authenticates with its subprotocol. The API never accepts the session cookie, so a
+  cross-site form can never act for the user.
+- A browser signs in once at ``/login`` by pasting the token (``opendot api-token show``). That
+  sets an HttpOnly, SameSite=Strict session cookie, and only then is ``index.html`` served, with
+  the token in ``<meta name="opendot-api-token">`` for the UI's API client. Without the cookie a
+  local process gets the login page, never the token.
+- Built assets (``/assets/...``) are public: they are the same for everyone and hold no secrets.
+- The desktop shell (Tauri) serves its own bundled copy of the UI and passes the token to it
+  directly, so API responses allow CORS for the Tauri origins only.
+- Contract endpoints the real daemon does not implement yet answer 501 ``not_implemented``, so
+  the UI can show "not available yet" instead of failing on a 404.
+"""
+
+from __future__ import annotations
+
+import html
+import re
+import secrets
+from pathlib import Path
+
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from .contract import ENDPOINTS
+from .models import ErrorResponse
+
+SESSION_COOKIE = "opendot_session"
+TOKEN_META = "opendot-api-token"
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "https://tauri.localhost")
+_META_PLACEHOLDER = re.compile(r'<meta\s+name="opendot-api-token"[^>]*>', re.IGNORECASE)
+
+LOGIN_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDot: sign in</title>
+<style>
+:root {{ color-scheme: light dark; font-family: system-ui, sans-serif; }}
+body {{ display: grid; place-items: center; min-height: 100vh; margin: 0; }}
+form {{ display: grid; gap: .75rem; width: min(24rem, 90vw); }}
+input, button {{ font: inherit; padding: .6rem .75rem; border-radius: .5rem; border: 1px solid #8886; }}
+button {{ cursor: pointer; }}
+.error {{ color: #c0392b; }}
+</style></head>
+<body><form method="post" action="/login">
+<h1>OpenDot</h1>
+<label for="token">Access token</label>
+<input id="token" name="token" type="password" autocomplete="off" required autofocus>
+<p>Run <code>opendot api-token show</code> on this computer to see it.</p>
+{error}
+<button type="submit">Open OpenDot</button>
+</form></body></html>
+"""
+
+
+def _host_is_loopback(host_header: str | None) -> bool:
+    if not host_header:
+        return False
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        host = host.split("]", 1)[0] + "]"
+    else:
+        host = host.rsplit(":", 1)[0]
+    return host in LOOPBACK_HOSTS
+
+
+class LoopbackGuard:
+    """Reject requests whose Host is not a loopback name, and add CORS for the Tauri shell only."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in scope.get("headers", [])}
+        if not _host_is_loopback(headers.get("host")):
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
+                return
+            await PlainTextResponse("Forbidden host", status_code=403)(scope, receive, send)
+            return
+        origin = headers.get("origin")
+        if scope["type"] == "http" and origin in TAURI_ORIGINS:
+            if scope["method"] == "OPTIONS":
+                await Response(status_code=204, headers=_cors(origin))(scope, receive, send)
+                return
+
+            async def send_with_cors(message: dict) -> None:
+                if message["type"] == "http.response.start":
+                    extra = [(k.lower().encode(), v.encode()) for k, v in _cors(origin).items()]
+                    message = {**message, "headers": [*message.get("headers", []), *extra]}
+                await send(message)
+
+            await self.app(scope, receive, send_with_cors)
+            return
+        await self.app(scope, receive, send)
+
+
+def _cors(origin: str) -> dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
+    }
+
+
+def _not_implemented_app(api_app: Starlette) -> ASGIApp:
+    """Wrap the API so contract endpoints it lacks answer 501 instead of 404."""
+    patterns = [
+        (endpoint.method, re.compile("^" + re.sub(r"\{[^/]+\}", "[^/]+", endpoint.path) + "$")) for endpoint in ENDPOINTS
+    ]
+    known = {(route.path, method) for route in api_app.routes for method in (getattr(route, "methods", None) or [])}
+    implemented = [(method, re.compile("^" + re.sub(r"\{[^/]+\}", "[^/]+", path) + "$")) for path, method in known]
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            path, method = scope["path"], scope["method"]
+            in_contract = any(m == method and p.match(path) for m, p in patterns)
+            served = any(m == method and p.match(path) for m, p in implemented)
+            if in_contract and not served:
+                # Still behind the bearer check: an unauthenticated caller learns nothing.
+                response: Response = JSONResponse(
+                    ErrorResponse(code="not_implemented", message="Not available in this version yet.").model_dump(
+                        mode="json"
+                    ),
+                    status_code=501,
+                )
+                authorized = _authorized(scope, api_app)
+                if not authorized:
+                    response = JSONResponse(
+                        ErrorResponse(code="unauthorized", message="Missing or invalid bearer token.").model_dump(
+                            mode="json"
+                        ),
+                        status_code=401,
+                    )
+                await response(scope, receive, send)
+                return
+        await api_app(scope, receive, send)
+
+    return app
+
+
+def _authorized(scope: Scope, api_app: Starlette) -> bool:
+    token = getattr(api_app.state, "api_token", None)
+    if not token:
+        return False
+    for key, value in scope.get("headers", []):
+        if key == b"authorization":
+            prefix, _, rest = value.partition(b" ")
+            return prefix.lower() == b"bearer" and secrets.compare_digest(rest.strip(), token.encode())
+    return False
+
+
+def create_web_app(api_app: Starlette, *, token: str, ui_dist: Path | None) -> ASGIApp:
+    """The daemon's single loopback app: API at /v1, login, and the built UI."""
+    if not token:
+        raise ValueError("an API token is required")
+    api_app.state.api_token = token
+    index_path = ui_dist / "index.html" if ui_dist is not None else None
+
+    def signed_in(request: Request) -> bool:
+        cookie = request.cookies.get(SESSION_COOKIE)
+        return bool(cookie) and secrets.compare_digest(cookie, token)
+
+    async def login(request: Request) -> Response:
+        if request.method == "POST":
+            form = await request.form()
+            supplied = str(form.get("token", ""))
+            if supplied and secrets.compare_digest(supplied, token):
+                response = RedirectResponse(url="/", status_code=303)
+                response.set_cookie(
+                    SESSION_COOKIE, supplied, httponly=True, samesite="strict", max_age=60 * 60 * 24 * 30, path="/"
+                )
+                return response
+            return HTMLResponse(LOGIN_PAGE.format(error='<p class="error">That token is not right.</p>'), 401)
+        return HTMLResponse(LOGIN_PAGE.format(error=""))
+
+    async def logout(_: Request) -> Response:
+        response = RedirectResponse(url="/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
+    async def spa(request: Request) -> Response:
+        if not signed_in(request):
+            return RedirectResponse(url="/login", status_code=303)
+        if index_path is None or not index_path.is_file():
+            return HTMLResponse("<p>The UI is not built. Run <code>pnpm -C ui build</code>.</p>", 503)
+        page = index_path.read_text(encoding="utf-8")
+        meta = f'<meta name="{TOKEN_META}" content="{html.escape(token, quote=True)}">'
+        page = _META_PLACEHOLDER.sub(meta, page, count=1) if _META_PLACEHOLDER.search(page) else page.replace(
+            "</head>", f"{meta}</head>", 1
+        )
+        return HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+    async def asset(request: Request) -> Response:
+        return serve_file(f"assets/{request.path_params['path']}")
+
+    def serve_file(relative: str) -> Response:
+        if ui_dist is None:
+            return PlainTextResponse("Not found", 404)
+        root = ui_dist.resolve()
+        target = (root / relative).resolve()
+        if root not in target.parents or not target.is_file() or target.name == "index.html":
+            return PlainTextResponse("Not found", 404)
+        return FileResponse(target)
+
+    routes = [
+        Route("/login", login, methods=["GET", "POST"]),
+        Route("/logout", logout, methods=["POST"]),
+        Route("/assets/{path:path}", asset),
+        Route("/{path:path}", _static_or_spa(ui_dist, serve_file, spa)),
+    ]
+    site = Starlette(routes=routes)
+    api = _not_implemented_app(api_app)
+
+    async def dispatch(scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "")
+        if scope["type"] in ("http", "websocket") and (path == "/v1" or path.startswith("/v1/")):
+            await api(scope, receive, send)
+        else:
+            await site(scope, receive, send)
+
+    return LoopbackGuard(dispatch)
+
+
+def _static_or_spa(ui_dist: Path | None, serve_file, spa):  # noqa: ANN001, ANN202
+    """Top-level files in the build (favicon, fonts) are public; every other path is the SPA."""
+
+    async def handle(request: Request) -> Response:
+        name = request.path_params.get("path", "")
+        if ui_dist is not None and name and "/" not in name and name != "index.html" and (ui_dist / name).is_file():
+            return serve_file(name)
+        return await spa(request)
+
+    return handle
+
+
+__all__ = ["SESSION_COOKIE", "TAURI_ORIGINS", "TOKEN_META", "create_web_app"]

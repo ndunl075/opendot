@@ -442,7 +442,7 @@ class AgentLoop:
         # 2. Route: the job's tier, or one tier up after a failure; the top tier asks first.
         escalate_from = Tier(row["escalate_from"]) if row["escalate_from"] else None
         try:
-            route = self.router.route(job, failed_at=escalate_from)
+            route = self._route_with_catalog_refresh(job, escalate_from)
         except HandOff:
             yield from self._end(task_id, TaskState.HANDED_OFF, self._handoff_text(row))
         except NoModelForTier as error:
@@ -541,6 +541,21 @@ class AgentLoop:
                 connection.execute(
                     "UPDATE agent_tasks SET escalate_from = NULL, updated_at = ? WHERE id = ?", (now, task_id)
                 )
+
+    def _route_with_catalog_refresh(self, job: Job, escalate_from: Tier | None):  # noqa: ANN202
+        """Route; if no model fits (for example the daemon started before the first sign-in),
+        re-read the provider's catalog once and try again. Tiers stay discovered, never hard-coded."""
+        try:
+            return self.router.route(job, failed_at=escalate_from)
+        except NoModelForTier:
+            refresh = getattr(self.router, "refresh", None)
+            if refresh is None:
+                raise
+            try:
+                refresh(self.registry.get(self.provider_name).list_models())
+            except ProviderError as error:
+                raise NoModelForTier(error.user_message) from error
+            return self.router.route(job, failed_at=escalate_from)
 
     def _preflight(self, task_id: str) -> Iterator[LoopEvent]:
         """Every check that must pass immediately before any provider request (M1 F3, F4)."""

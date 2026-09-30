@@ -827,6 +827,10 @@ def build_parser() -> argparse.ArgumentParser:
     from .eval import cli as eval_cli
 
     eval_cli.register(subcommands)
+
+    from .api import serve_cli
+
+    serve_cli.register(subcommands)
     return parser
 
 
@@ -843,7 +847,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .eval import cli as eval_cli
 
         return eval_cli.run(args)
+    if args.command == "api-token":
+        from .api import serve_cli
+
+        return serve_cli.run_token(args)
     database = database_from_args(args)
+    if args.command == "serve":
+        from .api import serve_cli
+
+        return serve_cli.run_serve(args, database)
     if args.command == "init":
         print(json.dumps({"schema_version": database.migrate(), "database_path": str(database.path)}))
         return 0
