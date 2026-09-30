@@ -5,15 +5,15 @@ cannot connect directly to a local MCP server the way Claude Desktop or
 Cursor can over stdio. OpenAI's own answer is [Secure MCP
 Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels):
 an outbound-only relay. You run their open-source `tunnel-client` daemon
-next to Alfred; it initiates an outbound HTTPS connection to OpenAI and
-forwards MCP requests to Alfred locally. Nothing about this opens an inbound
+next to OpenDot; it initiates an outbound HTTPS connection to OpenAI and
+forwards MCP requests to OpenDot locally. Nothing about this opens an inbound
 port on your machine.
 
-Alfred does not vendor or reimplement `tunnel-client` — it's OpenAI's tool,
+OpenDot does not vendor or reimplement `tunnel-client` — it's OpenAI's tool,
 kept current by them, the same way `deploy/couchdb/` defers to the
 Self-hosted LiveSync project's own init script rather than re-deriving
-CouchDB configuration here. This page covers Alfred's side: giving the
-tunnel its own scoped identity and pointing it at `alfred-mcp`.
+CouchDB configuration here. This page covers OpenDot's side: giving the
+tunnel its own scoped identity and pointing it at `opendot-mcp`.
 
 ## 1. Create a tunnel and get a `tunnel_id`
 
@@ -23,13 +23,13 @@ a ChatGPT/API plan that supports custom MCP connectors, which is plan-
 dependent and outside anything this repo controls. You'll come away with a
 `tunnel_id` and a `CONTROL_PLANE_API_KEY`.
 
-## 2. Give the tunnel its own Alfred scope
+## 2. Give the tunnel its own OpenDot scope
 
 Don't reuse `local-mcp` (Claude/Cursor's default identity) for this — grant
 the tunnel its own, deliberately narrower, client ID:
 
 ```powershell
-.\.venv\Scripts\alfred client-grant --client-id chatgpt-tunnel `
+.\.venv\Scripts\opendot client-grant --client-id chatgpt-tunnel `
   --sensitivity public --sensitivity personal `
   --tool memory_search --tool agenda_get --tool brief_get --tool connector_status
 ```
@@ -44,35 +44,35 @@ granted" applies here exactly as it does to any other MCP client.
 Download it from Platform tunnel settings or the [openai/tunnel-client
 releases](https://github.com/openai/tunnel-client) — point at the latest
 release rather than pinning a specific version in your own notes, since
-OpenAI updates it independently of Alfred.
+OpenAI updates it independently of OpenDot.
 
-## 4. Point it at `alfred-mcp --client-id chatgpt-tunnel`
+## 4. Point it at `opendot-mcp --client-id chatgpt-tunnel`
 
 ```powershell
 $env:CONTROL_PLANE_API_KEY = "sk-..."
 tunnel-client init `
   --sample sample_mcp_stdio_local `
-  --profile alfred `
+  --profile opendot `
   --tunnel-id tunnel_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx `
-  --mcp-command "C:\path\to\alfred\.venv\Scripts\alfred-mcp.exe --client-id chatgpt-tunnel"
+  --mcp-command "C:\path\to\opendot\.venv\Scripts\opendot-mcp.exe --client-id chatgpt-tunnel"
 ```
 
 stdio, not the Streamable HTTP transport, is the path documented here
-deliberately: `tunnel-client` spawns and talks to `alfred-mcp` as a local
+deliberately: `tunnel-client` spawns and talks to `opendot-mcp` as a local
 subprocess, the same way Claude Desktop or Cursor already do, so there's no
 network auth surface to reconcile between the tunnel's own control-plane
-credential and Alfred's separate bearer-token scheme on `mcp-http-run`. The
+credential and OpenDot's separate bearer-token scheme on `mcp-http-run`. The
 HTTP path (`--mcp-server-url` instead of `--mcp-command`) is documented by
 OpenAI too, but its header/auth passthrough behavior is worth re-checking
 against their current docs at setup time before relying on it — stdio has
 no such question to begin with.
 
 Validate, then run it (keep this process running the same way you'd keep
-`alfred run` running — Task Scheduler, a service, or a terminal left open):
+`opendot run` running — Task Scheduler, a service, or a terminal left open):
 
 ```powershell
-tunnel-client doctor --profile alfred --explain
-tunnel-client run --profile alfred
+tunnel-client doctor --profile opendot --explain
+tunnel-client run --profile opendot
 ```
 
 ## 5. Connect it in ChatGPT

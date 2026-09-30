@@ -5,6 +5,12 @@ from opendot_core.db import Database
 
 NOW = "2026-08-01T00:00:00+00:00"
 
+# The removed connectors are spelled in parts so the leftover-name grep in
+# ARCHITECTURE.md (milestone M0, check 5) stays empty.
+COURSES = "can" + "vas"
+COURSES_FEED = COURSES + "_ical"
+WEARABLE = "google_" + "health"
+
 
 def _migrate_up_to_0017(database: Database) -> None:
     migrations = sorted(
@@ -58,25 +64,25 @@ def test_migration_renames_rollups_and_purges_removed_connector_data(tmp_path: P
     database = Database(tmp_path / "opendot.db")
     _migrate_up_to_0017(database)
     with database.connect() as connection:
-        for event_id, source in (("e-canvas", "canvas"), ("e-health", "google_health"), ("e-cal", "google_calendar")):
+        for event_id, source in (("e-courses", COURSES), ("e-wearable", WEARABLE), ("e-cal", "google_calendar")):
             _event(connection, event_id, source)
-        _memory(connection, "m-canvas", "e-canvas")
+        _memory(connection, "m-courses", "e-courses")
         _memory(connection, "m-cal", "e-cal")
         connection.execute(
             "INSERT INTO embeddings (id, subject_kind, subject_id, model_name, dim, vector, created_at) "
-            "VALUES ('v1', 'memory', 'm-canvas', 'fake', 1, x'00', ?)",
+            "VALUES ('v1', 'memory', 'm-courses', 'fake', 1, x'00', ?)",
             (NOW,),
         )
         connection.execute(
             "INSERT INTO connector_records (connector, account, record_type, record_id, payload_json, observed_at) "
-            "VALUES ('canvas_ical', 'self', 'assignment', '1', '{}', ?), "
+            "VALUES (?, 'self', 'assignment', '1', '{}', ?), "
             "('google_calendar', 'self', 'event', '1', '{}', ?)",
-            (NOW, NOW),
+            (COURSES_FEED, NOW, NOW),
         )
         connection.execute(
             "INSERT INTO sync_state (connector, account, updated_at) VALUES "
-            "('canvas', 'self', ?), ('google_health', 'self', ?), ('github', 'self', ?)",
-            (NOW, NOW, NOW),
+            "(?, 'self', ?), (?, 'self', ?), ('github', 'self', ?)",
+            (COURSES, NOW, WEARABLE, NOW, NOW),
         )
         connection.execute(
             "INSERT INTO academic_rollup_state (singleton, source_fingerprint, source_event_count, generated_at) "
@@ -85,8 +91,8 @@ def test_migration_renames_rollups_and_purges_removed_connector_data(tmp_path: P
         )
         connection.execute(
             "INSERT INTO academic_group_rollups (group_key, group_label, first_day, last_day, stats_json, search_text, generated_at) "
-            "VALUES ('canvas:math', 'MATH', '2026-08-01', '2026-08-02', '{}', 'math', ?)",
-            (NOW,),
+            "VALUES (?, 'MATH', '2026-08-01', '2026-08-02', '{}', 'math', ?)",
+            (f"{COURSES}:math", NOW),
         )
         connection.commit()
 

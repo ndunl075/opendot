@@ -1,12 +1,12 @@
 ---
 name: inbox-triage
-description: Summarize unread Gmail messages Alfred Core has already synced, and offer to draft or schedule follow-up actions -- never sends or deletes anything on its own.
+description: Summarize unread Gmail messages OpenDot Core has already synced, and offer to draft or schedule follow-up actions -- never sends or deletes anything on its own.
 version: 0.1.0
-author: Alfred contributors
+author: OpenDot contributors
 license: Apache-2.0
 metadata:
   hermes:
-    tags: [alfred, gmail, productivity]
+    tags: [opendot, gmail, productivity]
     related_skills: [morning-brief, weekly-review]
 ---
 
@@ -14,7 +14,7 @@ metadata:
 
 ## Overview
 
-`gmail-sync` already pulls unread Gmail headers/snippets into Alfred Core's
+`gmail-sync` already pulls unread Gmail headers/snippets into OpenDot Core's
 local storage on its own schedule; this skill's job is to read that already-
 synced content and turn it into a short, useful summary -- not to sync Gmail
 itself, and not to act on anything without the user's explicit say-so.
@@ -27,7 +27,7 @@ itself, and not to act on anything without the user's explicit say-so.
 
 ## Steps
 
-1. If the prompt contains an `<alfred_context>` block with `gmail`, use it as
+1. If the prompt contains an `<opendot_context>` block with `gmail`, use it as
    the completed read and do not call `connector_records_get` again. Otherwise
    call `connector_records_get` with `connector="gmail"` and
    `record_type="unread_message"` (default `limit=20` is usually enough; ask
@@ -53,7 +53,7 @@ itself, and not to act on anything without the user's explicit say-so.
 ## Common pitfalls
 
 - Treating `connector_records_get`'s results as already read/handled --
-  Alfred Core marks nothing as read on your behalf; that's still whatever
+  OpenDot Core marks nothing as read on your behalf; that's still whatever
   Gmail's own client does.
 - Calling `message_send_propose` or `message_draft` without the user having
   asked for a reply -- triage is read-only by default.
@@ -67,7 +67,7 @@ itself, and not to act on anything without the user's explicit say-so.
 
 ## Verification checklist
 
-- [ ] Gmail data came from either the bridge's `<alfred_context>` pack or
+- [ ] Gmail data came from either the bridge's `<opendot_context>` pack or
       `connector_records_get(connector="gmail", record_type="unread_message")`.
 - [ ] Low-priority mail was omitted unless the user explicitly requested it.
 - [ ] No `message_draft`/`message_send_propose` call was made without an

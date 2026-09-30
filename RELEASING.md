@@ -1,11 +1,11 @@
 # Releasing
 
-Alfred has no external users yet, so this process exists to keep releases
+OpenDot has no external users yet, so this process exists to keep releases
 reproducible and verifiable once it does, not to satisfy an SLA.
 
 ## What a release is
 
-A release is an sdist + wheel of `alfred-core` at one commit, attached to a
+A release is an sdist + wheel of `opendot-core` at one commit, attached to a
 GitHub Release, with a [SLSA build provenance
 attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 proving they were built by this repository's own GitHub Actions workflow from
@@ -15,13 +15,13 @@ key or long-lived secret to generate, rotate, or lose. It answers "did this
 file really come from this repo's CI," not "should you trust this code" —
 read the diff for that.
 
-Nothing is published to PyPI yet; installation stays `pip install -e .` from
-a checkout (see README.md's "Local setup") until there's a reason to change
+Nothing is published to PyPI yet; installation stays `uv sync --project daemon` from
+a checkout (see CONTRIBUTING.md's "Local setup") until there's a reason to change
 that.
 
 ## Cutting one
 
-1. Update `version` in `pyproject.toml` ([semantic
+1. Update `version` in `daemon/pyproject.toml` ([semantic
    versioning](https://semver.org/): breaking change → major, new
    capability → minor, fix only → patch). While pre-1.0, breaking changes
    only bump the minor version.
@@ -42,7 +42,7 @@ that.
 ## Verifying a downloaded release
 
 ```powershell
-gh attestation verify <path-to-downloaded-file> --repo ndunl075/alfred
+gh attestation verify <path-to-downloaded-file> --repo ndunl075/opendot
 ```
 
 This confirms the exact bytes came from a `.github/workflows/release.yml` run

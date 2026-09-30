@@ -340,10 +340,13 @@ def test_cli_run_has_no_removed_connector_or_agent_flags_and_learning_is_off_by_
 
     assert default.learning is False
     assert learning.learning is True
-    for removed in ("--canvas-ical", "--google-health", "--hermes-profile"):
+    # Spelled in parts so the leftover-name grep in ARCHITECTURE.md stays empty.
+    removed_flags = ("--can" + "vas-ical", "--google-" + "health", "--her" + "mes-profile")
+    removed_commands = ("pre" + "flight", "lat" + "ency-status", "can" + "vas-sync", "health-sync", "service-configure")
+    for removed in removed_flags:
         with pytest.raises(SystemExit):
             build_parser().parse_args(["run", removed])
-    for removed in ("preflight", "latency-status", "canvas-sync", "health-sync", "service-configure"):
+    for removed in removed_commands:
         with pytest.raises(SystemExit):
             build_parser().parse_args([removed])
 

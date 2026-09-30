@@ -1,6 +1,6 @@
-# Contributing to Alfred
+# Contributing to OpenDot
 
-Alfred is a local-first personal secretary, not a multi-tenant product. Most
+OpenDot is a local-first personal secretary, not a multi-tenant product. Most
 of the design exists to keep one owner's data under their own control, so
 changes are held to that bar first and "generally useful" second.
 
@@ -8,30 +8,30 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing behavior — it is the
 canonical source of the project's decisions (section 1), build order (section
 10), and safety invariants (section 8). If a change contradicts something it
 says, the architecture doc changes too, in the same PR, with a one-line
-reason; it should never silently drift out of date. [README.md](README.md)
-documents what already exists day to day.
+reason; it should never silently drift out of date. [README.md](README.md) says what OpenDot is, and
+[docs/alfred-readme.md](docs/alfred-readme.md) documents the inherited CLI day to day.
 
 ## Local setup
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e .[dev]
-.\.venv\Scripts\alfred init
-.\.venv\Scripts\alfred status
+```bash
+uv sync --project daemon
+uv run --project daemon opendot init
+uv run --project daemon opendot status
 ```
 
-Or run `.\scripts\install.ps1`, which does the same four steps and is safe to
-re-run. Neither step touches Google, Telegram, Slack, GitHub, or any other
-provider — connector credentials are a separate, later step (README.md's
-"Local connectors").
+None of these steps touches Google, Telegram, Slack, GitHub, or any other
+provider. Connector credentials are a separate, later step (see
+[docs/alfred-readme.md](docs/alfred-readme.md), "Local connectors").
 
 ## Tests
 
-```powershell
-.\.venv\Scripts\python -m pytest -q
+```bash
+uv run --project daemon pytest daemon/tests -q
+uv run --project daemon ruff check daemon
+gitleaks git --no-banner
 ```
 
-Every module under `src/alfred/` has a matching `tests/test_*.py`. A PR that
+Every module under `daemon/src/opendot_core/` has a matching `daemon/tests/test_*.py`. A PR that
 changes behavior should extend or add tests in the same file rather than
 relying on a new one, unless the change introduces a genuinely new module —
 match the existing file's naming and fixture style rather than introducing a
@@ -44,7 +44,7 @@ properties section 8 describes, and code that doesn't follow them tends to
 silently reopen a gap that was already closed once:
 
 - **The database is the source of truth.** CLI, MCP server, job runner, and
-  any future transport all call the same `alfred/*.py` functions; transports
+  any future transport all call the same `opendot/*.py` functions; transports
   never contain business logic of their own. If you find yourself writing the
   same check in two transports, it belongs in the shared module instead.
 - **Consequential external writes are propose-then-execute, never one step.**
@@ -88,3 +88,20 @@ silently reopen a gap that was already closed once:
 - Security-relevant reports (a credential handling gap, an approval bypass, a
   way to make an action non-idempotent) go through
   [SECURITY.md](SECURITY.md), not a public issue.
+
+## The "never" list
+
+These hold even when a task seems to require them (they are also in
+ARCHITECTURE.md section 0, which wins if the two ever differ):
+
+- Never build a "log in with Claude" flow, read another app's credential files
+  (`~/.claude`, `~/.codex`, browser cookies), spoof client headers, or proxy
+  anyone's tokens.
+- Never turn on a paid path by default: API keys, ChatGPT credits after the plan
+  limit, or paid fallbacks.
+- Never commit secrets, tokens, or real personal data. The fake tokens in the
+  redaction tests are allowed; they are listed in `.gitleaks.toml` and
+  `.gitleaksignore` and must not be deleted.
+- Never copy OpenAI's visual design, icons, mascots or logos.
+- Never skip, delete, or weaken tests to make a check pass. The only test files
+  that may be deleted are the ones ARCHITECTURE.md section 5 lists.

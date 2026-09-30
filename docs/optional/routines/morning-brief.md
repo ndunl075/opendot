@@ -1,12 +1,12 @@
 ---
 name: morning-brief
-description: Render Alfred Core's deterministic morning brief and deliver a short, warm rewrite of it without changing any fact, date, or link it contains.
+description: Render OpenDot Core's deterministic morning brief and deliver a short, warm rewrite of it without changing any fact, date, or link it contains.
 version: 0.1.0
-author: Alfred contributors
+author: OpenDot contributors
 license: Apache-2.0
 metadata:
   hermes:
-    tags: [alfred, briefing, productivity]
+    tags: [opendot, briefing, productivity]
     related_skills: [inbox-triage, weekly-review]
 ---
 
@@ -14,7 +14,7 @@ metadata:
 
 ## Overview
 
-Alfred Core already does all the gathering, ranking, and formatting for the
+OpenDot Core already does all the gathering, ranking, and formatting for the
 morning brief deterministically, with zero model involvement -- overdue
 items, items due today, upcoming items, calendar conflicts, and GitHub
 notifications are bucketed and sorted before you ever see them. Your only job
@@ -37,7 +37,7 @@ wrote it -- never to re-derive or re-rank anything yourself.
    say so plainly rather than padding the response.
 3. Optionally, rewrite the brief's tone to be short and warm -- but under
    the same hard constraint `BriefingService.write_brief()` uses internally
-   for Alfred Core's own optional LLM pass: **preserve every fact, date, and
+   for OpenDot Core's own optional LLM pass: **preserve every fact, date, and
    link exactly as given. Do not add or invent anything not present in the
    brief.** If you're not confident you can do this without altering a
    fact, deliver the deterministic text from step 1 verbatim instead --
@@ -47,7 +47,7 @@ wrote it -- never to re-derive or re-rank anything yourself.
 ## Common pitfalls
 
 - Re-sorting, re-grouping, or "improving" the ranking `brief_get` already
-  did -- Alfred Core owns due-date logic and calendar-conflict detection;
+  did -- OpenDot Core owns due-date logic and calendar-conflict detection;
   duplicating it here risks disagreeing with the one system of record.
 - Dropping the freshness line or a late-delivery disclosure when rewriting
   for tone -- both are load-bearing information, not boilerplate to trim.

@@ -2,11 +2,11 @@
 name: weekly-review
 description: Pull together the week's open tasks, GitHub notifications, Canvas missing assignments, and remembered context into one retrospective-style summary.
 version: 0.1.0
-author: Alfred contributors
+author: OpenDot contributors
 license: Apache-2.0
 metadata:
   hermes:
-    tags: [alfred, review, productivity]
+    tags: [opendot, review, productivity]
     related_skills: [morning-brief, inbox-triage]
 ---
 

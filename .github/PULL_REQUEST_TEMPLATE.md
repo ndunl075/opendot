@@ -22,7 +22,7 @@
 - [ ] New consequential writes follow propose → approve → execute, never a
       single step (see CONTRIBUTING.md's "Code shape").
 - [ ] New writes are idempotent and, where the provider allows it, recover
-      across a crash between the provider accepting the write and Alfred
+      across a crash between the provider accepting the write and OpenDot
       recording its receipt, failing closed on an absent/ambiguous result.
 - [ ] New intake channels check a locally configured allowlist
       (default-deny) before turning a message into a local write.

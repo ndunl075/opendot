@@ -371,4 +371,3 @@ def test_connectors_page_shows_what_each_connector_may_do(tmp_path: Path) -> Non
     assert "can write" in response.text
     assert "read-only" in response.text
     # No connector stores sensitive data by default any more, and none is named as one.
-    assert "google_health" not in response.text

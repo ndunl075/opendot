@@ -12,13 +12,13 @@ Milestone: **M0 (fork Alfred and clean it)** — in progress
 
 - [x] 0.1 baseline recorded
 - [x] 0.2 monorepo layout (`daemon/`), `alfred` → `opendot_core`, CLI → `opendot`
-- [ ] 0.3 mine `hermes_bridge.py` into `agent/`
-- [ ] 0.4 apply §5 (delete, disable, change, migrations)
-- [ ] 0.5 remove Windows-only code
-- [ ] 0.6 ruff, gitleaks, ci.yml
-- [ ] 0.7 docs (README, NOTICE, CLAUDE.md, AGENTS.md, decisions.md, CHANGELOG)
-- [ ] 0.8 fixture scan for real personal data
-- [ ] 0.9 Codex CLI flags and model IDs
+- [x] 0.3 mine `hermes_bridge.py` into `agent/` (incl. `AgentBridge`, the driver Hermes's bridge provided)
+- [x] 0.4 apply §5 (delete, change, forward migration 0018; Slack/Telegram code and tests kept)
+- [x] 0.5 remove Windows-only code (Linux/macOS run in CI; only Windows was run locally)
+- [x] 0.6 ruff, gitleaks, ci.yml
+- [x] 0.7 docs (README, NOTICE, CLAUDE.md, AGENTS.md, decisions.md, CHANGELOG)
+- [x] 0.8 fixture scan for real personal data
+- [x] 0.9 Codex CLI flags and model IDs (docs/decisions.md)
 - [ ] 0.10 cross-vendor review into `docs/reviews/m0.md`
 
 ## Needs you

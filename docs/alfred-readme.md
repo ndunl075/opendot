@@ -61,9 +61,9 @@ writes credentials to its database, audit log, vault, or Git.
 issues, memory forget, backup restore) are always three steps:
 
 1. `*-propose` — local preview; never touches the provider.
-2. `alfred approval-approve --approval-id <ID> --actor nico` — prints a
+2. `alfred approval-approve --approval-id <ID> --actor sam` — prints a
    one-time token.
-3. `*-execute --approval-id <ID> --actor nico --token <TOKEN>` — consumes
+3. `*-execute --approval-id <ID> --actor sam --token <TOKEN>` — consumes
    that token.
 
 Retrying the same approval ID and token replays the stored receipt instead of
@@ -137,7 +137,7 @@ came from without copying the guest list. That needs the narrow
 `calendar.calendarlist.readonly` scope in addition to event access. A one-shot
 `alfred calendar-sync` can still target one calendar explicitly.
 
-Calendar writes: `alfred calendar-event-propose --actor nico --summary "..."
+Calendar writes: `alfred calendar-event-propose --actor sam --summary "..."
 --start <ISO-8601> --end <ISO-8601>`, then approve, then
 `alfred calendar-event-execute`. Recovery uses Alfred's stable Calendar event
 ID.
@@ -234,7 +234,7 @@ notifications drop out of the next sync automatically.
 
 Issue creation is a separate write scope. A fine-grained token needs
 **Issues: write** on only the repository you choose; save it as
-`github-issue-token`. `alfred github-issue-propose --actor nico --repository
+`github-issue-token`. `alfred github-issue-propose --actor sam --repository
 owner/repo --title "..."` creates a local preview; after approve,
 `github-issue-execute` creates that exact issue once. It never creates issues
 during sync or without a fresh approval token. Each created issue includes an
@@ -275,7 +275,7 @@ Create the local AES-256 key once with `alfred backup-key-generate`; it is
 kept only in Windows Credential Manager as `backup-encryption-key`. Then
 `alfred backup-create --output D:\Backups\alfred.backup` writes an encrypted
 SQLite snapshot. Restore is two-step: `backup-restore-propose --backup ...
---actor nico`, approve the preview, then `backup-restore-execute`. The
+--actor sam`, approve the preview, then `backup-restore-execute`. The
 backup's SHA-256 is frozen in the approval, so a changed file cannot be
 restored with a stale confirmation. Restore is non-replayable: any further
 restore needs a new preview and approval.
@@ -712,7 +712,7 @@ Corrections never rewrite history: `alfred memory-correct --memory-id ID
 that points back to it.
 
 Deleting is preview-then-confirm, because deleting data is strong-confirm and
-never unattended. `alfred memory-forget-propose --memory-id ID --actor nico
+never unattended. `alfred memory-forget-propose --memory-id ID --actor sam
 [--reason "..."]` previews a scoped, single-item deletion. Approve it, then
 `alfred memory-forget-execute` tombstones the memory, drops it from search,
 and records an audit entry. A superseded memory stays visible as history

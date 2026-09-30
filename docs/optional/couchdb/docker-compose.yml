@@ -12,7 +12,7 @@
 services:
   couchdb:
     image: couchdb:3
-    container_name: alfred-vault-couchdb
+    container_name: opendot-vault-couchdb
     user: "5984:5984"
     environment:
       - COUCHDB_USER=${COUCHDB_USER}
@@ -28,8 +28,8 @@ services:
       # that originate on the machine itself, regardless of what route got
       # there. To actually view this from a phone (matches ARCHITECTURE.md
       # section 5's "over a private encrypted network"), set
-      # ALFRED_VAULT_SYNC_HOST in .env to this host's own VPN/Tailscale IP
+      # OPENDOT_VAULT_SYNC_HOST in .env to this host's own VPN/Tailscale IP
       # (e.g. `tailscale ip -4`) -- never "0.0.0.0" and never a raw
       # port-forward on your router.
-      - "${ALFRED_VAULT_SYNC_HOST:-127.0.0.1}:5984:5984"
+      - "${OPENDOT_VAULT_SYNC_HOST:-127.0.0.1}:5984:5984"
     restart: unless-stopped

@@ -1,6 +1,6 @@
 # Security Policy
 
-Alfred runs entirely on its owner's own machine and holds real credentials
+OpenDot runs entirely on its owner's own machine and holds real credentials
 (Google, GitHub, Telegram, Slack) plus a personal memory archive. A security
 bug here is not "an attacker defaces a page" — it's "an attacker reads or
 sends on the owner's behalf," so please report privately rather than opening
@@ -43,11 +43,11 @@ In scope:
 
 Out of scope:
 
-- Anything that requires the reporter to already control the machine Alfred
+- Anything that requires the reporter to already control the machine OpenDot
   runs on, its OS credential store, or its owner's actual Google/GitHub/
   Telegram/Slack account — at that point the local machine is the trust
-  boundary, not Alfred.
+  boundary, not OpenDot.
 - Denial of service against a single local process the owner controls.
 - Findings in Hermes, Obsidian, or any other upstream dependency — report
-  those to the upstream project. (See decision 1 in ARCHITECTURE.md: Alfred
+  those to the upstream project. (See decision 1 in ARCHITECTURE.md: OpenDot
   does not currently fork or vendor Hermes.)

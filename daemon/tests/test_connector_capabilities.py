@@ -80,9 +80,20 @@ def test_no_connector_is_declared_sensitive_by_default() -> None:
     assert sensitive_connectors() == ()
 
 
-def test_removed_connectors_are_no_longer_declared() -> None:
-    for removed in ("canvas", "canvas_ical", "google_health"):
-        assert capability_for(removed) is None
+def test_the_declared_connectors_are_exactly_the_supported_set() -> None:
+    assert {item.connector for item in CONNECTOR_CAPABILITIES} == {
+        "google_calendar",
+        "google_calendar_catalog",
+        "google_calendar_history",
+        "gmail",
+        "gmail_inbound",
+        "github",
+        "composio",
+        "telegram",
+        "slack",
+        "obsidian_vault",
+        "people",
+    }
 
 
 def test_writing_connectors_are_exactly_the_expected_set() -> None:

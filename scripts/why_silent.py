@@ -1,9 +1,9 @@
-"""Explain why Alfred did not answer the last Telegram message.
+"""Explain why OpenDot did not answer the last Telegram message.
 
 Read-only. Prints no message text and no destinations -- only states, counts,
 and the first characters of your own messages, so the output is safe to paste.
 
-    python scripts/why_silent.py [path-to-alfred.db]
+    python scripts/why_silent.py [path-to-opendot.db]
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from pathlib import Path
 
 
 def main(argv: list[str]) -> int:
-    default = os.environ.get("ALFRED_DB_PATH") or ".alfred/alfred.db"
+    default = os.environ.get("OPENDOT_DB_PATH") or ".opendot/opendot.db"
     path = Path(argv[1] if len(argv) > 1 else default)
     if not path.exists():
-        print(f"no database at {path}; pass the path or set ALFRED_DB_PATH")
+        print(f"no database at {path}; pass the path or set OPENDOT_DB_PATH")
         return 1
 
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -64,7 +64,7 @@ def main(argv: list[str]) -> int:
         print(
             "\nVERDICT: no reply was ever queued for it. The message was received "
             "and stored, so intake is fine and the agent never produced an answer. "
-            "Check that `alfred run` is up and was started with --hermes-profile."
+            "Check that `opendot run` is up and was started with --hermes-profile."
         )
         return 0
 
@@ -88,8 +88,8 @@ def main(argv: list[str]) -> int:
         print("VERDICT: the send itself failed. The reason is above; nothing auto-retries.")
     elif states_present == {"sent"}:
         print(
-            "VERDICT: Alfred did send this reply. If it never showed up, the problem "
-            "is between the Bot API and your client, not in Alfred."
+            "VERDICT: OpenDot did send this reply. If it never showed up, the problem "
+            "is between the Bot API and your client, not in OpenDot."
         )
     else:
         print("VERDICT: the reply is still queued and undelivered; the outbox worker is not running.")

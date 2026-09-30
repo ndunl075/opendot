@@ -31,7 +31,6 @@ opendot = "opendot_core.cli:main"
 opendot-mcp = "opendot_core.mcp_server:main"
 
 [tool.pytest.ini_options]
-addopts = "-q"
 testpaths = ["tests"]
 pythonpath = ["."]
 

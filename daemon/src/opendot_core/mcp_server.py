@@ -38,6 +38,8 @@ from .github import GitHubActions, GitHubClient
 from .gmail import GmailActions, GmailSendActions
 from .google_calendar import GoogleCalendarActions
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
+from .http_auth import bearer_token as _bearer_token  # noqa: F401  (re-exported for tests)
+from .http_auth import generate_token as generate_http_token  # noqa: F401  (re-exported for the CLI)
 from .important_dates import ImportantDateStore
 from .journal import JournalStore
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
