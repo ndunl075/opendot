@@ -47,10 +47,35 @@ DENY_LIST: tuple[DenyItem, ...] = (
     ),
 )
 
-# Only the generic passthrough to outside apps is matched by keyword; first-party tools
-# (for example the local forget) use explicit actions.
-_KEYWORD_TOOLS = ("composio_",)
+# Tools that act only on OpenDot's own local data (memory, tasks, reminders ...). Their
+# deletions are the user's own reversible actions (section 10: Forget, Reset and cancelling a
+# reminder), so they use explicit actions only. Every other tool reaches an outside app
+# (Gmail, Calendar, GitHub, Composio's passthrough, any connector added later), so its action
+# is also matched by keyword: an unknown outside tool that deletes, pays or changes security
+# is denied by default rather than allowed by omission.
+_LOCAL_TOOL_PREFIXES = (
+    "memory",
+    "remember",
+    "forget",
+    "reminder",
+    "task",
+    "nag",
+    "important_date",
+    "mood",
+    "gratitude",
+    "journal",
+    "profile",
+    "agenda",
+    "brief",
+    "system_status",
+    "connector_status",
+    "action_commit",
+)
 _SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def is_local_tool(tool: str) -> bool:
+    return tool.strip().lower().startswith(_LOCAL_TOOL_PREFIXES)
 
 
 def _words(action: str) -> set[str]:
@@ -63,7 +88,7 @@ def deny_item_for(tool: str, action: str) -> DenyItem | None:
     for item in DENY_LIST:
         if lowered in item.actions:
             return item
-    if tool.startswith(_KEYWORD_TOOLS):
+    if not is_local_tool(tool):
         words = _words(lowered)
         joined = "_".join(sorted(words))
         for item in DENY_LIST:

@@ -365,3 +365,32 @@ def test_invalid_inputs_rejected(engine: RuleEngine) -> None:
         engine.add_rule(tool="t", behavior="auto", max_sensitivity="top")
     with pytest.raises(RuleError):
         engine.add_rule(tool=" ", behavior="auto")
+
+
+@pytest.mark.parametrize(
+    ("tool", "action"),
+    [("gmail", "delete"), ("google_calendar", "event_delete"), ("github", "remove_collaborator"), ("stripe", "pay")],
+)
+def test_outside_app_deletes_and_payments_hit_deny_list(engine: RuleEngine, tool: str, action: str) -> None:
+    decision = engine.decide(intent(tool, action))
+    assert decision.behavior is Behavior.HANDOFF and decision.locked
+
+
+@pytest.mark.parametrize(("tool", "action"), [("forget", "delete"), ("reminder_set", "remove"), ("task_complete", "delete")])
+def test_local_tools_are_not_matched_by_keyword(engine: RuleEngine, tool: str, action: str) -> None:
+    assert not engine.decide(intent(tool, action)).locked
+
+
+def test_add_rule_accepts_a_rule_object_and_rejects_deny_list(engine: RuleEngine) -> None:
+    from opendot_core.rules import Rule
+
+    denied = Rule(id="x", tool="gmail", action="delete", behavior=Behavior.AUTO, created_by="user",
+                  created_at=datetime.now(UTC))
+    with pytest.raises(RuleError, match="deny list"):
+        engine.add_rule(denied)
+    allowed = Rule(id="y", tool="reminder_set", action="create", behavior=Behavior.AUTO, created_by="user",
+                   created_at=datetime.now(UTC), max_sensitivity="personal")
+    stored = engine.add_rule(allowed)
+    assert stored.id == "y" and engine.list_rules(include_defaults=False)[0].id == "y"
+    with pytest.raises(RuleError):
+        engine.add_rule()

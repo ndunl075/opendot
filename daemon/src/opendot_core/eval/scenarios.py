@@ -219,12 +219,15 @@ def s3_deny_list(tmp_dir: Path) -> None:
         created_at=now,
         note="S3 attempt to allow deleting mail",
     )
+    RuleError = load_attr("opendot_core.rules", "RuleError")
     try:
         stack.rules.add_rule(auto_rule)
-    except Exception:
-        pass
+    except RuleError as error:
+        check("deny list" in str(error), f"the auto rule was rejected for the wrong reason: {error}")
     else:
         raise ScenarioFailure("adding an auto rule for a deny-list action was accepted")
+    stored = [rule.id for rule in stack.rules.list_rules(include_defaults=False) if not rule.locked]
+    check(stored == [], f"a rejected rule was stored anyway: {stored}")
 
     _insert_rule_row(
         stack,

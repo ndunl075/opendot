@@ -182,9 +182,11 @@ class RuleEngine:
 
     def add_rule(
         self,
+        rule: Rule | None = None,
+        /,
         *,
-        tool: str,
-        behavior: Behavior | str,
+        tool: str | None = None,
+        behavior: Behavior | str | None = None,
         action: str = "*",
         target: str | None = None,
         max_sensitivity: str = "secret",
@@ -192,16 +194,27 @@ class RuleEngine:
         created_by: str = "user",
         note: str | None = None,
     ) -> Rule:
+        """Store a user rule, given as keywords or as a ``Rule``. Deny-list rules are always rejected.
+
+        A passed ``Rule`` is validated exactly like keywords; its ``locked`` and ``builtin`` flags
+        are ignored (only the core deny list is locked, and it is never stored).
+        """
+        if rule is not None:
+            tool, action, target = rule.tool, rule.action, rule.target
+            behavior, max_sensitivity, max_cost_credits = rule.behavior, rule.max_sensitivity, rule.max_cost_credits
+            created_by, note = rule.created_by, rule.note
+        if tool is None or behavior is None:
+            raise RuleError("a rule needs a tool and a behavior")
         fields = self._validated(tool, action, target, behavior, max_sensitivity, max_cost_credits)
-        rule = Rule(
-            id=str(uuid4()),
+        stored = Rule(
+            id=rule.id if rule is not None and rule.id else str(uuid4()),
             created_by=created_by,
             created_at=datetime.now(UTC),
             note=note,
             **fields,
         )
-        self._insert(rule)
-        return rule
+        self._insert(stored)
+        return stored
 
     def update_rule(self, rule_id: str, **changes: Any) -> Rule:
         allowed = {"tool", "action", "target", "behavior", "max_sensitivity", "max_cost_credits", "note"}
@@ -330,6 +343,8 @@ class RuleEngine:
         if max_cost_credits is not None and max_cost_credits < 0:
             raise RuleError("max_cost_credits cannot be negative")
         item = deny_item_for_pattern(action)
+        if item is None and not any(ch in action for ch in "*?["):
+            item = deny_item_for(tool.strip(), action)
         if item is not None:
             raise RuleError(f"rejected: '{action}' is on the core deny list ({item.label}); no rule can change it")
         return {

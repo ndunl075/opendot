@@ -171,13 +171,15 @@ class ScenarioTools:
     def intent(self, name: str, arguments: dict[str, Any] | str) -> Any:
         from ..rules import ToolIntent  # lazy: rules/ is built separately
 
+        # Tool names are the MCP names the rule engine's defaults (rules/defaults.py) are keyed by;
+        # sensitivities are the four levels of section 9.
         args = _arguments(arguments)
         if name == "memory_search":
-            return ToolIntent(tool="memory", action="search", target=None, sensitivity="personal")
+            return ToolIntent(tool="memory_search", action="search", target=None, sensitivity="personal")
         if name == "reminder_set":
-            return ToolIntent(tool="reminders", action="create", target=None, sensitivity="low")
+            return ToolIntent(tool="reminder_set", action="create", target=None, sensitivity="personal")
         if name == "gmail_draft_create":
-            return ToolIntent(tool="gmail", action="draft_create", target=args.get("to"), sensitivity="personal")
+            return ToolIntent(tool="message_draft", action="create", target=args.get("to"), sensitivity="personal")
         if name == "gmail_delete_message":
             return ToolIntent(
                 tool="gmail", action="delete", target=f"message:{args.get('message_id', '')}", sensitivity="personal"

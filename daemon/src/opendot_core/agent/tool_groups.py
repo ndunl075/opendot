@@ -532,3 +532,20 @@ def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool
     if _QUESTION_SHAPE.search(request) and _EXTERNAL_LOOKUP_TERMS.search(recent_topic_text):
         return False
     return True
+
+
+def choose_task_tool_group(message: str, available: list[str] | tuple[str, ...]) -> list[str]:
+    """The tool group for a whole task (section 8.2 rule 4), chosen once and never changed.
+
+    When the executor offers at most ``MAX_TOOLS_PER_GROUP`` tools they are all offered. Otherwise
+    the tools ``select_tool_group`` picks for the request come first, then the rest in
+    ``_TOOL_PRIORITY`` order, capped at the group size. Returned sorted by name, so the stable
+    prompt prefix (which lists the schemas) is byte-identical for the same group.
+    """
+    offered = sorted(set(available))
+    if len(offered) <= MAX_TOOLS_PER_GROUP:
+        return offered
+    wanted = select_tool_group(message)
+    rank = {name: index for index, name in enumerate(_TOOL_PRIORITY)}
+    ordered = sorted(offered, key=lambda name: (name not in wanted, rank.get(name, len(rank)), name))
+    return sorted(ordered[:MAX_TOOLS_PER_GROUP])
