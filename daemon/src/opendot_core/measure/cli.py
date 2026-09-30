@@ -58,16 +58,6 @@ def _from_hook(spec: str) -> Any:
 def build_provider(args: argparse.Namespace) -> Any:
     if args.provider_factory:
         return _from_hook(args.provider_factory)
-    try:
-        factory = importlib.import_module("opendot_core.providers.factory")
-    except ImportError:
-        factory = None
-    if factory is not None and hasattr(factory, "build_registry"):
-        registry = factory.build_registry()
-        try:
-            return registry.get(args.provider)
-        except ProviderError as error:
-            raise MeasureError(error.user_message) from error
     if args.provider == DEFAULT_PROVIDER:
         try:
             module = importlib.import_module("opendot_core.providers.chatgpt_plan")
@@ -76,6 +66,8 @@ def build_provider(args: argparse.Namespace) -> Any:
             raise MeasureError("the ChatGPT plan provider is not available in this build") from error
         except ProviderError as error:
             raise MeasureError(error.user_message) from error
+    # Opt-in providers need their own settings, keys and spend caps, which the
+    # CLI does not configure: they are reachable only through a factory hook.
     raise MeasureError(f"unknown provider {args.provider!r}; pass --provider-factory module:function")
 
 

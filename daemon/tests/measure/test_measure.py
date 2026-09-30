@@ -228,3 +228,16 @@ def test_no_secrets_in_report(tmp_path):
     assert code == 0
     assert secret not in text and jwt not in text
     assert "Bearer" not in text
+
+
+def test_the_default_real_run_builds_the_plan_provider_directly(monkeypatch) -> None:
+    """Review F1: the default path must not require a configured registry."""
+    import argparse
+
+    from opendot_core.measure import cli as measure_cli
+
+    sentinel = object()
+    monkeypatch.setattr("opendot_core.providers.chatgpt_plan.ChatGPTPlanProvider", lambda: sentinel)
+    args = argparse.Namespace(provider_factory=None, provider="chatgpt_plan")
+
+    assert measure_cli.build_provider(args) is sentinel

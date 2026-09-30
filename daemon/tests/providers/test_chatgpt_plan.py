@@ -545,3 +545,36 @@ def test_credit_helper_flags_unknown_billing_keys(raw):
 )
 def test_credit_helper_ignores_zero_and_token_fields(raw):
     assert credit_spend_detected(Usage(raw=raw)) == []
+
+
+
+def test_an_iterator_created_before_a_usage_limit_does_not_send_after_the_pause(provider, fake):
+    """Review F9: the pause is checked when the request is sent, not only when the iterator is made."""
+    sign_in(provider, fake)
+    request = ChatRequest(model="m", input=[InputItem(role="user", content="hi")])
+    early = provider.stream(request)  # created, not yet consumed
+    fake.queue_error(429, "err_429_usage_limit.json")
+    with pytest.raises(UsageLimitExceeded):
+        run(provider)
+    before = len(fake.api_requests)
+
+    with pytest.raises(UsageLimitExceeded):
+        list(early)
+
+    assert len(fake.api_requests) == before
+
+
+def test_startup_discovery_loads_the_catalog_for_an_existing_session(fake, store, tmp_path):
+    first = ChatGPTPlanProvider(store, tmp_path / "s.json", http=fake.client(), clock=lambda: fake.now)
+    sign_in(first, fake)
+    restarted = ChatGPTPlanProvider(store, tmp_path / "s.json", http=fake.client(), clock=lambda: fake.now)
+    assert restarted.models == []
+
+    assert restarted.load_models_on_start()
+    assert restarted.models
+
+
+def test_startup_discovery_is_quiet_when_nobody_is_signed_in(fake, store, tmp_path):
+    fresh = ChatGPTPlanProvider(store, tmp_path / "s.json", http=fake.client(), clock=lambda: fake.now)
+
+    assert fresh.load_models_on_start() == []

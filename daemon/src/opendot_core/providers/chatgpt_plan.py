@@ -849,6 +849,19 @@ class ChatGPTPlanProvider:
 
     # -- point 5 -----------------------------------------------------------------------------------
 
+    def load_models_on_start(self) -> list[ModelInfo]:
+        """Startup discovery (point 5): fetch the catalog for an existing session.
+
+        Returns an empty list when not signed in, instead of raising, so the
+        daemon can call this unconditionally at startup.
+        """
+        if not self._models:
+            try:
+                self._models = self.list_models()
+            except (AuthRequired, ProviderUnavailable):
+                return []
+        return list(self._models)
+
     def list_models(self) -> list[ModelInfo]:
         response = self._authed("GET", f"{self._api}/models", headers={"Accept": "application/json"})
         body = self._json(response)
@@ -919,6 +932,11 @@ class ChatGPTPlanProvider:
         return self._stream(body)
 
     def _stream(self, body: dict[str, Any]) -> Iterator[StreamEvent]:
+        # Checked again here: the iterator may have been created before a
+        # usage-limit 429 paused the provider, and the request only goes out
+        # when it is consumed.
+        if self.paused:
+            raise UsageLimitExceeded("paused after a usage limit; call resume() after raising your limit")
         payload = json.dumps(body)
         for attempt in (0, 1):
             token = self._access_token(force_refresh=attempt == 1)

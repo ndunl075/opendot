@@ -109,12 +109,22 @@ def test_cap_zero_fails_closed_before_any_request(tmp_path) -> None:
 
 def test_spend_is_recorded_and_the_cap_then_trips(tmp_path) -> None:
     recorder = Recorder(body=fixture("optin_openai_text.sse"))
-    provider = _provider(tmp_path, recorder, cap=0.0004)
+    provider = _provider(tmp_path, recorder, cap=0.0055)
     list(provider.stream(request(model="gpt-4o")))  # 100 in + 20 out at gpt-4o rates = $0.00045
     assert provider._spend.spent("openai_key") == pytest.approx(0.00045)
     with pytest.raises(SpendCapReached):
         list(provider.stream(request(model="gpt-4o")))
     assert len(recorder.requests) == 1
+
+
+def test_a_cap_too_small_for_the_reserved_output_refuses_before_any_request(tmp_path) -> None:
+    recorder = Recorder(body=fixture("optin_openai_text.sse"))
+    provider = _provider(tmp_path, recorder, cap=0.0004)
+
+    with pytest.raises(SpendCapReached):
+        list(provider.stream(request(model="gpt-4o")))
+
+    assert recorder.requests == []
 
 
 def test_key_never_in_logs_or_url(tmp_path, caplog) -> None:
@@ -138,3 +148,15 @@ def test_sensitive_text_is_redacted_before_egress(tmp_path) -> None:
 
 def test_spend_cap_error_is_a_provider_error() -> None:
     assert issubclass(SpendCapReached, ProviderError)
+
+
+def test_a_key_echoed_in_an_in_stream_error_is_scrubbed(tmp_path) -> None:
+    body = ('data: {"error": {"code": 500, "message": "bad key ' + SECRET + '"}}\n\n').encode()
+    provider = _provider(tmp_path, Recorder(body=body))
+
+    with pytest.raises(Exception) as caught:
+        list(provider.stream(request()))
+
+    assert SECRET not in str(caught.value)
+    assert SECRET not in repr(caught.value)
+    assert SECRET not in getattr(caught.value, "detail", "")

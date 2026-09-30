@@ -199,6 +199,13 @@ class HttpProvider:
                         yield event
         except httpx.HTTPError as error:
             raise ProviderUnavailable(type(error).__name__) from None
+        except ProviderError as error:
+            # Errors raised from inside the stream (an SSE error event) never
+            # passed the HTTP-status scrub, so remove the key here.
+            if key:
+                error.detail = error.detail.replace(key, "[key]")
+                error.args = tuple(str(arg).replace(key, "[key]") for arg in error.args)
+            raise
         finally:
             if sent and not recorded and self.paid and self._spend is not None:
                 # The request reached the provider but never completed: count the input conservatively.

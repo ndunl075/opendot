@@ -1,6 +1,6 @@
 # OpenDot status
 
-Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — in progress** (M0 done 2026-09-30).
+Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — DONE** (2026-09-30; M0 done the same day). Next: M2.
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
@@ -28,7 +28,7 @@ Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — in progress** (M
 - [x] 1.4 `chatgpt_plan` provider (synthetic fixtures until the first real sign-in)
 - [x] 1.5 opt-in providers `openai_key`, `anthropic_key`, `openrouter`, `local` (all off by default)
 - [x] 1.6 `opendot measure` (`--dry-run` works without an account)
-- [ ] 1.7 cross-vendor review into `docs/reviews/m1.md`
+- [x] 1.7 cross-vendor review into `docs/reviews/m1.md` (all findings fixed or accepted; F3/F4 carried into M2)
 
 ## Needs you
 

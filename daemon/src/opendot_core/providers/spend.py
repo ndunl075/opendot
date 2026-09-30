@@ -26,6 +26,9 @@ from .types import Usage
 
 CONNECTOR = "provider_spend"
 
+#: Output tokens reserved against the cap before a call is sent (a bounded estimate).
+OUTPUT_RESERVE_TOKENS = 512
+
 #: USD per million tokens as (input, output). Longest model-id prefix wins.
 #: Approximate list prices; treat results as estimates.
 PRICE_TABLE: dict[str, dict[str, tuple[float, float]]] = {
@@ -93,7 +96,14 @@ class SpendTracker:
         value = self._read(f"{provider}:{self._month()}")
         return value if value is not None else 0.0
 
-    def check(self, provider: str, *, model: str = "", estimated_input_tokens: int = 0) -> None:
+    def check(
+        self,
+        provider: str,
+        *,
+        model: str = "",
+        estimated_input_tokens: int = 0,
+        reserved_output_tokens: int = OUTPUT_RESERVE_TOKENS,
+    ) -> None:
         """Raise ``SpendCapReached`` unless there is room under the cap. Call before any request."""
         cap = self.get_cap(provider)
         spent = self.spent(provider)
@@ -101,7 +111,11 @@ class SpendTracker:
             raise SpendCapReached(f"no monthly spend cap is set for {provider}")
         if spent >= cap:
             raise SpendCapReached(f"{provider} monthly cap ${cap:.2f} reached (${spent:.2f} spent)")
-        upcoming = estimate_cost_usd(provider, model, input_tokens=estimated_input_tokens, output_tokens=0)
+        # Reserve a bounded guess for the output too, so one call cannot
+        # overshoot the cap by its whole answer.
+        upcoming = estimate_cost_usd(
+            provider, model, input_tokens=estimated_input_tokens, output_tokens=reserved_output_tokens
+        )
         if spent + upcoming > cap:
             raise SpendCapReached(
                 f"{provider}: this call could exceed the monthly cap ${cap:.2f} (${spent:.2f} already spent)"
