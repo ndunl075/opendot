@@ -107,3 +107,14 @@ section 1. Newest last.
   `opendot.bearer.<token>`: the server selects `opendot` and never echoes the token. It also requires a
   local Origin. Reason: browsers cannot set an Authorization header on a WebSocket, and CORS does not
   protect WebSockets.
+- 2026-09-30 (M3): Codex's default (elevated) Windows sandbox fails to start any process on the build
+  machine ("apply deny-read ACLs"). The unelevated Windows sandbox works and still confines writes to
+  the workspace, so GPT tasks run with: `codex exec -m <model> -c model_reasoning_effort="<effort>"
+  -s workspace-write -c 'windows.sandbox="unelevated"' -c sandbox_workspace_write.network_access=true
+  -C <worktree> -o <last-message-file> - < <prompt-file>` (prompt on stdin; passing it as an argument
+  makes a backgrounded run wait on stdin forever). `--dangerously-bypass-approvals-and-sandbox` is
+  never used.
+- 2026-09-30 (M3): pnpm comes from corepack (`corepack install --global pnpm@10`, pnpm 10.34.6); the
+  old corepack shim pointed at an uncached pnpm 12.4.1.
+- 2026-09-30 (M3): Each GPT UI task runs in its own git worktree on branch `m3/<task>` so Opus can
+  build daemon and desktop pieces in parallel, then reviews and merges into `m3/base`.
