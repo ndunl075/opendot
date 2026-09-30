@@ -304,3 +304,11 @@ def test_loop_builds_with_defaults(tmp_path: Path) -> None:
         stack.database, stack.registry, stack.router, stack.meter, stack.rules, PromptPacker(), stack.tools
     )
     assert loop.paused() is None
+
+
+def test_resume_after_plan_limit_also_resumes_the_provider(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[text_turn("x")])
+    resumed: list[bool] = []
+    stack.provider.resume = lambda: resumed.append(True)  # type: ignore[attr-defined]
+    stack.loop.resume_after_plan_limit()
+    assert resumed == [True]

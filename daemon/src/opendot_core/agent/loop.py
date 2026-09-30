@@ -294,6 +294,15 @@ class AgentLoop:
         self.meter.allow_task_overrun(task_id)
 
     def resume_after_plan_limit(self) -> None:
+        # The plan provider keeps its own persisted pause (M1); clear both, or the next request
+        # would be refused again before it is sent.
+        try:
+            provider = self.registry.get(self.provider_name)
+        except ProviderError:
+            provider = None
+        resume = getattr(provider, "resume", None)
+        if callable(resume):
+            resume()
         self._set_control("plan_limit", None)
 
     def pause(self, reason: str = "user") -> None:

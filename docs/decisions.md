@@ -70,3 +70,27 @@ section 1. Newest last.
   (default `.opendot/chatgpt_plan.json`), not a migration, so M2 can move it into settings later. The
   pause flag persists and only `resume()` clears it. SSE/error fixtures are synthetic until the first
   real sign-in. ID tokens are verified (RS256 via JWKS, iss, aud, exp, nonce) with `cryptography`.
+- 2026-09-30 (M2): The core deny list matches outside-app tools by keyword on the action
+  (delete, trash, pay, password, ...), not only Composio's passthrough. Only tools that act on
+  OpenDot's own local data (memory, tasks, reminders, forget ...) are exempt. Reason: an unknown
+  or new connector that deletes or pays must be refused by default, not allowed by omission.
+- 2026-09-30 (M2): The eval harness names tools by the MCP names the rule defaults are keyed by
+  (`memory_search`, `reminder_set`, `message_draft`) and uses the four section 9 sensitivities.
+  Reason: the first draft used names no default matched and an invalid sensitivity (`low`), so
+  every call fell through to `ask`. S3 now also requires the rejection to be a deny-list
+  `RuleError` and that nothing was stored (stricter, not weaker).
+- 2026-09-30 (M2): Each model attempt is one durable step. A failed attempt escalates the *next*
+  step one tier (so a step escalates at most once and tiers are never skipped); after a success the
+  task goes back to the job's own tier. A 429 of either kind (plan usage limit or ordinary rate
+  limit) sets a persisted plan-wide pause that only the user clears. Auth, eligibility, disabled
+  provider, spend cap and unsupported capability fail the task: no tier fixes them.
+- 2026-09-30 (M2): A `handoff` decision ends the task at once (state `handed_off`) with the
+  refusal text; no further model call is made. A reviewer `block` does the same and never creates
+  an approval card.
+- 2026-09-30 (M2): Anomaly auto-pause trips the kill switch on: an action about to run *without
+  asking* for a recipient domain the user never approved before; 20 auto actions within 10
+  minutes; more than half the daily budget spent within an hour. For `ask` actions a new domain is
+  a reviewer concern shown on the card instead, since the user is asked anyway.
+- 2026-09-30 (M2): The first user message is frozen into history after the first model step; later
+  steps end with a short fixed continuation line in the changing tail. Reason: history stays
+  append-only and the stable prefix stays byte-identical (S10).
