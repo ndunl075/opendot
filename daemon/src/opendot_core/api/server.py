@@ -331,6 +331,9 @@ def create_app(
         # Escrow before committing so a crash cannot leave an approved action with no token. A replay
         # must never replace or discard the token an earlier, successful approval stored.
         stored = token_escrow.put_if_absent(approval_id, token_value)
+        if not stored:
+            # Commit the token the executor will actually be handed, never a different fresh one.
+            token_value = token_escrow.get(approval_id) or token_value
         try:
             return approvals.approve_with_token(approval_id, actor=actor, token=token_value).approval
         except BaseException:
