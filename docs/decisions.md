@@ -44,3 +44,29 @@ section 1. Newest last.
   low, medium, high, xhigh, max, and ultra on the larger models; never use max
   or ultra for unattended tasks.
 - 2026-09-30: `opendot run` does not build an agent bridge until M2 (accepted review finding F1); M2 wires it and tests the CLI path.
+- 2026-09-30: `chatgpt_plan` provider (task 1.4) implemented from the DevKit source
+  (`packages/local/src`), because OpenAI's public docs pages fetched today
+  (developers.openai.com/siwc and its token-reference page) list components and token
+  lifetimes but not endpoints or scope names. Gaps filled from the DevKit: issuer
+  `https://auth.openai.com` with OIDC discovery; scopes `openid profile email offline_access
+  resource.invoke chatgpt.tokens.use.direct` (the last one is the plan scope checked after
+  sign-in); `resource=https://api.openai.com/v1`; dynamic client registration happens inside the
+  authorize step (send `client_id=dynamic_agent_client`, the issued id comes back as a
+  `client_id` callback parameter and is saved); callback path `/auth/callback` on 127.0.0.1;
+  revocation of the refresh token at the discovery `revocation_endpoint`.
+- 2026-09-30: Docs/DevKit gaps for `chatgpt_plan`: (a) the docs list `urn:uuid:` host ids and the
+  DevKit sends `ext_agent_host_id` on the authorize URL only (OpenDot does the same, not as an API
+  header); (b) the DevKit only supports text messages with roles user/assistant/developer and no
+  tools, while section 6.1 allows plain function tools, so OpenDot sends `function_call` and
+  `function_call_output` input items and maps system to `developer` (unverified against a real
+  account until the first sign-in); (c) the DevKit lists models via `GET /v1/models` returning
+  `{"models":[{slug,display_name,visibility}]}` (only `visibility == "list"`), not the public
+  `{"data":[{id}]}` shape; OpenDot accepts both; (d) the DevKit treats `response.incomplete` as an
+  error, OpenDot maps it to `IncompleteResponse`; (e) the docs mention `earliest_refresh_at` in
+  token responses, OpenDot ignores it and refreshes 60 s before expiry or on a 401; (f)
+  `subscription_sharing_v2_*` codes are legacy aliases in the DevKit, OpenDot maps the
+  `user_not_eligible` alias only.
+- 2026-09-30: `chatgpt_plan` state (host id, saved client id, paused flag) lives in a small JSON file
+  (default `.opendot/chatgpt_plan.json`), not a migration, so M2 can move it into settings later. The
+  pause flag persists and only `resume()` clears it. SSE/error fixtures are synthetic until the first
+  real sign-in. ID tokens are verified (RS256 via JWKS, iss, aud, exp, nonce) with `cryptography`.

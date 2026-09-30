@@ -1,0 +1,9 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_syn2","status":"in_progress","model":"gpt-6-terra"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"get_weather","arguments":"{\"city\":\"Columbus\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_syn2","status":"completed","model":"gpt-6-terra","output":[{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"get_weather","arguments":"{\"city\":\"Columbus\"}"}],"usage":{"input_tokens":30,"input_tokens_details":{"cached_tokens":0},"output_tokens":9,"output_tokens_details":{"reasoning_tokens":2}}}}
+
