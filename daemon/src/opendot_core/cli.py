@@ -820,6 +820,9 @@ def build_parser() -> argparse.ArgumentParser:
     from .measure import cli as measure_cli
 
     measure_cli.register(subcommands)
+    from .eval import cli as eval_cli
+
+    eval_cli.register(subcommands)
     return parser
 
 
@@ -832,6 +835,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .measure import cli as measure_cli
 
         return measure_cli.run(args)
+    if args.command == "eval":
+        from .eval import cli as eval_cli
+
+        return eval_cli.run(args)
     database = database_from_args(args)
     if args.command == "init":
         print(json.dumps({"schema_version": database.migrate(), "database_path": str(database.path)}))
