@@ -4,7 +4,7 @@ Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — DONE** (2026-09-
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
-- Collected after M0: 722; after M1 work: 905 (minimum stays 650)
+- Collected after M0: 722; after M1: 921 (minimum stays 650)
 - Collected tests at baseline: **777**
 - Tests inside the deletable files listed in ARCHITECTURE.md §5: **127**
 - Minimum collected count from now on (baseline − deletable): **650**
