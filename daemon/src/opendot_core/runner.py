@@ -3,7 +3,7 @@
 Decision 3 calls for "a modular monolith on the always-on PC": one process,
 one database. Until now, every capability -- Telegram intake/delivery, due
 jobs, connector sync -- was a separate one-shot CLI invocation with no
-process actually keeping them running. AlfredRunner is that process: each
+process actually keeping them running. OpenDotRunner is that process: each
 cycle handles Telegram and due jobs (the latency-sensitive path), and each
 configured connector syncs on its own, independently paced interval.
 
@@ -21,9 +21,8 @@ from typing import Callable, TypeVar
 from .audit import AuditEvent, AuditLog
 from .db import Database
 from .jobs import JobRunner
-from .preflight import preflight
 from .quiet_hours import QuietHours
-from .runtime_control import clear_restart_request, record_heartbeat, restart_alfred, restart_pending
+from .runtime_control import clear_restart_request, record_heartbeat, restart_daemon, restart_pending
 from .telegram import TelegramPair
 from .telegram_actions import TelegramActionWorker
 from .telegram_runtime import (
@@ -60,7 +59,7 @@ class RunOnceReport:
     errors: list[str] = field(default_factory=list)
 
 
-class AlfredRunner:
+class OpenDotRunner:
     def __init__(
         self,
         database: Database,
@@ -110,53 +109,6 @@ class AlfredRunner:
         self._connector_result: tuple[list[str], list[str]] | None = None
         self._connector_result_lock = Lock()
 
-    def _audit_preflight(self) -> None:
-        """Record on startup whether the agent can reach Alfred's tools.
-
-        Preflight only helps if it runs, and nobody runs a diagnostic on a
-        system that looks fine -- which is exactly how three separate outages
-        survived for weeks. Startup is the moment worth checking: it is when
-        the Hermes profile has most likely just been rewritten by an update
-        that dropped the mcp_servers key.
-
-        Audited, never fatal. A broken link means Alfred answers without
-        tools, which is degraded but still useful, so refusing to start would
-        turn a partial outage into a total one. The audit row is what makes
-        it findable afterwards rather than being inferred weeks later from a
-        model apologising for a connector it invented.
-        """
-        try:
-            report = preflight(self.database)
-        except Exception as error:
-            # A diagnostic must never be the thing that stops the loop.
-            AuditLog(self.database).append(
-                AuditEvent(
-                    actor="system:runner",
-                    client="runner",
-                    tool="preflight",
-                    outcome="error",
-                    result={"error": error.__class__.__name__},
-                )
-            )
-            return
-        broken = [check.name for check in report.checks if not check.ok]
-        AuditLog(self.database).append(
-            AuditEvent(
-                actor="system:runner",
-                client="runner",
-                tool="preflight",
-                outcome="ok" if report.ok else "degraded",
-                result={"broken": broken} if broken else {"checks": len(report.checks)},
-            )
-        )
-        for check in report.checks:
-            if not check.ok:
-                print(
-                    f"[alfred run] preflight: {check.name} -- {check.detail}"
-                    + (f" | fix: {check.fix}" if check.fix else ""),
-                    flush=True,
-                )
-
     def run_forever(
         self, *, iterations: int | None = None, stop_check: Callable[[], bool] = lambda: False
     ) -> None:
@@ -166,10 +118,9 @@ class AlfredRunner:
         SvcStop handler, for instance -- request a clean stop between
         cycles without this module needing to import any platform-specific
         signaling primitive itself. It defaults to never stopping, so every
-        existing caller (including `alfred run`'s own KeyboardInterrupt
+        existing caller (including `opendot run`'s own KeyboardInterrupt
         handling) is unaffected.
         """
-        self._audit_preflight()
         count = 0
         while (iterations is None or count < iterations) and not stop_check():
             report = self.run_once()
@@ -240,7 +191,7 @@ class AlfredRunner:
                 typing_chat_ids,
                 interval_seconds=self.typing_heartbeat_interval_seconds,
             ):
-                answered, result = self._safe("hermes_bridge", self.agent_bridge, errors)
+                answered, result = self._safe("agent_bridge", self.agent_bridge, errors)
             if answered and result is not None:
                 agent_replies = int(getattr(result, "answered", 0))
             telegram_delivered += self._deliver_telegram(transport, errors)
@@ -336,7 +287,7 @@ class AlfredRunner:
             worker = Thread(
                 target=self._run_connector_worker,
                 args=(due,),
-                name="alfred-connectors",
+                name="opendot-connectors",
                 daemon=True,
             )
             self._connector_thread = worker
@@ -387,16 +338,16 @@ class AlfredRunner:
             AuditLog(self.database).append(
                 AuditEvent(actor="system:runner", client="runner", tool=context, outcome="error", result={"error": reason})
             )
-            print(f"[alfred run] {context} failed: {reason}")
+            print(f"[opendot run] {context} failed: {reason}")
             return False, None
 
     def _restart_requested(self) -> bool:
         if not restart_pending(self.database):
             return False
         clear_restart_request(self.database)
-        restart = restart_alfred()
+        restart = restart_daemon()
         if restart.ok:
-            print(f"[alfred run] restart requested via {restart.method}")
+            print(f"[opendot run] restart requested via {restart.method}")
         else:
-            print(f"[alfred run] restart requested but {restart.detail}")
+            print(f"[opendot run] restart requested but {restart.detail}")
         return True

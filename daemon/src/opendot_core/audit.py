@@ -1,4 +1,4 @@
-"""Append-only, tamper-evident audit records for Alfred actions."""
+"""Append-only, tamper-evident audit records for OpenDot actions."""
 
 from __future__ import annotations
 

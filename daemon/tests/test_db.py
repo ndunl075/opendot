@@ -120,13 +120,13 @@ def test_status_surfaces_a_reply_stranded_by_an_unfinished_claim(tmp_path: Path)
             connection.execute(
                 """
                 INSERT INTO outbox (id, destination, payload_json, idempotency_key, state, attempts, created_at)
-                VALUES ('a', 'telegram:1', '{"text":"hi"}', 'hermes-reply:900:0', 'sending', 1, '2026-08-16 21:00:00')
+                VALUES ('a', 'telegram:1', '{"text":"hi"}', 'agent-reply:900:0', 'sending', 1, '2026-08-16 21:00:00')
                 """
             )
             connection.execute(
                 """
                 INSERT INTO outbox (id, destination, payload_json, idempotency_key, state, attempts, created_at, last_error)
-                VALUES ('b', 'telegram:1', '{"text":"yo"}', 'hermes-reply:901:0', 'failed', 1, '2026-08-16 22:00:00',
+                VALUES ('b', 'telegram:1', '{"text":"yo"}', 'agent-reply:901:0', 'failed', 1, '2026-08-16 22:00:00',
                         'Telegram send failed: ReadTimeout')
                 """
             )

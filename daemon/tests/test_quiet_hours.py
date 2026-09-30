@@ -90,7 +90,7 @@ def test_quiet_hours_hold_job_deliveries_but_not_interactive_replies(tmp_path: P
                 connection,
                 destination="telegram:20",
                 payload={"text": "here's your answer"},
-                idempotency_key="hermes-reply:1:0",
+                idempotency_key="agent-reply:1:0",
             )
     fake = FakeTelegram()
     hours = QuietHours(start=time(22, 0), end=time(7, 0), timezone="UTC")
@@ -107,7 +107,7 @@ def test_quiet_hours_hold_job_deliveries_but_not_interactive_replies(tmp_path: P
                 "SELECT idempotency_key, state FROM outbox ORDER BY created_at, rowid"
             )
         }
-    assert states["hermes-reply:1:0"] == "sent"
+    assert states["agent-reply:1:0"] == "sent"
     assert states["job-delivery:1"] == "pending"
 
     # After quiet hours, the held reminder delivers.

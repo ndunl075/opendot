@@ -105,7 +105,7 @@ def test_feedback_is_append_only_and_does_not_silently_rewrite_memory(tmp_path: 
         memory.id,
         query="how should i answer?",
         outcome="irrelevant",
-        actor="mcp:hermes",
+        actor="mcp:agent",
     )
 
     assert receipt["memory_id"] == memory.id

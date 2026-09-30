@@ -11,7 +11,7 @@
           {% for item in section.entries %}
             <div class="row">
               <div class="checkbox{% if section.overdue %} overdue{% endif %}"></div>
-              <div class="row-title">{{ item.title }}{% if item.source != "Alfred task" %} <span class="mono">· {{ item.source }}</span>{% endif %}</div>
+              <div class="row-title">{{ item.title }}{% if item.source != "OpenDot task" %} <span class="mono">· {{ item.source }}</span>{% endif %}</div>
               <div class="row-meta">{% if item.due_at %}{{ item.due_at|dt }}{% endif %}</div>
             </div>
           {% endfor %}
@@ -22,7 +22,7 @@
   {% if not has_any_items %}
     <div class="section">
       <div class="card">
-        <div class="empty-state">No open tasks. Alfred has nothing due.</div>
+        <div class="empty-state">No open tasks. OpenDot has nothing due.</div>
       </div>
     </div>
   {% endif %}

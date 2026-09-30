@@ -6,12 +6,12 @@ open-source community adapter (a plugin like Self-hosted LiveSync running
 inside Obsidian on desktop and phone) -- see ``deploy/couchdb/`` for that
 server's setup.
 
-Alfred's own Python code never talks to CouchDB for anything else: the
+OpenDot's own Python code never talks to CouchDB for anything else: the
 actual sync -- reading and writing ``opendot-vault/`` files, replicating
 them to a phone -- is done entirely by that third-party plugin, not by
-Alfred. This module exists only so an operator can confirm the server side
+OpenDot. This module exists only so an operator can confirm the server side
 is actually reachable, the same way `connector-status` reports on every
-other external dependency, without needing Alfred to become a CouchDB
+other external dependency, without needing OpenDot to become a CouchDB
 client for anything real.
 """
 

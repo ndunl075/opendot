@@ -26,7 +26,7 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 # calendar.events covers the read sync and the approval-gated event write;
 # gmail.readonly covers the unread-inbox sync; gmail.compose covers the
 # approval-gated draft write. gmail.compose's own grant may be broader than
-# what Alfred exercises -- the real boundary is that GmailClient's code
+# what OpenDot exercises -- the real boundary is that GmailClient's code
 # never calls a send endpoint, only drafts.create, regardless of what the
 # token could technically do. All three scopes come from one consent
 # screen, so Calendar and Gmail share a single refresh token.
@@ -97,7 +97,7 @@ class LocalRedirectListener:
                     error=query.get("error", [None])[0],
                     state=query.get("state", [None])[0],
                 )
-                message = "Alfred received the authorization. You can close this tab." if outer._result.code else "Authorization failed. You can close this tab."
+                message = "OpenDot received the authorization. You can close this tab." if outer._result.code else "Authorization failed. You can close this tab."
                 body = f"<html><body><p>{message}</p></body></html>".encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")

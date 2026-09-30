@@ -1,7 +1,7 @@
 """Which MCP tools no client can actually reach.
 
-Alfred serves 33 tools and grants them per client. Nothing ever compared the
-two lists, and the gap that opened was invisible for weeks: the `hermes`
+OpenDot serves 33 tools and grants them per client. Nothing ever compared the
+two lists, and the gap that opened was invisible for weeks: the `agent`
 client -- the only one the agent uses -- was granted 22 while the server
 served 33. Every tool built recently was selected by the router, offered to
 the model, and then refused at the policy boundary.

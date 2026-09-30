@@ -12,8 +12,8 @@ def _search_item(
     title: str,
     url: str,
     updated_at: str,
-    repo: str = "example/alfred",
-    author: str = "nico",
+    repo: str = "example/opendot",
+    author: str = "sam",
     draft: bool = False,
 ) -> dict:
     return {
@@ -44,7 +44,7 @@ class FakePullRequestSearch:
 def test_pull_request_service_merges_authored_and_review_requested() -> None:
     now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
     transport = FakePullRequestSearch(
-        authored=[_search_item(title="My feature", url="https://github.com/example/alfred/pull/1", updated_at="2026-08-15T10:00:00Z")],
+        authored=[_search_item(title="My feature", url="https://github.com/example/opendot/pull/1", updated_at="2026-08-15T10:00:00Z")],
         review_requested=[
             _search_item(
                 title="Needs review",
@@ -74,12 +74,12 @@ def test_pull_request_service_marks_stale_when_updated_before_threshold() -> Non
         authored=[
             _search_item(
                 title="Fresh",
-                url="https://github.com/example/alfred/pull/1",
+                url="https://github.com/example/opendot/pull/1",
                 updated_at="2026-08-10T10:00:00Z",
             ),
             _search_item(
                 title="Old",
-                url="https://github.com/example/alfred/pull/2",
+                url="https://github.com/example/opendot/pull/2",
                 updated_at="2026-07-01T10:00:00Z",
             ),
         ]
@@ -94,7 +94,7 @@ def test_pull_request_service_marks_stale_when_updated_before_threshold() -> Non
 
 
 def test_pull_request_service_prefers_review_requested_on_duplicate_url() -> None:
-    url = "https://github.com/example/alfred/pull/1"
+    url = "https://github.com/example/opendot/pull/1"
     transport = FakePullRequestSearch(
         authored=[_search_item(title="Mine", url=url, updated_at="2026-08-15T10:00:00Z")],
         review_requested=[_search_item(title="Mine", url=url, updated_at="2026-08-15T10:00:00Z", author="friend")],
@@ -111,7 +111,7 @@ def test_pull_request_service_render_includes_draft_flag() -> None:
         authored=[
             _search_item(
                 title="WIP",
-                url="https://github.com/example/alfred/pull/3",
+                url="https://github.com/example/opendot/pull/3",
                 updated_at="2026-08-15T10:00:00Z",
                 draft=True,
             )
@@ -144,7 +144,7 @@ def test_github_client_search_issues_uses_the_search_endpoint() -> None:
                 "items": [
                     _search_item(
                         title="Fix bug",
-                        url="https://github.com/example/alfred/pull/4",
+                        url="https://github.com/example/opendot/pull/4",
                         updated_at="2026-08-15T10:00:00Z",
                     )
                 ]
@@ -176,7 +176,7 @@ def test_github_client_search_issues_paginates_until_short_page() -> None:
                     "items": [
                         _search_item(
                             title=f"PR {index}",
-                            url=f"https://github.com/example/alfred/pull/{index}",
+                            url=f"https://github.com/example/opendot/pull/{index}",
                             updated_at="2026-08-15T10:00:00Z",
                         )
                         for index in range(per_page)
@@ -189,7 +189,7 @@ def test_github_client_search_issues_paginates_until_short_page() -> None:
                 "items": [
                     _search_item(
                         title="Last page",
-                        url="https://github.com/example/alfred/pull/999",
+                        url="https://github.com/example/opendot/pull/999",
                         updated_at="2026-08-15T10:00:00Z",
                     )
                 ]
@@ -213,12 +213,12 @@ def test_pull_request_service_sorts_non_stale_before_stale() -> None:
         authored=[
             _search_item(
                 title="Stale but recent title",
-                url="https://github.com/example/alfred/pull/1",
+                url="https://github.com/example/opendot/pull/1",
                 updated_at=(now - timedelta(days=20)).isoformat().replace("+00:00", "Z"),
             ),
             _search_item(
                 title="Active",
-                url="https://github.com/example/alfred/pull/2",
+                url="https://github.com/example/opendot/pull/2",
                 updated_at=(now - timedelta(days=1)).isoformat().replace("+00:00", "Z"),
             ),
         ]

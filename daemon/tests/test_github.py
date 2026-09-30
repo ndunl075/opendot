@@ -17,9 +17,9 @@ def _notification(thread_id: str, updated_at: str, *, title: str = "Fix flaky te
         "subject": {
             "title": title,
             "type": "PullRequest",
-            "url": "https://api.github.com/repos/example/alfred/pulls/42",
+            "url": "https://api.github.com/repos/example/opendot/pulls/42",
         },
-        "repository": {"full_name": "example/alfred"},
+        "repository": {"full_name": "example/opendot"},
     }
 
 
@@ -42,7 +42,7 @@ def test_github_sync_stores_only_notification_brief_fields(tmp_path: Path) -> No
             "SELECT payload_json, active FROM connector_records WHERE connector = 'github' AND record_id = '1'"
         ).fetchone()
         assert record["active"] == 1
-        assert "https://github.com/example/alfred/pull/42" in record["payload_json"]
+        assert "https://github.com/example/opendot/pull/42" in record["payload_json"]
         assert connection.execute("SELECT last_success_at FROM sync_state WHERE connector = 'github'").fetchone()[0]
 
 
@@ -84,7 +84,7 @@ def test_github_issue_creation_is_previewed_then_approval_gated_and_replayed(tmp
 
         def create_issue(self, *, repository: str, title: str, body: str | None) -> dict:
             self.calls.append((repository, title, body))
-            return {"number": 42, "html_url": "https://github.com/example/alfred/issues/42"}
+            return {"number": 42, "html_url": "https://github.com/example/opendot/issues/42"}
 
         def find_issue_by_marker(self, *, repository: str, marker: str) -> dict | None:
             return None
@@ -94,20 +94,20 @@ def test_github_issue_creation_is_previewed_then_approval_gated_and_replayed(tmp
     write = FakeGitHubWrite()
     actions = GitHubActions(database, approvals, write)
     proposal = actions.propose_issue(
-        actor="nico", repository="example/alfred", title="Add a safe action", body="Please add it."
+        actor="sam", repository="example/opendot", title="Add a safe action", body="Please add it."
     )
-    assert proposal.preview == {"repository": "example/alfred", "title": "Add a safe action", "body": "Please add it."}
+    assert proposal.preview == {"repository": "example/opendot", "title": "Add a safe action", "body": "Please add it."}
     assert write.calls == []
 
-    issued = approvals.approve(proposal.id, actor="nico")
-    first = actions.execute(proposal.id, actor="nico", token=issued.token)
-    second = actions.execute(proposal.id, actor="nico", token=issued.token)
+    issued = approvals.approve(proposal.id, actor="sam")
+    first = actions.execute(proposal.id, actor="sam", token=issued.token)
+    second = actions.execute(proposal.id, actor="sam", token=issued.token)
 
     assert first.replayed is False
     assert second.replayed is True
     assert second.issue_number == 42
     assert write.calls == [
-        ("example/alfred", "Add a safe action", f"Please add it.\n\n<!-- alfred-action:{proposal.id} -->")
+        ("example/opendot", "Add a safe action", f"Please add it.\n\n<!-- opendot-action:{proposal.id} -->")
     ]
 
 
@@ -116,12 +116,12 @@ def test_github_issue_proposal_rejects_unscoped_repository_and_wrong_approval(tm
     approvals = ApprovalService(database)
     actions = GitHubActions(database, approvals)
     with pytest.raises(ValueError, match="owner/repository"):
-        actions.propose_issue(actor="nico", repository="https://github.com/example/alfred", title="No")
+        actions.propose_issue(actor="sam", repository="https://github.com/example/opendot", title="No")
 
-    unrelated = approvals.propose(actor="nico", action_type="send_message", preview={})
-    issued = approvals.approve(unrelated.id, actor="nico")
+    unrelated = approvals.propose(actor="sam", action_type="send_message", preview={})
+    issued = approvals.approve(unrelated.id, actor="sam")
     with pytest.raises(PolicyError, match="not for GitHub"):
-        actions.execute(unrelated.id, actor="nico", token=issued.token)
+        actions.execute(unrelated.id, actor="sam", token=issued.token)
     assert approvals.get(unrelated.id).state == "approved"
 
 
@@ -137,40 +137,40 @@ def test_github_client_posts_only_title_and_optional_body_to_issue_endpoint() ->
 
     client = GitHubClient("TOKEN", transport=httpx.MockTransport(capture))
     try:
-        assert client.create_issue(repository="example/alfred", title="Issue", body=None)["number"] == 3
+        assert client.create_issue(repository="example/opendot", title="Issue", body=None)["number"] == 3
     finally:
         client.close()
-    assert seen == {"path": "/repos/example/alfred/issues", "body": '{"title":"Issue"}'}
+    assert seen == {"path": "/repos/example/opendot/issues", "body": '{"title":"Issue"}'}
 
 
 def test_github_client_recovers_an_issue_by_its_hidden_marker() -> None:
-    marker = "<!-- alfred-action:123 -->"
+    marker = "<!-- opendot-action:123 -->"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path == "/search/issues"
-        assert request.url.params["q"] == f"repo:example/alfred type:issue in:body {marker}"
+        assert request.url.params["q"] == f"repo:example/opendot type:issue in:body {marker}"
         return httpx.Response(200, json={"items": [{"number": 3, "body": f"Original\n\n{marker}"}]})
 
     client = GitHubClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
-        assert client.find_issue_by_marker(repository="example/alfred", marker=marker)["number"] == 3
+        assert client.find_issue_by_marker(repository="example/opendot", marker=marker)["number"] == 3
     finally:
         client.close()
 
 
 def test_github_client_recovers_a_pr_comment_by_its_hidden_marker() -> None:
-    marker = "<!-- alfred-pr-comment:123 -->"
+    marker = "<!-- opendot-pr-comment:123 -->"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/repos/example/alfred/issues/2/comments"
+        assert request.url.path == "/repos/example/opendot/issues/2/comments"
         assert request.url.params["per_page"] == "100"
         return httpx.Response(200, json=[{"id": 9, "body": f"Looks good.\n\n{marker}"}])
 
     client = GitHubClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
-        assert client.find_pr_comment_by_marker(repository="example/alfred", pull_number=2, marker=marker)["id"] == 9
+        assert client.find_pr_comment_by_marker(repository="example/opendot", pull_number=2, marker=marker)["id"] == 9
     finally:
         client.close()
 
@@ -184,23 +184,23 @@ def test_github_issue_recovers_after_provider_success_before_local_receipt(tmp_p
         def create_issue(self, *, repository, title, body):
             self.calls += 1
             self.marker = body.split("\n\n")[-1]
-            raise ConnectionError("Alfred crashed before it received GitHub's response")
+            raise ConnectionError("OpenDot crashed before it received GitHub's response")
 
         def find_issue_by_marker(self, *, repository, marker):
             assert marker == self.marker
-            return {"number": 42, "html_url": "https://github.com/example/alfred/issues/42", "body": marker}
+            return {"number": 42, "html_url": "https://github.com/example/opendot/issues/42", "body": marker}
 
     database = Database(tmp_path / "opendot.db")
     approvals = ApprovalService(database)
     transport = CrashAfterProviderSuccess()
     proposal = GitHubActions(database, approvals).propose_issue(
-        actor="nico", repository="example/alfred", title="Recover me", body=None
+        actor="sam", repository="example/opendot", title="Recover me", body=None
     )
-    issued = approvals.approve(proposal.id, actor="nico")
+    issued = approvals.approve(proposal.id, actor="sam")
     with pytest.raises(ConnectionError):
-        GitHubActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+        GitHubActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
 
-    recovered = GitHubActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+    recovered = GitHubActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
     assert recovered.issue_number == 42
     assert recovered.replayed is False
     assert transport.calls == 1
@@ -217,26 +217,26 @@ def test_github_consumed_issue_without_provider_evidence_fails_closed(tmp_path: 
     database = Database(tmp_path / "opendot.db")
     approvals = ApprovalService(database)
     proposal = GitHubActions(database, approvals).propose_issue(
-        actor="nico", repository="example/alfred", title="Recover me", body=None
+        actor="sam", repository="example/opendot", title="Recover me", body=None
     )
-    issued = approvals.approve(proposal.id, actor="nico")
-    approvals.consume(proposal.id, actor="nico", token=issued.token)
+    issued = approvals.approve(proposal.id, actor="sam")
+    approvals.consume(proposal.id, actor="sam", token=issued.token)
     with pytest.raises(RuntimeError, match="outcome is unknown"):
-        GitHubActions(database, approvals, MissingIssue()).execute(proposal.id, actor="nico", token=issued.token)
+        GitHubActions(database, approvals, MissingIssue()).execute(proposal.id, actor="sam", token=issued.token)
 
 
 def test_pr_comment_is_approval_gated(tmp_path: Path) -> None:
     class Fake:
         def __init__(self): self.calls = []
-        def create_pr_comment(self, **kwargs): self.calls.append(kwargs); return {"id": 9, "html_url": "https://github.com/example/alfred/pull/2#issuecomment-9"}
+        def create_pr_comment(self, **kwargs): self.calls.append(kwargs); return {"id": 9, "html_url": "https://github.com/example/opendot/pull/2#issuecomment-9"}
         def find_pr_comment_by_marker(self, **kwargs): return None
     database = Database(tmp_path / "opendot.db"); approvals = ApprovalService(database); fake = Fake()
     actions = GitHubActions(database, approvals, fake)
-    proposal = actions.propose_pr_comment(actor="nico", repository="example/alfred", pull_number=2, body="Looks good.")
+    proposal = actions.propose_pr_comment(actor="sam", repository="example/opendot", pull_number=2, body="Looks good.")
     assert fake.calls == []
-    issued = approvals.approve(proposal.id, actor="nico")
-    assert actions.execute_pr_comment(proposal.id, actor="nico", token=issued.token).issue_number == 9
-    assert fake.calls == [{"repository": "example/alfred", "pull_number": 2, "body": f"Looks good.\n\n<!-- alfred-pr-comment:{proposal.id} -->"}]
+    issued = approvals.approve(proposal.id, actor="sam")
+    assert actions.execute_pr_comment(proposal.id, actor="sam", token=issued.token).issue_number == 9
+    assert fake.calls == [{"repository": "example/opendot", "pull_number": 2, "body": f"Looks good.\n\n<!-- opendot-pr-comment:{proposal.id} -->"}]
 
 
 def test_github_pr_comment_recovers_after_provider_success_before_local_receipt(tmp_path: Path) -> None:
@@ -244,20 +244,20 @@ def test_github_pr_comment_recovers_after_provider_success_before_local_receipt(
         def __init__(self) -> None: self.marker: str | None = None
         def create_pr_comment(self, **kwargs):
             self.marker = kwargs["body"].split("\n\n")[-1]
-            raise ConnectionError("Alfred crashed before it received GitHub's response")
+            raise ConnectionError("OpenDot crashed before it received GitHub's response")
         def find_pr_comment_by_marker(self, **kwargs):
             assert kwargs["marker"] == self.marker
-            return {"id": 9, "html_url": "https://github.com/example/alfred/pull/2#issuecomment-9"}
+            return {"id": 9, "html_url": "https://github.com/example/opendot/pull/2#issuecomment-9"}
 
     database = Database(tmp_path / "opendot.db")
     approvals = ApprovalService(database)
     transport = CrashAfterProviderSuccess()
     proposal = GitHubActions(database, approvals).propose_pr_comment(
-        actor="nico", repository="example/alfred", pull_number=2, body="Looks good."
+        actor="sam", repository="example/opendot", pull_number=2, body="Looks good."
     )
-    issued = approvals.approve(proposal.id, actor="nico")
+    issued = approvals.approve(proposal.id, actor="sam")
     with pytest.raises(ConnectionError):
-        GitHubActions(database, approvals, transport).execute_pr_comment(proposal.id, actor="nico", token=issued.token)
-    recovered = GitHubActions(database, approvals, transport).execute_pr_comment(proposal.id, actor="nico", token=issued.token)
+        GitHubActions(database, approvals, transport).execute_pr_comment(proposal.id, actor="sam", token=issued.token)
+    recovered = GitHubActions(database, approvals, transport).execute_pr_comment(proposal.id, actor="sam", token=issued.token)
     assert recovered.issue_number == 9
     assert recovered.replayed is False

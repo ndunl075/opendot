@@ -10,7 +10,7 @@ The correction was already in the chat. "you missed the one from sam", "that's
 the wrong week", "thanks, perfect" -- people say what they think of an answer
 in the next message whether or not a keyboard is attached. This module reads
 those sentences, plus one thing the owner cannot see at all: whether the
-context Alfred answered *from* was actually current.
+context OpenDot answered *from* was actually current.
 
 Two detectors, deliberately different in kind:
 
@@ -19,7 +19,7 @@ three outcomes the buttons recorded. Rules, not a model call: this runs inside
 Telegram intake's write transaction, where a model round trip is not an
 option, and a rule that fires on "you forgot" is also a rule that can be read,
 tested, and argued with -- which matters more here than recall, because a
-wrong verdict quietly reorders what Alfred shows next.
+wrong verdict quietly reorders what OpenDot shows next.
 
 ``detect_context_gap`` grades the pack a reply was built from. A source that
 has never synced, or last synced a day ago, means the answer was written from
@@ -42,7 +42,7 @@ from datetime import UTC, datetime, timedelta
 from pydantic import BaseModel
 
 #: Where a verdict came from. Kept in the row so a metric can separate what the
-#: owner said from what Alfred inferred about itself, and so ranking can prefer
+#: owner said from what OpenDot inferred about itself, and so ranking can prefer
 #: the stronger signal when one response collects more than one.
 SIGNAL_BUTTON = "button"
 SIGNAL_REPLY = "reply"
@@ -71,7 +71,7 @@ Rule = tuple[str, re.Pattern[str]]
 
 
 #: The answer was wrong, not merely incomplete. Each pattern needs an explicit
-#: statement of wrongness; none of them fire on a bare "no", because Alfred's
+#: statement of wrongness; none of them fire on a bare "no", because OpenDot's
 #: own replies end with offers ("want me to add anything?") and "no i'm good"
 #: declines an offer rather than disputing a fact.
 _WRONG_CONTEXT_RULES: tuple[Rule, ...] = (
@@ -137,7 +137,7 @@ _WRONG_CONTEXT_RULES: tuple[Rule, ...] = (
 )
 
 #: The answer was right as far as it went and left something out. Every rule
-#: names an omission by Alfred; a bare "what about tomorrow" is excluded on
+#: names an omission by OpenDot; a bare "what about tomorrow" is excluded on
 #: purpose, since that is usually the next question rather than a complaint
 #: about the last answer.
 _MISSING_CONTEXT_RULES: tuple[Rule, ...] = (
@@ -271,7 +271,7 @@ def detect_context_gap(
     Freshness is each connector's own last successful sync, recorded in the
     same trace that names the sources. A source in the pack with no successful
     sync behind it, or one a full day stale, means the reply described a state
-    of the world Alfred had already lost track of. That is missing context by
+    of the world OpenDot had already lost track of. That is missing context by
     definition, and unlike a wrong date it leaves no trace the owner could
     notice and complain about.
     """

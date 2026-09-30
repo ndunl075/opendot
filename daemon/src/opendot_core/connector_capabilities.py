@@ -4,7 +4,7 @@ Section 3's connector contract says every connector "declares read/write
 capabilities, OAuth scopes, sensitivity, polling/webhook support, and rate
 limits". Nothing declared any of it. `connector_health.py` answers *is it
 working*; there was no answer at all to *what can it do* -- so the only way
-to establish whether Canvas can write, or which Google scopes are actually
+to establish whether a connector can write, or which Google scopes are actually
 requested, or which connector stores `sensitive` data, was to read the
 source of eight modules and infer it.
 
@@ -34,7 +34,7 @@ Transport = Literal["poll", "push", "local"]
 class ConnectorCapability(BaseModel):
     """One connector's declared surface.
 
-    ``writes`` means the connector can change something outside Alfred. It
+    ``writes`` means the connector can change something outside OpenDot. It
     does *not* mean it can do so unattended: every write here goes through the
     propose/approve/commit path in section 8, which is why ``write_actions``
     lists the proposal tools rather than raw API calls.
@@ -48,10 +48,10 @@ class ConnectorCapability(BaseModel):
     scopes: tuple[str, ...] = ()
     sensitivity: Sensitivity = "personal"
     transport: Transport = "poll"
-    #: How much this connector asks of a provider per sync. Alfred does no
+    #: How much this connector asks of a provider per sync. OpenDot does no
     #: quota accounting, so this describes the bound that keeps usage small
     #: -- the page size actually requested and anything capping a single
-    #: sync -- rather than a limit Alfred enforces. On top of this, a failing
+    #: sync -- rather than a limit OpenDot enforces. On top of this, a failing
     #: connector backs off exponentially (30s doubling, capped at its own
     #: interval), so a dead provider is not retried every runner cycle.
     rate_limit: str = "one bounded read per sync interval"
@@ -80,7 +80,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         connector="google_calendar_history",
         rate_limit="one bounded window read, on its own longer interval",
-        summary="Bounded past events, read once and reused for academic history.",
+        summary="Bounded past events, read once and reused for Calendar history.",
         scopes=("https://www.googleapis.com/auth/calendar.calendarlist.readonly",),
     ),
     ConnectorCapability(
@@ -101,7 +101,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         connector="gmail_inbound",
         rate_limit="one bounded unread query per interval, allowlisted sender only",
-        summary="Commands emailed to Alfred from one allowlisted sender.",
+        summary="Commands emailed to OpenDot from one allowlisted sender.",
         scopes=("https://www.googleapis.com/auth/gmail.readonly",),
         notes="Read-only by construction: an inbound message can create work, never authorize it.",
     ),
@@ -115,23 +115,6 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         notes="Writes recover through hidden exact body markers, so a retry cannot double-post.",
     ),
     ConnectorCapability(
-        connector="canvas",
-        rate_limit="one upcoming/missing query per interval",
-        summary="Upcoming and missing coursework via an institution-issued token.",
-        scopes=("institution-issued Canvas personal token",),
-        notes="Read-only. Stores assignments and missing-submission state, never grades or files.",
-    ),
-    ConnectorCapability(
-        connector="canvas_ical",
-        rate_limit="one conditional GET per interval; ETag/Last-Modified usually make it a 304",
-        summary="Degraded read-only coursework when Canvas API tokens are disabled.",
-        scopes=("private iCalendar feed URL (a bearer secret)",),
-        notes=(
-            "Bounded full snapshots with ETag/Last-Modified validators. The feed URL never "
-            "reaches SQLite or the audit log. Not API parity: no grades, submissions, or To Do state."
-        ),
-    ),
-    ConnectorCapability(
         connector="composio",
         rate_limit="100k tool calls per UTC month on the free tier (hard cap); locally counted in tool_runs",
         summary="Overflow apps Composio hosts (Notion, Spotify, Linear, …), not first-party connectors.",
@@ -139,25 +122,9 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         write_actions=("composio_execute",),
         scopes=("Composio API key in the OS keyring; connected-account tokens stay at Composio",),
         notes=(
-            "Gmail, Calendar, GitHub, Slack, Telegram, and Fitbit stay first-party. "
+            "Gmail, Calendar, GitHub, Slack and Telegram stay first-party. "
             "Reads run now; writes preview and wait for Telegram approval. "
-            "Do not point Hermes at Composio's hosted MCP URL — YOLO would auto-approve."
-        ),
-    ),
-    ConnectorCapability(
-        connector="google_health",
-        rate_limit="one bounded lookback read per interval",
-        summary="Sleep, activity, and heart metrics from a wearable-linked account.",
-        scopes=(
-            "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
-            "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
-            "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
-        ),
-        sensitivity="sensitive",
-        notes=(
-            "The only connector storing `sensitive` data, so client scopes exclude it by default. "
-            "Opt in with `alfred google-auth --include-health`. Syncs steps, sleep sessions, and "
-            "daily resting heart rate -- not sample-level BPM, which is too dense for the event log."
+            "Do not point an agent at Composio's hosted MCP URL: it would auto-approve writes."
         ),
     ),
     ConnectorCapability(
@@ -185,14 +152,14 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         rate_limit="local filesystem scan; no provider involved",
         summary="User-authored Markdown notes imported as confirmed memory.",
         transport="local",
-        notes="Alfred never writes back to an imported file; projections go only to Generated/.",
+        notes="OpenDot never writes back to an imported file; projections go only to Generated/.",
     ),
     ConnectorCapability(
         connector="people",
-        rate_limit="reads Alfred's own tables only; no provider involved",
+        rate_limit="reads OpenDot's own tables only; no provider involved",
         summary="Person entities derived from calendar identities already synced.",
         transport="local",
-        notes="Reads Alfred's own tables only; reaches no provider and creates nothing confirmed.",
+        notes="Reads OpenDot's own tables only; reaches no provider and creates nothing confirmed.",
     ),
 )
 
@@ -205,7 +172,7 @@ def capability_for(connector: str) -> ConnectorCapability | None:
 
 
 def writing_connectors() -> tuple[str, ...]:
-    """Every connector that can change something outside Alfred."""
+    """Every connector that can change something outside OpenDot."""
     return tuple(item.connector for item in CONNECTOR_CAPABILITIES if item.writes)
 
 

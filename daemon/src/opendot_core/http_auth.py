@@ -1,4 +1,4 @@
-"""Shared loopback bearer-token auth for Alfred's local HTTP surfaces.
+"""Shared loopback bearer-token auth for OpenDot's local HTTP surfaces.
 
 Used by the Streamable HTTP MCP transport (``mcp_server.run_streamable_http``)
 and the admin UI (``admin_ui.py``) so "authenticate every request, outside

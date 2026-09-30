@@ -2,7 +2,7 @@
 
 Slack Socket Mode is intentionally limited to direct, locally paired message
 surfaces.  The Socket Mode SDK owns the authenticated WebSocket and reconnects;
-this module owns Alfred's event provenance, pairing, idempotency, and outbox.
+this module owns OpenDot's event provenance, pairing, idempotency, and outbox.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ class SlackTransport(Protocol):
 
 
 class SlackGateway:
-    """Translate a paired human Slack message into a durable Alfred intent."""
+    """Translate a paired human Slack message into a durable OpenDot intent."""
 
     def __init__(self, database: Database, allowed_pairs: set[SlackPair]) -> None:
         self.database = database
@@ -66,7 +66,7 @@ class SlackGateway:
         if not event.user or not event.channel or not event.text or not event.ts:
             return SlackReceipt(text="Ignored incomplete Slack message event.", ignored=True)
         if SlackPair(channel_id=event.channel, user_id=event.user) not in self.allowed_pairs:
-            raise PermissionError("Slack sender is not locally paired with Alfred")
+            raise PermissionError("Slack sender is not locally paired with OpenDot")
 
         self.database.migrate()
         timestamp = occurred_at or datetime.now(UTC)

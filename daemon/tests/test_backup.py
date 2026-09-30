@@ -19,9 +19,9 @@ def test_encrypted_backup_restores_only_after_approval(tmp_path: Path) -> None:
 
     created = service.create(backup, encoded_key=key)
     graph.remember("After backup.")
-    proposal = service.propose_restore(backup, actor="nico")
-    issued = approvals.approve(proposal.id, actor="nico")
-    restored = service.execute_restore(proposal.id, actor="nico", token=issued.token, encoded_key=key)
+    proposal = service.propose_restore(backup, actor="sam")
+    issued = approvals.approve(proposal.id, actor="sam")
+    restored = service.execute_restore(proposal.id, actor="sam", token=issued.token, encoded_key=key)
 
     assert created.sha256 == restored.backup_sha256
     assert graph.get_memory(original.id).statement == "Before backup."
@@ -36,11 +36,11 @@ def test_backup_restore_rejects_changed_file(tmp_path: Path) -> None:
     backup = tmp_path / "opendot_core.backup"
     key = service.generate_key()
     service.create(backup, encoded_key=key)
-    proposal = service.propose_restore(backup, actor="nico")
+    proposal = service.propose_restore(backup, actor="sam")
     backup.write_bytes(backup.read_bytes() + b"changed")
-    issued = approvals.approve(proposal.id, actor="nico")
+    issued = approvals.approve(proposal.id, actor="sam")
     with pytest.raises(ValueError, match="changed after"):
-        service.execute_restore(proposal.id, actor="nico", token=issued.token, encoded_key=key)
+        service.execute_restore(proposal.id, actor="sam", token=issued.token, encoded_key=key)
 
 
 def _service(tmp_path: Path) -> tuple[EncryptedBackupService, Database]:
@@ -132,11 +132,11 @@ def test_a_drill_leaves_no_temporary_files_behind(tmp_path: Path) -> None:
 def test_latest_backup_picks_the_newest_by_timestamped_name(tmp_path: Path) -> None:
     from opendot_core.backup import latest_backup
 
-    for name in ("alfred-20260101-000000", "alfred-20260814-023001", "alfred-20260501-120000"):
+    for name in ("opendot-20260101-000000", "opendot-20260814-023001", "opendot-20260501-120000"):
         (tmp_path / f"{name}.opendot-backup").write_bytes(b"x")
     (tmp_path / "notes.txt").write_bytes(b"ignored")
 
-    assert latest_backup(tmp_path).name == "alfred-20260814-023001.opendot-backup"
+    assert latest_backup(tmp_path).name == "opendot-20260814-023001.opendot-backup"
 
 
 def test_latest_backup_is_explicit_when_there_is_nothing_to_verify(tmp_path: Path) -> None:

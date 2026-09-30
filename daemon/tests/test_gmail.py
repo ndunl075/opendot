@@ -38,7 +38,7 @@ class FakeGmail:
 def test_the_run_loop_bounds_the_unread_limit_below_the_one_shot_default() -> None:
     """Each sync blocks the single-threaded run loop, and against a real
     account 500 unread measured at 45s versus 7s for 50. The one-shot
-    gmail-sync command keeps its larger default; only `alfred run` bounds it."""
+    gmail-sync command keeps its larger default; only `opendot run` bounds it."""
     from opendot_core.cli import build_parser
 
     assert build_parser().parse_args(["run"]).gmail_unread_limit == 50
@@ -114,7 +114,7 @@ def test_gmail_client_lists_then_fetches_metadata_only() -> None:
 
 def test_gmail_client_paginates_past_the_old_twenty_page_cap() -> None:
     """Regression test: a real unread backlog larger than 2,000 messages
-    used to hard-fail at 20 pages; the cap now matches CanvasClient's own
+    used to hard-fail at 20 pages; the cap now matches the page cap's own
     100-page limit elsewhere in this codebase."""
     total_pages = 25
     calls = {"list": 0}
@@ -190,14 +190,14 @@ def test_gmail_client_create_draft_sends_a_valid_rfc2822_message() -> None:
         raw = base64.urlsafe_b64decode(payload["message"]["raw"]).decode("utf-8")
         assert "To: advisor@school.example" in raw
         assert "Subject: Question" in raw
-        assert "Message-ID: <alfred-test@local.invalid>" in raw
+        assert "Message-ID: <opendot-test@local.invalid>" in raw
         assert "Quick question about the deadline." in raw
         return httpx.Response(200, json={"id": "draft1"})
 
     client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
         created = client.create_draft(
-            message_id="<alfred-test@local.invalid>",
+            message_id="<opendot-test@local.invalid>",
             to="advisor@school.example",
             subject="Question",
             body="Quick question about the deadline.",
@@ -213,7 +213,7 @@ def test_gmail_client_recovers_a_draft_by_its_stable_message_id() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, request.url.path))
         if request.url.path == "/gmail/v1/users/me/messages":
-            assert request.url.params["q"] == "rfc822msgid:<alfred-test@local.invalid>"
+            assert request.url.params["q"] == "rfc822msgid:<opendot-test@local.invalid>"
             return httpx.Response(200, json={"messages": [{"id": "message-1"}]})
         assert request.url.path == "/gmail/v1/users/me/drafts"
         assert request.url.params["maxResults"] == "500"
@@ -221,7 +221,7 @@ def test_gmail_client_recovers_a_draft_by_its_stable_message_id() -> None:
 
     client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
-        recovered = client.find_draft_by_message_id(message_id="<alfred-test@local.invalid>")
+        recovered = client.find_draft_by_message_id(message_id="<opendot-test@local.invalid>")
     finally:
         client.close()
     assert recovered == {"id": "draft-1"}
@@ -232,12 +232,12 @@ def test_gmail_client_recovers_a_sent_message_by_its_stable_message_id() -> None
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path == "/gmail/v1/users/me/messages"
-        assert request.url.params["q"] == "rfc822msgid:<alfred-send-test@local.invalid> in:sent"
+        assert request.url.params["q"] == "rfc822msgid:<opendot-send-test@local.invalid> in:sent"
         return httpx.Response(200, json={"messages": [{"id": "sent-1"}]})
 
     client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
-        assert client.find_sent_message_by_message_id(message_id="<alfred-send-test@local.invalid>") == {"id": "sent-1"}
+        assert client.find_sent_message_by_message_id(message_id="<opendot-send-test@local.invalid>") == {"id": "sent-1"}
     finally:
         client.close()
 
@@ -248,13 +248,13 @@ def test_gmail_client_send_uses_the_messages_send_endpoint() -> None:
         raw = base64.urlsafe_b64decode(json.loads(request.read())["raw"]).decode("utf-8")
         assert "To: advisor@school.example" in raw
         assert "Subject: Approved update" in raw
-        assert "Message-ID: <alfred-send-test@local.invalid>" in raw
+        assert "Message-ID: <opendot-send-test@local.invalid>" in raw
         return httpx.Response(200, json={"id": "sent1"})
 
     client = GmailClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
         assert client.send_message(
-            message_id="<alfred-send-test@local.invalid>", to="advisor@school.example", subject="Approved update", body="Thanks."
+            message_id="<opendot-send-test@local.invalid>", to="advisor@school.example", subject="Approved update", body="Thanks."
         )["id"] == "sent1"
     finally:
         client.close()
@@ -290,19 +290,19 @@ def test_gmail_draft_is_never_created_without_a_consumed_approval(tmp_path: Path
     transport = FakeDraftTransport()
     actions = GmailActions(database, approvals)
 
-    proposed = actions.propose_draft(actor="nico", to="advisor@school.example", subject="Question", body="Quick question.")
+    proposed = actions.propose_draft(actor="sam", to="advisor@school.example", subject="Question", body="Quick question.")
     assert transport.calls == []  # proposing alone must never touch Gmail
 
     with pytest.raises(PolicyError, match="not usable"):
-        GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token="not-a-real-token")
+        GmailActions(database, approvals, transport).execute(proposed.id, actor="sam", token="not-a-real-token")
     assert transport.calls == []
 
-    issued = approvals.approve(proposed.id, actor="nico")
-    receipt = GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+    issued = approvals.approve(proposed.id, actor="sam")
+    receipt = GmailActions(database, approvals, transport).execute(proposed.id, actor="sam", token=issued.token)
 
     assert receipt.replayed is False
     assert receipt.draft_id == "draft-1"
-    assert transport.calls == [{"message_id": f"<alfred-{proposed.id}@local.invalid>", "to": "advisor@school.example", "subject": "Question", "body": "Quick question."}]
+    assert transport.calls == [{"message_id": f"<opendot-{proposed.id}@local.invalid>", "to": "advisor@school.example", "subject": "Question", "body": "Quick question."}]
 
 
 def test_gmail_execute_replays_the_receipt_instead_of_creating_twice(tmp_path: Path) -> None:
@@ -310,12 +310,12 @@ def test_gmail_execute_replays_the_receipt_instead_of_creating_twice(tmp_path: P
     approvals = ApprovalService(database)
     transport = FakeDraftTransport()
     proposed = GmailActions(database, approvals).propose_draft(
-        actor="nico", to="advisor@school.example", subject="Question", body="Quick question."
+        actor="sam", to="advisor@school.example", subject="Question", body="Quick question."
     )
-    issued = approvals.approve(proposed.id, actor="nico")
+    issued = approvals.approve(proposed.id, actor="sam")
 
-    first = GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
-    second = GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+    first = GmailActions(database, approvals, transport).execute(proposed.id, actor="sam", token=issued.token)
+    second = GmailActions(database, approvals, transport).execute(proposed.id, actor="sam", token=issued.token)
 
     assert first.replayed is False
     assert second.replayed is True
@@ -325,7 +325,7 @@ def test_gmail_execute_replays_the_receipt_instead_of_creating_twice(tmp_path: P
     with pytest.raises(PolicyError, match="does not match"):
         GmailActions(database, approvals, transport).execute(proposed.id, actor="someone-else", token=issued.token)
     with pytest.raises(PolicyError, match="invalid"):
-        GmailActions(database, approvals, transport).execute(proposed.id, actor="nico", token="wrong-token")
+        GmailActions(database, approvals, transport).execute(proposed.id, actor="sam", token="wrong-token")
 
 
 def test_gmail_draft_recovers_after_provider_success_before_local_receipt(tmp_path: Path) -> None:
@@ -337,7 +337,7 @@ def test_gmail_draft_recovers_after_provider_success_before_local_receipt(tmp_pa
         def create_draft(self, *, message_id, to, subject, body):
             self.calls += 1
             self.message_id = message_id
-            raise ConnectionError("Alfred crashed before it received Gmail's response")
+            raise ConnectionError("OpenDot crashed before it received Gmail's response")
 
         def find_draft_by_message_id(self, *, message_id):
             assert message_id == self.message_id
@@ -347,13 +347,13 @@ def test_gmail_draft_recovers_after_provider_success_before_local_receipt(tmp_pa
     approvals = ApprovalService(database)
     transport = CrashAfterProviderSuccess()
     proposal = GmailActions(database, approvals).propose_draft(
-        actor="nico", to="advisor@school.example", subject="Question", body="Quick question."
+        actor="sam", to="advisor@school.example", subject="Question", body="Quick question."
     )
-    issued = approvals.approve(proposal.id, actor="nico")
+    issued = approvals.approve(proposal.id, actor="sam")
     with pytest.raises(ConnectionError):
-        GmailActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+        GmailActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
 
-    recovered = GmailActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+    recovered = GmailActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
     assert recovered.draft_id == "draft-recovered"
     assert recovered.replayed is False
     assert transport.calls == 1
@@ -364,13 +364,13 @@ def test_gmail_consumed_draft_without_provider_evidence_fails_closed(tmp_path: P
     approvals = ApprovalService(database)
     transport = FakeDraftTransport()
     proposal = GmailActions(database, approvals).propose_draft(
-        actor="nico", to="advisor@school.example", subject="Question", body="Quick question."
+        actor="sam", to="advisor@school.example", subject="Question", body="Quick question."
     )
-    issued = approvals.approve(proposal.id, actor="nico")
-    approvals.consume(proposal.id, actor="nico", token=issued.token)
+    issued = approvals.approve(proposal.id, actor="sam")
+    approvals.consume(proposal.id, actor="sam", token=issued.token)
 
     with pytest.raises(RuntimeError, match="outcome is unknown"):
-        GmailActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+        GmailActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
     assert transport.calls == []
 
 
@@ -379,12 +379,12 @@ def test_gmail_send_is_approval_gated_and_replayed_once(tmp_path: Path) -> None:
     approvals = ApprovalService(database)
     transport = FakeSendTransport()
     proposed = GmailSendActions(database, approvals).propose_send(
-        actor="nico", to="advisor@school.example", subject="Update", body="Approved body."
+        actor="sam", to="advisor@school.example", subject="Update", body="Approved body."
     )
     assert transport.calls == []
-    issued = approvals.approve(proposed.id, actor="nico")
-    first = GmailSendActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
-    second = GmailSendActions(database, approvals, transport).execute(proposed.id, actor="nico", token=issued.token)
+    issued = approvals.approve(proposed.id, actor="sam")
+    first = GmailSendActions(database, approvals, transport).execute(proposed.id, actor="sam", token=issued.token)
+    second = GmailSendActions(database, approvals, transport).execute(proposed.id, actor="sam", token=issued.token)
     assert first.message_id == "sent-1"
     assert second.replayed is True
     assert len(transport.calls) == 1
@@ -397,7 +397,7 @@ def test_gmail_send_recovers_after_provider_success_before_local_receipt(tmp_pat
 
         def send_message(self, *, message_id, to, subject, body):
             self.message_id = message_id
-            raise ConnectionError("Alfred crashed before it received Gmail's response")
+            raise ConnectionError("OpenDot crashed before it received Gmail's response")
 
         def find_sent_message_by_message_id(self, *, message_id):
             assert message_id == self.message_id
@@ -407,12 +407,12 @@ def test_gmail_send_recovers_after_provider_success_before_local_receipt(tmp_pat
     approvals = ApprovalService(database)
     transport = CrashAfterProviderSuccess()
     proposal = GmailSendActions(database, approvals).propose_send(
-        actor="nico", to="advisor@school.example", subject="Update", body="Approved body."
+        actor="sam", to="advisor@school.example", subject="Update", body="Approved body."
     )
-    issued = approvals.approve(proposal.id, actor="nico")
+    issued = approvals.approve(proposal.id, actor="sam")
     with pytest.raises(ConnectionError):
-        GmailSendActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+        GmailSendActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
 
-    recovered = GmailSendActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+    recovered = GmailSendActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
     assert recovered.message_id == "sent-recovered"
     assert recovered.replayed is False

@@ -164,8 +164,8 @@ def test_read_executes_immediately_and_write_proposes(tmp_path: Path) -> None:
     client = _client(database)
     actions = ComposioActions(database, approvals, client)
     try:
-        read = actions.execute_or_propose(actor="nico", slug="NOTION_FETCH_DATA", arguments={"q": "inbox"})
-        write = actions.execute_or_propose(actor="nico", slug="NOTION_CREATE_PAGE", arguments={"title": "Notes"})
+        read = actions.execute_or_propose(actor="sam", slug="NOTION_FETCH_DATA", arguments={"q": "inbox"})
+        write = actions.execute_or_propose(actor="sam", slug="NOTION_CREATE_PAGE", arguments={"title": "Notes"})
     finally:
         client.close()
 
@@ -182,10 +182,10 @@ def test_approved_write_is_idempotent(tmp_path: Path) -> None:
     client = _client(database)
     actions = ComposioActions(database, approvals, client)
     try:
-        proposal = actions.propose(actor="nico", slug="NOTION_CREATE_PAGE", arguments={"title": "Notes"})
-        issued = approvals.approve(proposal.id, actor="nico")
-        first = actions.execute(proposal.id, actor="nico", token=issued.token)
-        second = actions.execute(proposal.id, actor="nico", token=issued.token)
+        proposal = actions.propose(actor="sam", slug="NOTION_CREATE_PAGE", arguments={"title": "Notes"})
+        issued = approvals.approve(proposal.id, actor="sam")
+        first = actions.execute(proposal.id, actor="sam", token=issued.token)
+        second = actions.execute(proposal.id, actor="sam", token=issued.token)
     finally:
         client.close()
 
@@ -198,10 +198,10 @@ def test_approved_write_is_idempotent(tmp_path: Path) -> None:
 def test_execute_rejects_wrong_action_type(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     approvals = ApprovalService(database)
-    approval = approvals.propose(actor="nico", action_type="github_issue_create", preview={"title": "x"})
-    issued = approvals.approve(approval.id, actor="nico")
+    approval = approvals.propose(actor="sam", action_type="github_issue_create", preview={"title": "x"})
+    issued = approvals.approve(approval.id, actor="sam")
     with pytest.raises(PolicyError, match="Composio"):
-        ComposioActions(database, approvals, _client()).execute(approval.id, actor="nico", token=issued.token)
+        ComposioActions(database, approvals, _client()).execute(approval.id, actor="sam", token=issued.token)
 
 
 def test_quota_blocks_before_a_call_that_would_exceed_the_cap(tmp_path: Path) -> None:

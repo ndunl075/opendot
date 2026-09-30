@@ -1,0 +1,5 @@
+# Known fake token (AKIAABCDEFGHIJKLMNOP) in the redaction tests, found in
+# Alfred's history. Do not add real findings here.
+4d193164c67fe49b0f96667b400fdeaaa72f0efc:tests/test_models.py:aws-access-token:165
+e19c8f50584d8a5bda33184453bc10260f82fbcd:tests/test_models.py:aws-access-token:165
+974ec1a7f822c742dcff5f4e9e859cb315286900:tests/test_models.py:aws-access-token:165

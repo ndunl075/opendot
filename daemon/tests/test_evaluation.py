@@ -102,7 +102,7 @@ def test_a_quiet_connector_does_not_read_as_answers_the_owner_disliked(
 
     report = EvaluationService(database).report()
 
-    # Alfred flagging its own stale pack is connector health, not a verdict on
+    # OpenDot flagging its own stale pack is connector health, not a verdict on
     # the answer, so it is counted apart and cannot drag the helpful rate down.
     assert report.response_feedback.total == 1
     assert report.response_feedback.positive_rate == 1.0

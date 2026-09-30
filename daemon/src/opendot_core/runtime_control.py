@@ -1,35 +1,36 @@
-"""Runtime liveness, restart, and watchdog helpers for Alfred's always-on loop.
+"""Runtime liveness, restart, and watchdog helpers for OpenDot's always-on loop.
 
 Telegram `/status` and `/restart` work while the loop is alive. When it is
-dead or hung, a short Task Scheduler job runs `alfred watchdog-check`, which
-reads the heartbeat written each cycle, restarts the Windows service (or
-falls back to the configured `alfred run` command), and does a one-shot
-Telegram poll for `/wake` or `/restart` so the owner can nudge it from a
-phone without waiting for the next automatic check.
+dead or hung, the operating system's scheduler (cron, a systemd timer,
+launchd or Task Scheduler) can run `opendot watchdog-check`, which reads the
+heartbeat written each cycle, runs the restart command named by the
+`OPENDOT_RESTART_COMMAND` environment variable, and does a one-shot Telegram
+poll for `/wake` or `/restart` so the owner can nudge it from a phone without
+waiting for the next automatic check.
+
+Nothing here is tied to one operating system. Per-OS service installation
+lives in `service.py`; this module only needs a command that restarts the
+daemon.
 """
 
 from __future__ import annotations
 
 import json
-import platform
+import os
 import re
+import shlex
 import subprocess
-import sys
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Callable
 
 from pydantic import BaseModel
 
 from .db import Database
-from .winservice import _DEFAULT_ALFRED_DIR, load_configured_args
 
 RUNTIME_CONNECTOR = "runtime"
 RUNTIME_ACCOUNT = "runner"
 DEFAULT_STALE_SECONDS = 300.0
-RESTART_TASK_NAME = "AlfredRestart"
-WATCHDOG_TASK_NAME = "AlfredWatchdog"
-_SERVICE_NAME = "Alfred"
+RESTART_COMMAND_ENV = "OPENDOT_RESTART_COMMAND"
 _PAIR_PATTERN = re.compile(r"^(\d+):(\d+)$")
 
 
@@ -37,7 +38,6 @@ class RuntimeStatus(BaseModel):
     last_cycle_at: datetime | None
     seconds_since_cycle: float | None
     healthy: bool
-    service_state: str | None
     restart_requested_at: datetime | None
 
 
@@ -147,7 +147,6 @@ def runtime_status(
         last_cycle_at=last_cycle_at,
         seconds_since_cycle=seconds_since,
         healthy=healthy,
-        service_state=windows_service_state(),
         restart_requested_at=restart_requested_at,
     )
 
@@ -161,103 +160,40 @@ def format_runtime_status(status: RuntimeStatus) -> str:
     else:
         age = int(status.seconds_since_cycle or 0)
         line = f"opendot looks stalled or stopped. last cycle {age}s ago."
-    if status.service_state:
-        line += f" windows service: {status.service_state}."
     if status.restart_requested_at is not None:
         line += " restart is queued."
     return line
 
 
-def windows_service_state() -> str | None:
-    if platform.system() != "Windows":
-        return None
-    try:
-        completed = subprocess.run(
-            ["sc.exe", "query", _SERVICE_NAME],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
+def restart_daemon(
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> RestartResult:
+    """Run the operator's restart command (``OPENDOT_RESTART_COMMAND``).
+
+    The command is whatever restarts the daemon on this machine: for example
+    ``systemctl --user restart opendot`` on Linux or ``launchctl kickstart -k
+    gui/501/dev.opendot.daemon`` on macOS. It is split with :mod:`shlex` and run
+    without a shell.
+    """
+    raw = os.environ.get(RESTART_COMMAND_ENV, "").strip()
+    if not raw:
+        return RestartResult(
+            ok=False,
+            method="none",
+            detail=f"no restart path available; set {RESTART_COMMAND_ENV}",
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return "unavailable"
+    try:
+        completed = runner(shlex.split(raw), capture_output=True, text=True, check=False, timeout=60)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        return RestartResult(ok=False, method="restart_command", detail=str(error))
     if completed.returncode != 0:
-        return "not_installed"
-    output = completed.stdout.upper()
-    if "RUNNING" in output:
-        return "running"
-    if "STOPPED" in output:
-        return "stopped"
-    if "START_PENDING" in output:
-        return "starting"
-    if "STOP_PENDING" in output:
-        return "stopping"
-    return "unknown"
-
-
-def restart_alfred(
-    *,
-    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-) -> RestartResult:
-    """Try to restart Alfred through the registered restart task or Windows service."""
-    if platform.system() == "Windows":
-        task = runner(
-            ["schtasks.exe", "/Run", "/TN", RESTART_TASK_NAME],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
+        return RestartResult(
+            ok=False,
+            method="restart_command",
+            detail=(completed.stderr or completed.stdout or "restart command failed").strip(),
         )
-        if task.returncode == 0:
-            return RestartResult(ok=True, method="scheduled_task", detail=RESTART_TASK_NAME)
-        service_state = windows_service_state()
-        if service_state == "running":
-            stop = runner(["sc.exe", "stop", _SERVICE_NAME], capture_output=True, text=True, check=False, timeout=60)
-            if stop.returncode != 0:
-                return RestartResult(
-                    ok=False,
-                    method="service_stop",
-                    detail=(stop.stderr or stop.stdout or "stop failed").strip(),
-                )
-        if service_state in {"running", "stopped", "starting", "stopping"}:
-            start = runner(["sc.exe", "start", _SERVICE_NAME], capture_output=True, text=True, check=False, timeout=60)
-            if start.returncode == 0:
-                return RestartResult(ok=True, method="service_restart", detail=_SERVICE_NAME)
-            return RestartResult(
-                ok=False,
-                method="service_start",
-                detail=(start.stderr or start.stdout or "start failed").strip(),
-            )
-    return RestartResult(ok=False, method="none", detail="no restart path available")
-
-
-def start_configured_runner(
-    *,
-    alfred_dir: Path = _DEFAULT_ALFRED_DIR,
-    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-) -> RestartResult:
-    """Start `alfred run` from service.json when no Windows service is installed."""
-    try:
-        run_args = load_configured_args(alfred_dir=alfred_dir)
-    except RuntimeError as error:
-        return RestartResult(ok=False, method="configured_run", detail=str(error))
-    repo_root = Path(__file__).resolve().parents[2]
-    command = [sys.executable, "-m", "opendot_core.cli", *run_args]
-    creationflags = 0
-    if platform.system() == "Windows":
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-    try:
-        subprocess.Popen(
-            command,
-            cwd=repo_root,
-            creationflags=creationflags,
-            close_fds=True,
-        )
-    except OSError as error:
-        return RestartResult(ok=False, method="configured_run", detail=str(error))
-    return RestartResult(ok=True, method="configured_run", detail=" ".join(run_args))
+    return RestartResult(ok=True, method="restart_command", detail=raw)
 
 
 def watchdog_check(
@@ -283,17 +219,9 @@ def watchdog_check(
     action = "none"
     detail = "heartbeat is stale"
     if auto_restart:
-        restart = restart_alfred()
-        if restart.ok:
-            action = restart.method
-            detail = restart.detail
-        elif windows_service_state() in {None, "not_installed", "unavailable"}:
-            fallback = start_configured_runner()
-            action = fallback.method if fallback.ok else "failed"
-            detail = fallback.detail
-        else:
-            action = "failed"
-            detail = restart.detail
+        restart = restart_daemon()
+        action = restart.method if restart.ok else "failed"
+        detail = restart.detail
 
     if telegram_token and paired_chat_ids:
         rescue_messages = _telegram_rescue_poll(
@@ -303,14 +231,10 @@ def watchdog_check(
         )
         for message in rescue_messages:
             if message.startswith("/restart") or message.startswith("/wake"):
-                forced = restart_alfred()
+                forced = restart_daemon()
                 if forced.ok:
                     action = forced.method
                     detail = forced.detail
-                elif windows_service_state() in {None, "not_installed", "unavailable"}:
-                    fallback = start_configured_runner()
-                    action = fallback.method if fallback.ok else action
-                    detail = fallback.detail if fallback.ok else detail
                 break
 
     return WatchdogResult(
@@ -336,20 +260,13 @@ def paired_chat_ids_from_run_args(run_args: list[str]) -> set[int]:
     return chat_ids
 
 
-def paired_chat_ids_from_config(*, alfred_dir: Path = _DEFAULT_ALFRED_DIR) -> set[int]:
-    try:
-        return paired_chat_ids_from_run_args(load_configured_args(alfred_dir=alfred_dir))
-    except RuntimeError:
-        return set()
-
-
 def _telegram_rescue_poll(
     database: Database,
     *,
     token: str,
     allowed_chat_ids: set[int],
 ) -> list[str]:
-    """One-shot Telegram poll while Alfred is down. Returns matched command texts."""
+    """One-shot Telegram poll while OpenDot is down. Returns matched command texts."""
     from .telegram import TelegramUpdate
     from .telegram_bot import TelegramBotClient
 
@@ -383,7 +300,7 @@ def _telegram_rescue_poll(
                 reply = format_runtime_status(runtime_status(database))
             else:
                 request_restart(database)
-                reply = "restart queued. watchdog is waking alfred now."
+                reply = "restart queued. watchdog is waking opendot now."
             client.send_message(chat_id=message.chat.id, text=reply)
         if latest_cursor is not None:
             now = datetime.now(UTC).isoformat()

@@ -4,14 +4,14 @@ from opendot_core.db import Database
 from opendot_core.gmail_inbound import GmailInboundGateway
 
 
-def _message(message_id: str, internal_date: str, *, subject: str, sender: str = "nico@example.com") -> dict:
+def _message(message_id: str, internal_date: str, *, subject: str, sender: str = "sam@example.com") -> dict:
     return {
         "id": message_id,
         "internalDate": internal_date,
         "payload": {
             "headers": [
                 {"name": "Subject", "value": subject},
-                {"name": "From", "value": f"Nico <{sender}>"},
+                {"name": "From", "value": f"Sam <{sender}>"},
             ]
         },
     }
@@ -28,7 +28,7 @@ class FakeInbox:
 def test_task_command_from_an_allowed_sender_creates_a_task(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     gateway = GmailInboundGateway(
-        database, FakeInbox([_message("1", "1786190400000", subject="Task: Buy milk")]), {"nico@example.com"}
+        database, FakeInbox([_message("1", "1786190400000", subject="Task: Buy milk")]), {"sam@example.com"}
     )
 
     result = gateway.poll()
@@ -43,8 +43,8 @@ def test_polling_twice_does_not_duplicate_the_task(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     messages = [_message("1", "1786190400000", subject="Task: Buy milk")]
 
-    first = GmailInboundGateway(database, FakeInbox(messages), {"nico@example.com"}).poll()
-    second = GmailInboundGateway(database, FakeInbox(messages), {"nico@example.com"}).poll()
+    first = GmailInboundGateway(database, FakeInbox(messages), {"sam@example.com"}).poll()
+    second = GmailInboundGateway(database, FakeInbox(messages), {"sam@example.com"}).poll()
 
     assert (first.handled, first.duplicate) == (1, 0)
     assert (second.handled, second.duplicate) == (0, 1)
@@ -58,7 +58,7 @@ def test_remind_command_schedules_a_reminder_when_a_destination_is_configured(tm
     gateway = GmailInboundGateway(
         database,
         FakeInbox([_message("1", "1786190400000", subject="Remind: 2026-08-20T09:00:00Z Renew passport")]),
-        {"nico@example.com"},
+        {"sam@example.com"},
         default_reminder_destination="telegram:123",
     )
 
@@ -79,7 +79,7 @@ def test_remind_command_without_a_configured_destination_only_creates_the_task(t
     gateway = GmailInboundGateway(
         database,
         FakeInbox([_message("1", "1786190400000", subject="Remind: 2026-08-20T09:00:00Z Renew passport")]),
-        {"nico@example.com"},
+        {"sam@example.com"},
     )
 
     result = gateway.poll()
@@ -96,7 +96,7 @@ def test_command_from_an_unallowed_sender_is_rejected_not_executed(tmp_path: Pat
     gateway = GmailInboundGateway(
         database,
         FakeInbox([_message("1", "1786190400000", subject="Task: Buy milk", sender="stranger@example.com")]),
-        {"nico@example.com"},
+        {"sam@example.com"},
     )
 
     result = gateway.poll()
@@ -114,7 +114,7 @@ def test_command_from_an_unallowed_sender_is_rejected_not_executed(tmp_path: Pat
 def test_ordinary_mail_without_a_recognized_subject_is_silently_ignored(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     gateway = GmailInboundGateway(
-        database, FakeInbox([_message("1", "1786190400000", subject="Re: capstone review")]), {"nico@example.com"}
+        database, FakeInbox([_message("1", "1786190400000", subject="Re: capstone review")]), {"sam@example.com"}
     )
 
     result = gateway.poll()
@@ -131,7 +131,7 @@ def test_malformed_remind_time_is_ignored_rather_than_raising(tmp_path: Path) ->
     gateway = GmailInboundGateway(
         database,
         FakeInbox([_message("1", "1786190400000", subject="Remind: not-a-time Renew passport")]),
-        {"nico@example.com"},
+        {"sam@example.com"},
     )
 
     result = gateway.poll()
@@ -146,8 +146,8 @@ def test_allowed_senders_are_matched_case_insensitively(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     gateway = GmailInboundGateway(
         database,
-        FakeInbox([_message("1", "1786190400000", subject="Task: Buy milk", sender="Nico@Example.com")]),
-        {"nico@example.com"},
+        FakeInbox([_message("1", "1786190400000", subject="Task: Buy milk", sender="Sam@Example.com")]),
+        {"sam@example.com"},
     )
 
     result = gateway.poll()
@@ -170,6 +170,6 @@ def test_inbound_poll_bounds_its_unread_fetch_like_the_read_sync_does(tmp_path: 
             return []
 
     fake = RecordingGmail()
-    GmailInboundGateway(Database(tmp_path / "opendot.db"), fake, {"nico@example.com"}, limit=50).poll()
+    GmailInboundGateway(Database(tmp_path / "opendot.db"), fake, {"sam@example.com"}, limit=50).poll()
 
     assert fake.limits == [50]

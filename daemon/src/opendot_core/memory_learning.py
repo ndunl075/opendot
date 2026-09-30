@@ -1,7 +1,7 @@
 """Conservative, provenance-first learning from ordinary conversation.
 
 Cognee's useful idea is a pipeline rather than a magical database: observe,
-extract, corroborate, promote, retrieve, and improve from feedback. Alfred
+extract, corroborate, promote, retrieve, and improve from feedback. OpenDot
 keeps that loop inside its existing SQLite authority. An extractor can
 propose facts, but deterministic policy decides what becomes recallable.
 

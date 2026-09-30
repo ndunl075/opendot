@@ -81,7 +81,7 @@ class GitHubClient:
         return result
 
     def find_issue_by_marker(self, *, repository: str, marker: str) -> dict[str, Any] | None:
-        """Find one issue bearing Alfred's exact hidden recovery marker."""
+        """Find one issue bearing OpenDot's exact hidden recovery marker."""
         owner, repo = _repository_parts(repository)
         response = self._client.get(
             "/search/issues",
@@ -447,7 +447,7 @@ def _repository_parts(repository: str) -> tuple[str, str]:
 
 def _issue_marker(approval_id: str) -> str:
     """Return an invisible, exact body marker for issue recovery."""
-    return f"<!-- alfred-action:{approval_id} -->"
+    return f"<!-- opendot-action:{approval_id} -->"
 
 
 def _append_marker(body: str | None, marker: str) -> str:
@@ -455,4 +455,4 @@ def _append_marker(body: str | None, marker: str) -> str:
 
 
 def _pr_comment_marker(approval_id: str) -> str:
-    return f"<!-- alfred-pr-comment:{approval_id} -->"
+    return f"<!-- opendot-pr-comment:{approval_id} -->"

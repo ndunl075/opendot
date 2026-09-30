@@ -1,12 +1,12 @@
 """Turn commanded email from allowed senders into local tasks/reminders.
 
-This is the "inbound Alfred email" leg of section 9's Communications row: the
+This is the "inbound OpenDot email" leg of section 9's Communications row: the
 same pattern Telegram uses (paired identity -> parsed command -> task/
 reminder), adapted to a subject line instead of a slash command, and to
 Gmail's stable per-message ID instead of an update-offset cursor.
 
 Default-deny channel identity applies here exactly as it does for Telegram:
-only an explicitly allowed sender address may command Alfred. Unlike
+only an explicitly allowed sender address may command OpenDot. Unlike
 Telegram's dedicated bot inbox, the unread Gmail inbox is mostly ordinary
 mail, so a message that simply isn't a recognized command is silently
 ignored rather than audited as a rejection -- only a *recognized* command
@@ -189,4 +189,4 @@ def _parse_subject_command(subject: str) -> tuple[str, str, datetime | None]:
         if not parts[1].strip():
             raise ValueError("reminder title is required")
         return "remind", parts[1].strip(), run_at
-    raise ValueError("subject is not a recognized Alfred command")
+    raise ValueError("subject is not a recognized OpenDot command")

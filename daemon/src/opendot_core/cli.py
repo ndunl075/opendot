@@ -13,8 +13,7 @@ from typing import Iterator, Sequence
 
 from .availability import AvailabilityService
 from .audit import AuditEvent, AuditLog
-from .academic_memory import AcademicMemoryService
-from .historical_memory import HistoricalMemoryService
+from .calendar_history import CalendarMemoryService, CalendarRollupService
 from .embeddings import EmbeddingBackfill, OllamaEmbeddingProvider
 from .backup import EncryptedBackupService, latest_backup
 from .config import Settings
@@ -34,7 +33,6 @@ from .vault import VaultImporter, VaultProjector
 from .people import PeopleService
 from .policy import ApprovalService, PolicyStore
 from .policy_coverage import PolicyCoverageService
-from .preflight import preflight
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .google_calendar import (
     CalendarCatalogSync,
@@ -44,21 +42,7 @@ from .google_calendar import (
     GoogleCalendarSync,
     default_sync_window,
 )
-from .google_oauth import authorize_interactively, current_access_token
-from .canvas import CanvasClient, CanvasSync
-from .canvas_ical import (
-    CanvasICalClient,
-    CanvasICalSync,
-    CanvasICalSyncResult,
-    setup_canvas_ical_feed,
-)
-from .google_health import (
-    REQUIRED_SCOPES,
-    GoogleHealthClient,
-    GoogleHealthSync,
-    HealthAccountNotLinked,
-    google_auth_scopes,
-)
+from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
 from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
 from .composio import (
     SECRET_NAME as COMPOSIO_SECRET_NAME,
@@ -72,19 +56,15 @@ from .composio import (
 from .pull_requests import PullRequestService
 from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
 from .gmail_backfill import GmailClientMetadataAdapter, GmailThreadBackfill
-from .hermes_mcp import register as register_hermes_mcp
 from .threads import ThreadService
 from .gmail_inbound import GmailInboundGateway
-from .hermes_bridge import HermesBridge, SubprocessAgentRunner
 from .evaluation import EvaluationService
-from .latency import LatencyService
 from .brief_schedule import create_daily
 from .telegram_bot import TelegramBotClient
 from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
-from .runner import AlfredRunner, ConnectorSync
+from .runner import OpenDotRunner, ConnectorSync
 from .runtime_control import (
     note_watchdog_result,
-    paired_chat_ids_from_config,
     runtime_status,
     watchdog_check,
 )
@@ -93,7 +73,6 @@ from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
 from .mcp_server import generate_http_token, run_streamable_http
 from .admin_ui import run_admin_ui
-from .winservice import configure as configure_windows_service
 from .vault_sync import check_couchdb
 from .workflow_learning import WorkflowLearningService
 
@@ -104,14 +83,14 @@ def database_from_args(args: argparse.Namespace) -> Database:
 
 
 @contextmanager
-def running_alfred_runner(database: Database, args: argparse.Namespace) -> Iterator[AlfredRunner]:
-    """Build and tear down the exact ``AlfredRunner`` behind ``alfred run``.
+def running_opendot_runner(database: Database, args: argparse.Namespace) -> Iterator[OpenDotRunner]:
+    """Build and tear down the exact ``OpenDotRunner`` behind ``opendot run``.
 
-    ``args`` is a parsed ``run`` namespace (from ``build_parser()``).
-    Shared with ``opendot_core.winservice`` so a Windows service drives the
-    identical construction and cleanup path as the CLI -- only how the loop
-    is told to stop differs between the two callers (``KeyboardInterrupt``
-    here; a ``stop_check`` there).
+    ``args`` is a parsed ``run`` namespace (from ``build_parser()``). Any
+    supervisor (the per-OS service wrapper, a test) can share the identical
+    construction and cleanup path as the CLI; only how the loop is told to
+    stop differs between callers (``KeyboardInterrupt`` here, a ``stop_check``
+    elsewhere).
     """
     pairs = frozenset(_parse_telegram_pair(value) for value in args.pair)
     chat_ids = frozenset(args.chat_id)
@@ -168,41 +147,6 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 ),
             )
         )
-    if args.canvas_base_url:
-        connectors.append(
-            ConnectorSync(
-                name="canvas",
-                interval_seconds=args.connector_interval,
-                run=lambda: _canvas_sync_once(
-                    database, args.canvas_base_url, args.canvas_secret_name, include_history=False
-                ),
-            )
-        )
-        connectors.append(
-            ConnectorSync(
-                name="canvas_history",
-                interval_seconds=args.canvas_history_interval,
-                run=lambda: _canvas_sync_once(
-                    database, args.canvas_base_url, args.canvas_secret_name, include_history=True
-                ),
-            )
-        )
-    if args.canvas_ical:
-        connectors.append(
-            ConnectorSync(
-                name="canvas_ical",
-                interval_seconds=args.canvas_ical_interval,
-                run=lambda: _canvas_ical_sync_once(database, args.canvas_ical_secret_name),
-            )
-        )
-    if args.google_health:
-        connectors.append(
-            ConnectorSync(
-                name="google_health",
-                interval_seconds=args.connector_interval,
-                run=lambda: _health_sync_once(database, args.google_health_lookback_days),
-            )
-        )
     if args.vault:
         connectors.append(
             ConnectorSync(
@@ -229,16 +173,16 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
     # never part of the Telegram response path.
     connectors.append(
         ConnectorSync(
-            name="academic_memory",
+            name="calendar_rollups",
             interval_seconds=args.connector_interval,
-            run=AcademicMemoryService(database).rebuild_if_changed,
+            run=CalendarRollupService(database).rebuild_if_changed,
         )
     )
     connectors.append(
         ConnectorSync(
-            name="historical_memory",
+            name="calendar_memory",
             interval_seconds=args.connector_interval,
-            run=HistoricalMemoryService(database).rebuild_if_changed,
+            run=CalendarMemoryService(database).rebuild_if_changed,
         )
     )
     # Reads only what Calendar already synced, so it belongs after the
@@ -250,7 +194,7 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
             run=PeopleService(database).sync,
         )
     )
-    if args.hermes_profile:
+    if args.learning:
         connectors.append(
             ConnectorSync(
                 name="workflow_learning",
@@ -266,47 +210,12 @@ def running_alfred_runner(database: Database, args: argparse.Namespace) -> Itera
                 run=lambda: EmbeddingBackfill(database, embedding_provider).run(limit=128),
             )
         )
-    agent_bridge = None
-    agent_typing_chat_ids = None
-    if args.hermes_profile:
-        hermes_command = args.hermes_python or args.hermes_command
-        hermes_command_prefix = ("-m", "hermes_cli.main") if args.hermes_python else ()
-        memory_graph = (
-            MemoryGraph(database, embedding_provider=embedding_provider)
-            if embedding_provider is not None
-            else MemoryGraph(database)
-        )
-        hermes_bridge = HermesBridge(
-            database,
-            SubprocessAgentRunner(
-                command=hermes_command,
-                command_prefix=hermes_command_prefix,
-                profile=args.hermes_profile,
-                conversation_model=args.hermes_conversation_model,
-                work_model=args.hermes_work_model,
-                work_provider=args.hermes_work_provider,
-                provider_key_secret_name=args.hermes_provider_key_secret,
-                secret_store=SystemKeyringSecretStore(),
-                timeout_seconds=args.hermes_timeout,
-                conversation_timeout_seconds=args.hermes_conversation_timeout,
-                database=database,
-                monthly_call_limit=args.hermes_monthly_call_limit,
-                monthly_budget_usd=args.hermes_monthly_budget_usd,
-            ),
-            memory_graph=memory_graph,
-            telegram_transport=telegram_transport,
-        )
-        agent_bridge = hermes_bridge.run_once
-        agent_typing_chat_ids = hermes_bridge.pending_chat_ids
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         database,
         telegram_transport=telegram_transport,
         telegram_pairs=pairs,
         telegram_chat_ids=chat_ids,
-        defer_unparsed_to_agent=bool(args.hermes_profile),
-        agent_bridge=agent_bridge,
-        agent_typing_chat_ids=agent_typing_chat_ids,
-        memory_learning=MemoryLearningService(database).run_once if args.hermes_profile else None,
+        memory_learning=MemoryLearningService(database).run_once if args.learning else None,
         slack_transport=slack_bot,
         slack_pairs=slack_pairs,
         slack_channel_ids=slack_channel_ids,
@@ -334,43 +243,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
-    preflight_parser = subcommands.add_parser(
-        "preflight",
-        help="can the agent actually reach Alfred's tools; names the broken link and its fix",
-    )
-    preflight_parser.add_argument("--profile", default="alfred")
     subcommands.add_parser(
         "policy-coverage",
         help="MCP tools no registered client can call; catches a grant that drifted behind the tool list",
     )
-    hermes_mcp_register = subcommands.add_parser(
-        "hermes-mcp-register",
-        help="register Alfred's MCP server in a Hermes profile so the agent can see its tools",
-    )
-    hermes_mcp_register.add_argument("--profile", default="alfred")
-    hermes_mcp_register.add_argument(
-        "--config",
-        help="path to the profile's config.yaml; defaults to the Windows profile location",
-    )
-    hermes_mcp_register.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="report what would change without writing",
-    )
-    subcommands.add_parser(
-        "academic-memory-rebuild",
-        help="rebuild local Calendar/Canvas rollups and their provenance-linked semantic memories",
-    )
-    subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
     subcommands.add_parser(
         "connector-capabilities",
         help="show what each connector may do: reads/writes, scopes, sensitivity, transport",
     )
-    latency_status = subcommands.add_parser(
-        "latency-status",
-        help="show content-free Telegram acknowledgement and agent response latency",
-    )
-    latency_status.add_argument("--limit", type=int, default=20, help="number of recent instrumented turns")
     evaluation_status = subcommands.add_parser(
         "evaluation-status",
         help="summarize content-free response, retrieval, workflow, and memory-learning signals",
@@ -382,7 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
         "vault-sync-status", help="check whether the self-hosted CouchDB behind optional mobile vault sync is reachable"
     )
     vault_sync_status.add_argument("--url", default="http://127.0.0.1:5984", help="the CouchDB instance's base URL")
-    backup_create = subcommands.add_parser("backup-create", help="create an encrypted local Alfred database backup")
+    backup_create = subcommands.add_parser("backup-create", help="create an encrypted local OpenDot database backup")
     backup_create.add_argument("--output", type=Path, required=True)
     backup_create.add_argument("--secret-name", default="backup-encryption-key")
     backup_verify = subcommands.add_parser(
@@ -501,7 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=7,
         help="weekly window in days (default 7; use a large value to list all soon)",
     )
-    self_node = subcommands.add_parser("memory-self", help="create Alfred's one owner identity")
+    self_node = subcommands.add_parser("memory-self", help="create OpenDot's one owner identity")
     self_node.add_argument("--label", required=True)
     entity = subcommands.add_parser("memory-entity", help="create a confirmed graph entity")
     entity.add_argument("--type", required=True)
@@ -605,7 +485,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     http_token.add_argument("--secret-name", default="mcp-http-bearer-token")
     http_run = subcommands.add_parser(
-        "mcp-http-run", help="run Alfred's MCP surface over Streamable HTTP, bound to 127.0.0.1 only"
+        "mcp-http-run", help="run OpenDot's MCP surface over Streamable HTTP, bound to 127.0.0.1 only"
     )
     http_run.add_argument("--client-id", required=True, help="must already have a client-grant scope")
     http_run.add_argument("--port", type=int, default=8000)
@@ -615,7 +495,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     admin_token.add_argument("--secret-name", default="admin-ui-bearer-token")
     admin_run = subcommands.add_parser(
-        "admin-ui-run", help="run Alfred's read-only admin dashboard, bound to 127.0.0.1 by default"
+        "admin-ui-run", help="run OpenDot's read-only admin dashboard, bound to 127.0.0.1 by default"
     )
     admin_run.add_argument("--port", type=int, default=8200)
     admin_run.add_argument("--secret-name", default="admin-ui-bearer-token")
@@ -677,11 +557,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     google_auth.add_argument("--port", type=int, default=8765, help="local loopback redirect port")
     google_auth.add_argument("--scope", action="append", default=[], help="override the default OAuth scopes")
-    google_auth.add_argument(
-        "--include-health",
-        action="store_true",
-        help="add the three read-only Google Health scopes to this grant (never implied by the Calendar/Gmail defaults)",
-    )
     google_auth.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
     google_auth.add_argument("--timeout", type=int, default=300, help="seconds to wait for the browser redirect")
     calendar_sync = subcommands.add_parser("calendar-sync", help="read-sync Google Calendar into local source events")
@@ -698,23 +573,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="backfill every calendar selected in the Google Calendar UI",
     )
-    canvas_sync = subcommands.add_parser("canvas-sync", help="read-sync current and historical Canvas assignments")
-    canvas_sync.add_argument("--base-url", required=True, help="your school Canvas HTTPS URL")
-    canvas_sync.add_argument("--secret-name", default="canvas-api-token")
-    canvas_ical_sync = subcommands.add_parser(
-        "canvas-ical-sync",
-        help="read-sync a private Canvas Calendar Feed URL from the operating-system keyring",
-    )
-    canvas_ical_sync.add_argument("--secret-name", default="canvas-ical-feed-url")
-    canvas_ical_setup = subcommands.add_parser(
-        "canvas-ical-setup",
-        help="securely prompt for, validate, save, and first-sync a private Canvas Calendar Feed URL",
-    )
-    canvas_ical_setup.add_argument("--secret-name", default="canvas-ical-feed-url")
-    health_sync = subcommands.add_parser(
-        "health-sync", help="read-sync Google Health steps/sleep/resting-HR; reuses the google-auth grant"
-    )
-    health_sync.add_argument("--lookback-days", type=int, default=14, help="how many days back to fetch each sync")
     composio_setup = subcommands.add_parser(
         "composio-setup",
         help="store a Composio API key in the OS keyring (free tier; no card required)",
@@ -842,7 +700,7 @@ def build_parser() -> argparse.ArgumentParser:
     gmail_send_execute.add_argument("--approval-id", required=True)
     gmail_send_execute.add_argument("--actor", required=True)
     gmail_send_execute.add_argument("--token", required=True)
-    run = subcommands.add_parser("run", help="run Alfred continuously: paired message channels, due jobs, and connector sync")
+    run = subcommands.add_parser("run", help="run OpenDot continuously: paired message channels, due jobs, and connector sync")
     run.add_argument("--pair", action="append", default=[], help="locally paired CHAT_ID:USER_ID; enables Telegram intake")
     run.add_argument(
         "--chat-id", action="append", type=int, default=[], help="locally allowed delivery chat ID; enables Telegram delivery"
@@ -865,33 +723,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=604800.0,
         help="minimum seconds between full Calendar history refreshes (default: weekly)",
     )
-    run.add_argument("--canvas-base-url", help="enables Canvas sync when set")
-    run.add_argument("--canvas-secret-name", default="canvas-api-token")
-    run.add_argument(
-        "--canvas-history-interval",
-        type=float,
-        default=86400.0,
-        help="minimum seconds between full Canvas course-history reads (default: daily)",
-    )
-    run.add_argument(
-        "--canvas-ical",
-        action="store_true",
-        help="enables direct read-only Canvas Calendar Feed sync from the operating-system keyring",
-    )
-    run.add_argument("--canvas-ical-secret-name", default="canvas-ical-feed-url")
-    run.add_argument(
-        "--canvas-ical-interval",
-        type=float,
-        default=900.0,
-        help="minimum seconds between direct Canvas Calendar Feed refreshes (default: 900)",
-    )
     run.add_argument("--github-secret-name", default="github-token")
-    run.add_argument(
-        "--google-health",
-        action="store_true",
-        help="enables Google Health steps/sleep/resting-HR sync (reuses the google-auth grant; needs --include-health)",
-    )
-    run.add_argument("--google-health-lookback-days", type=int, default=14)
     run.add_argument(
         "--gmail-inbound-sender",
         action="append",
@@ -913,98 +745,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument(
-        "--hermes-profile",
-        help=(
-            "Hermes profile name; enables answering free-form Telegram messages with the agent "
-            "instead of replying with the /task|/remind help text"
-        ),
-    )
-    run.add_argument(
-        "--hermes-command",
-        default="hermes",
-        help="hermes executable to invoke; use a full path when PATH differs (e.g. under the Windows service)",
-    )
-    run.add_argument(
-        "--hermes-python",
-        help=(
-            "Python executable from Hermes's own venv; runs `-m hermes_cli.main` and bypasses "
-            "the Windows console launcher when it exits with 0xC000013A"
-        ),
-    )
-    run.add_argument(
-        "--hermes-timeout",
-        type=float,
-        default=120.0,
-        help="seconds to allow one agent turn before giving up on it",
-    )
-    run.add_argument(
-        "--hermes-conversation-timeout",
-        type=float,
-        default=45.0,
-        help=(
-            "seconds to allow one casual no-tool reply; much shorter than "
-            "--hermes-timeout because the fast lane should be fast or fail fast"
-        ),
-    )
-    run.add_argument(
-        "--hermes-conversation-model",
-        default="poolside/laguna-xs-2.1:free",
-        help=(
-            "fast model used only for casual no-tool conversation "
-            "(default: poolside/laguna-xs-2.1:free)"
-        ),
-    )
-    run.add_argument(
-        "--hermes-work-model",
-        default=None,
-        help=(
-            "optional paid model for tool-backed and search turns, e.g. "
-            "google/gemini-2.5-flash. Unset (the default) leaves every turn on "
-            "the profile's free Nous Portal model, so Alfred still costs $0. "
-            "Requires --hermes-provider-key-secret; without a readable key the "
-            "turn silently stays on the free model"
-        ),
-    )
-    run.add_argument(
-        "--hermes-monthly-budget-usd",
-        type=float,
-        default=None,
-        help=(
-            "hard monthly spend cap for Hermes turns, summed from the per-turn "
-            "cost Hermes reports. Unset means no dollar cap and only the call "
-            "count bounds spend, which is a proxy: measured turns varied by an "
-            "order of magnitude in tokens"
-        ),
-    )
-    run.add_argument(
-        "--hermes-work-provider",
-        default="openrouter",
-        help=(
-            "Hermes provider serving --hermes-work-model (default: openrouter). "
-            "Required because the model name alone does not switch providers: "
-            "Hermes keeps the one pinned in config.yaml, so a Google model "
-            "would be routed to Nous Portal, which does not serve it"
-        ),
-    )
-    run.add_argument(
-        "--hermes-provider-key-secret",
-        default=None,
-        help=(
-            "name of the OS keyring entry holding the paid provider's API key "
-            "(store it with: keyring set alfred <name>). The value is read per "
-            "turn and passed to Hermes through the environment, never written "
-            "to config.yaml, SQLite, or the audit log"
-        ),
-    )
-    run.add_argument(
         "--embedding-model",
         help="local Ollama embedding model for hybrid memory recall (for example nomic-embed-text)",
     )
     run.add_argument(
-        "--hermes-monthly-call-limit",
-        type=int,
-        default=1000,
-        help="hard monthly cap on external Hermes turns; local direct answers do not count",
+        "--learning",
+        action="store_true",
+        help="enable memory and workflow learning passes (off by default)",
     )
     run.add_argument(
         "--workflow-learning-interval",
@@ -1017,15 +764,6 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--idle-sleep", type=float, default=1.0, help="seconds to rest between cycles")
     run.add_argument("--connector-interval", type=float, default=900.0, help="minimum seconds between each connector sync")
     run.add_argument("--iterations", type=int, help="stop after N cycles instead of running forever (mainly for testing)")
-    service_configure = subcommands.add_parser(
-        "service-configure",
-        help="store the 'opendot run ...' arguments the Windows service (opendot_core.winservice) will launch",
-    )
-    service_configure.add_argument(
-        "run_args",
-        nargs=argparse.REMAINDER,
-        help="everything after this is passed through verbatim, e.g. run --pair 123:456 --chat-id 123",
-    )
     runtime_status_cmd = subcommands.add_parser(
         "runtime-status",
         help="show whether the always-on loop is alive and when it last cycled",
@@ -1038,7 +776,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     watchdog = subcommands.add_parser(
         "watchdog-check",
-        help="restart Alfred when the heartbeat is stale and rescue /wake from Telegram",
+        help="restart OpenDot when the heartbeat is stale and rescue /wake from Telegram",
     )
     watchdog.add_argument(
         "--stale-seconds",
@@ -1047,9 +785,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="treat the runner as stalled after this many seconds without a cycle",
     )
     watchdog.add_argument(
+        "--chat-id",
+        type=int,
+        action="append",
+        default=[],
+        help="Telegram chat id allowed to send /status, /wake and /restart (repeatable)",
+    )
+    watchdog.add_argument(
         "--no-restart",
         action="store_true",
-        help="report stale state without trying to restart Alfred",
+        help="report stale state without trying to restart OpenDot",
     )
     watchdog.add_argument(
         "--telegram-secret",
@@ -1068,9 +813,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "status":
         print(json.dumps(database.status()))
         return 0
-    if args.command == "academic-memory-rebuild":
-        rollup = AcademicMemoryService(database).rebuild_if_changed()
-        history = HistoricalMemoryService(database).rebuild_if_changed()
+    if args.command == "calendar-history-rebuild":
+        rollup = CalendarRollupService(database).rebuild_if_changed()
+        history = CalendarMemoryService(database).rebuild_if_changed()
         print(
             json.dumps(
                 {
@@ -1085,9 +830,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "connector-status":
         print(json.dumps([health.model_dump(mode="json") for health in connector_health(database)]))
-        return 0
-    if args.command == "latency-status":
-        print(LatencyService(database).report(limit=args.limit).model_dump_json())
         return 0
     if args.command == "evaluation-status":
         print(EvaluationService(database).report(window_days=args.window_days).model_dump_json())
@@ -1493,22 +1235,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps([item.model_dump(mode="json") for item in result]))
         return 0
     if args.command == "run":
-        with running_alfred_runner(database, args) as runner:
+        with running_opendot_runner(database, args) as runner:
             try:
                 runner.run_forever(iterations=args.iterations)
             except KeyboardInterrupt:
-                print("\n[alfred run] stopped")
-        return 0
-    if args.command == "service-configure":
-        config_path = configure_windows_service(args.run_args)
-        print(json.dumps({"config_path": str(config_path), "args": args.run_args}))
+                print("\n[opendot run] stopped")
         return 0
     if args.command == "runtime-status":
         print(json.dumps(runtime_status(database, stale_seconds=args.stale_seconds).model_dump(mode="json")))
         return 0
     if args.command == "watchdog-check":
         token: str | None = None
-        chat_ids = paired_chat_ids_from_config()
+        chat_ids = set(args.chat_id)
         try:
             token = SystemKeyringSecretStore().get_required(args.telegram_secret)
         except SecretStoreError:
@@ -1527,7 +1265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         secret_store = SystemKeyringSecretStore()
         client_id = secret_store.get_required("google-oauth-client-id")
         client_secret = secret_store.get_required("google-oauth-client-secret")
-        scopes = google_auth_scopes(include_health=args.include_health, requested=tuple(args.scope))
+        scopes = tuple(args.scope) or DEFAULT_SCOPES
         token = authorize_interactively(
             client_id=client_id,
             client_secret=client_secret,
@@ -1535,11 +1273,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             port=args.port,
             timeout_seconds=args.timeout,
             open_browser=not args.no_browser,
-            on_url=lambda url: print(f"Open this URL to authorize Alfred:\n{url}"),
+            on_url=lambda url: print(f"Open this URL to authorize OpenDot:\n{url}"),
         )
         if not token.refresh_token:
             raise SystemExit(
-                "Google did not return a refresh token. Revoke Alfred's prior access at "
+                "Google did not return a refresh token. Revoke OpenDot's prior access at "
                 "https://myaccount.google.com/permissions and run 'opendot google-auth' again."
             )
         secret_store.store("google-oauth-refresh-token", token.refresh_token)
@@ -1598,41 +1336,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
         )
-        return 0
-    if args.command == "canvas-sync":
-        client = CanvasClient(args.base_url, SystemKeyringSecretStore().get_required(args.secret_name))
-        try:
-            result = CanvasSync(database, client, include_history=True).sync()
-        finally:
-            client.close()
-        print(result.model_dump_json())
-        return 0
-    if args.command == "canvas-ical-sync":
-        result = _canvas_ical_sync_once(database, args.secret_name)
-        print(result.model_dump_json())
-        return 0
-    if args.command == "canvas-ical-setup":
-        feed_url = getpass.getpass(
-            "Paste the private Canvas Calendar Feed URL, then press Enter "
-            "(input is hidden for security): "
-        )
-        result = setup_canvas_ical_feed(
-            database,
-            SystemKeyringSecretStore(),
-            feed_url,
-            secret_name=args.secret_name,
-        )
-        print(result.model_dump_json())
-        return 0
-    if args.command == "health-sync":
-        client = GoogleHealthClient(_google_health_access_token())
-        try:
-            result = GoogleHealthSync(database, client, lookback_days=args.lookback_days).sync()
-        except HealthAccountNotLinked as error:
-            raise SystemExit(str(error)) from error
-        finally:
-            client.close()
-        print(result.model_dump_json())
         return 0
     if args.command == "composio-setup":
         api_key = args.api_key or getpass.getpass("Paste the Composio API key, then press Enter. ")
@@ -1721,10 +1424,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.close()
         print(result.model_dump_json())
         return 0
-    if args.command == "preflight":
-        report = preflight(database, profile=args.profile)
-        print(report.model_dump_json())
-        return 0 if report.ok else 1
     if args.command == "policy-coverage":
         report = PolicyCoverageService(database).report()
         print(report.model_dump_json())
@@ -1732,14 +1431,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         # client can call. A narrow per-client grant is deliberate and
         # must not fail a scheduled check.
         return 1 if report.unreachable and not report.no_clients_registered else 0
-    if args.command == "hermes-mcp-register":
-        result = register_hermes_mcp(
-            profile=args.profile,
-            config_path=Path(args.config) if args.config else None,
-            dry_run=args.dry_run,
-        )
-        print(result.model_dump_json())
-        return 0
     if args.command == "gmail-thread-backfill":
         client = GmailClient(_google_access_token())
         try:
@@ -1850,16 +1541,13 @@ def _google_access_token() -> str:
     return current_access_token(SystemKeyringSecretStore())
 
 
-def _google_health_access_token() -> str:
-    """Health API rejects Calendar/Gmail scopes on the same access token."""
-    return current_access_token(SystemKeyringSecretStore(), scopes=REQUIRED_SCOPES)
 
 
 def _composio_client(database: Database, secret_name: str) -> ComposioClient:
     try:
         api_key = SystemKeyringSecretStore().get_required(secret_name)
     except SecretStoreError as error:
-        raise SystemExit("Composio API key is not stored. Run `alfred composio-setup`.") from error
+        raise SystemExit("Composio API key is not stored. Run `opendot composio-setup`.") from error
     return ComposioClient(api_key, database=database)
 
 
@@ -1969,35 +1657,10 @@ def _sync_state_is_fresh(
     return datetime.now(UTC) - last_success.astimezone(UTC) < timedelta(seconds=minimum_age_seconds)
 
 
-def _canvas_sync_once(
-    database: Database, base_url: str, secret_name: str, *, include_history: bool = False
-) -> None:
-    client = CanvasClient(base_url, SystemKeyringSecretStore().get_required(secret_name))
-    try:
-        CanvasSync(database, client, include_history=include_history).sync()
-    finally:
-        client.close()
 
 
-def _canvas_ical_sync_once(database: Database, secret_name: str) -> CanvasICalSyncResult:
-    client = CanvasICalClient(SystemKeyringSecretStore().get_required(secret_name))
-    try:
-        return CanvasICalSync(database, client).sync()
-    finally:
-        client.close()
 
 
-def _health_sync_once(database: Database, lookback_days: int) -> None:
-    client = GoogleHealthClient(_google_health_access_token())
-    try:
-        GoogleHealthSync(database, client, lookback_days=lookback_days).sync()
-    except HealthAccountNotLinked:
-        # Fitbit not linked yet: sync() already recorded HealthAccountNotLinked
-        # in sync_state; the runner should back off quietly, not treat this as
-        # a crash loop.
-        pass
-    finally:
-        client.close()
 
 
 def _github_sync_once(database: Database, secret_name: str) -> None:

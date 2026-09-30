@@ -1,6 +1,6 @@
-/* Alfred admin — a quiet, editorial workspace, not a status page.
+/* OpenDot admin — a quiet, editorial workspace, not a status page.
    No external fonts or CDN assets: system font stack only, matching
-   Alfred's local-first rule that nothing calls out by default. */
+   OpenDot's local-first rule that nothing calls out by default. */
 
 :root {
   --bg-sidebar: #F7F6F3;

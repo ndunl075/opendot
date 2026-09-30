@@ -26,7 +26,7 @@ FEEDBACK_OUTCOMES = frozenset({"helpful", "missing_context", "wrong_context"})
 FEEDBACK_SIGNALS = frozenset({SIGNAL_BUTTON, SIGNAL_REPLY, SIGNAL_COVERAGE})
 
 #: Which verdict wins when one response collected several. A tap is a stated
-#: opinion, a reply is an inferred one, and coverage is Alfred grading its own
+#: opinion, a reply is an inferred one, and coverage is OpenDot grading its own
 #: pack; that is also the order of how much any of them should move ranking.
 _SIGNAL_PRECEDENCE = {SIGNAL_BUTTON: 0, SIGNAL_REPLY: 1, SIGNAL_COVERAGE: 2}
 
@@ -121,8 +121,8 @@ class ResponseFeedbackService:
                 connection,
                 AuditEvent(
                     # An inferred verdict still comes from the owner's own
-                    # words; only Alfred's self-check is Alfred's own claim.
-                    actor="system:alfred" if signal == SIGNAL_COVERAGE else "owner:telegram",
+                    # words; only OpenDot's self-check is OpenDot's own claim.
+                    actor="system:opendot" if signal == SIGNAL_COVERAGE else "owner:telegram",
                     client="telegram",
                     tool="response_feedback",
                     outcome="recorded",
@@ -217,7 +217,7 @@ class ResponseFeedbackService:
                 """
             ).fetchall()
         # One vote per response, even now that several detectors can reach one.
-        # Without this, a turn the owner corrected *and* Alfred flagged would
+        # Without this, a turn the owner corrected *and* OpenDot flagged would
         # count twice and outweigh a turn only one of them noticed.
         strongest: dict[str, sqlite3.Row] = {}
         for row in rows:

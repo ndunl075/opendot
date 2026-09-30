@@ -5,7 +5,7 @@ import time
 from opendot_core.audit import AuditLog
 from opendot_core.db import Database
 from opendot_core.outbox import Outbox
-from opendot_core.runner import AlfredRunner, ConnectorSync
+from opendot_core.runner import OpenDotRunner, ConnectorSync
 from opendot_core.telegram import TelegramPair
 
 
@@ -53,7 +53,7 @@ def _reminder_update() -> dict:
 def test_run_once_carries_a_reminder_from_intake_through_delivery(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     fake = FakeTelegram([_reminder_update()])
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         database,
         telegram_transport=fake,
         telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
@@ -98,7 +98,7 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
     }
     fake = FakeTelegram([free_form])
     bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="should not be called", ok=True))
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         database,
         telegram_transport=fake,
         telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
@@ -146,7 +146,7 @@ def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path:
         ]
     )
     bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="yo. what's good?", ok=True))
-    report = AlfredRunner(
+    report = OpenDotRunner(
         database,
         telegram_transport=fake,
         telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
@@ -173,7 +173,7 @@ def test_typing_status_is_refreshed_until_the_agent_finishes(tmp_path: Path) -> 
         assert release_agent.wait(timeout=2.0)
         return type("Answer", (), {"answered": 1})()
 
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         database,
         telegram_transport=fake,
         telegram_chat_ids=frozenset({20}),
@@ -206,7 +206,7 @@ def test_typing_heartbeat_failure_never_blocks_the_agent(tmp_path: Path) -> None
             raise TimeoutError("cosmetic request failed")
 
     called: list[str] = []
-    report = AlfredRunner(
+    report = OpenDotRunner(
         Database(tmp_path / "opendot.db"),
         telegram_transport=BrokenTypingTelegram(),
         agent_bridge=lambda: called.append("agent") or type("Answer", (), {"answered": 1})(),
@@ -221,7 +221,7 @@ def test_typing_heartbeat_failure_never_blocks_the_agent(tmp_path: Path) -> None
 
 def test_run_once_skips_telegram_entirely_when_not_configured(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
-    runner = AlfredRunner(database)
+    runner = OpenDotRunner(database)
 
     report = runner.run_once()
 
@@ -236,7 +236,7 @@ def test_memory_learning_runs_after_the_agent_reply(tmp_path: Path) -> None:
     class Learned:
         promoted = 1
 
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         Database(tmp_path / "opendot.db"),
         agent_bridge=lambda: calls.append("answer") or type("Answer", (), {"answered": 1})(),
         memory_learning=lambda: calls.append("learn") or Learned(),
@@ -252,8 +252,8 @@ def test_connector_sync_runs_once_per_configured_interval(tmp_path: Path) -> Non
     database = Database(tmp_path / "opendot.db")
     calls: list[int] = []
     clock = {"t": 0.0}
-    connector = ConnectorSync(name="canvas", interval_seconds=100, run=lambda: calls.append(1))
-    runner = AlfredRunner(database, connectors=(connector,), now=lambda: clock["t"])
+    connector = ConnectorSync(name="calendar", interval_seconds=100, run=lambda: calls.append(1))
+    runner = OpenDotRunner(database, connectors=(connector,), now=lambda: clock["t"])
 
     first = runner.run_once()
     clock["t"] = 50
@@ -261,9 +261,9 @@ def test_connector_sync_runs_once_per_configured_interval(tmp_path: Path) -> Non
     clock["t"] = 150
     third = runner.run_once()
 
-    assert first.connectors_synced == ["canvas"]
+    assert first.connectors_synced == ["calendar"]
     assert second.connectors_synced == []
-    assert third.connectors_synced == ["canvas"]
+    assert third.connectors_synced == ["calendar"]
     assert len(calls) == 2
 
 
@@ -278,7 +278,7 @@ def test_background_connector_batch_does_not_block_telegram_cycles(tmp_path: Pat
         completed.set()
 
     fake = FakeTelegram()
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         Database(tmp_path / "opendot.db"),
         telegram_transport=fake,
         telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
@@ -312,7 +312,7 @@ def test_a_failing_connector_does_not_stop_the_loop_or_other_connectors(tmp_path
     def working() -> None:
         calls.append("worked")
 
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         database,
         connectors=(
             ConnectorSync(name="broken", interval_seconds=0, run=failing),
@@ -338,7 +338,7 @@ def test_failing_connector_uses_exponential_backoff_instead_of_every_cycle(tmp_p
         calls.append(clock["now"])
         raise RuntimeError("offline")
 
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         Database(tmp_path / "opendot.db"),
         connectors=(ConnectorSync(name="offline", interval_seconds=900, run=failing),),
         now=lambda: clock["now"],
@@ -360,7 +360,7 @@ def test_failing_connector_uses_exponential_backoff_instead_of_every_cycle(tmp_p
 def test_run_forever_stops_after_the_configured_iteration_count(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     sleeps: list[float] = []
-    runner = AlfredRunner(database, idle_sleep_seconds=7, sleep=sleeps.append)
+    runner = OpenDotRunner(database, idle_sleep_seconds=7, sleep=sleeps.append)
 
     runner.run_forever(iterations=3)
 
@@ -374,7 +374,7 @@ def test_run_forever_retries_a_failed_telegram_poll_after_one_second(tmp_path: P
             raise TimeoutError("offline")
 
     sleeps: list[float] = []
-    runner = AlfredRunner(
+    runner = OpenDotRunner(
         Database(tmp_path / "opendot.db"),
         telegram_transport=OfflineTelegram(),
         telegram_pairs=frozenset({TelegramPair(chat_id=20, user_id=10)}),
@@ -399,7 +399,7 @@ def test_run_forever_stops_when_stop_check_reports_true(tmp_path: Path) -> None:
         return cycles["count"] >= 2
 
     connector = ConnectorSync(name="counter", interval_seconds=0, run=lambda: cycles.__setitem__("count", cycles["count"] + 1))
-    runner = AlfredRunner(database, connectors=(connector,), sleep=sleeps.append)
+    runner = OpenDotRunner(database, connectors=(connector,), sleep=sleeps.append)
 
     runner.run_forever(stop_check=stop_after_two_cycles)
 
@@ -411,7 +411,7 @@ def test_run_forever_never_stops_on_its_own_without_a_stop_check_or_iterations(t
     """Confirms the default stop_check is a true no-op, not an accidental early exit."""
     database = Database(tmp_path / "opendot.db")
     sleeps: list[float] = []
-    runner = AlfredRunner(database, sleep=sleeps.append)
+    runner = OpenDotRunner(database, sleep=sleeps.append)
 
     runner.run_forever(iterations=5, stop_check=lambda: False)
 
@@ -427,7 +427,7 @@ def test_pending_reminder_is_delivered_even_without_a_new_telegram_message(tmp_p
                 connection, destination="telegram:20", payload={"text": "already due"}, idempotency_key="preexisting"
             )
     fake = FakeTelegram()
-    runner = AlfredRunner(database, telegram_transport=fake, telegram_chat_ids=frozenset({20}))
+    runner = OpenDotRunner(database, telegram_transport=fake, telegram_chat_ids=frozenset({20}))
 
     report = runner.run_once()
 

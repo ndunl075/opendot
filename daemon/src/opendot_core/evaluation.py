@@ -1,4 +1,4 @@
-"""Operator-readable evaluation report over Alfred's own learning signals.
+"""Operator-readable evaluation report over OpenDot's own learning signals.
 
 ARCHITECTURE.md's learning loop ends with "record accepted/rejected
 suggestions and retrieval misses as evaluation data" and "better memory,
@@ -35,8 +35,8 @@ from .db import Database
 RESPONSE_OUTCOMES = ("helpful", "missing_context", "wrong_context")
 
 #: How a verdict about the answer was reached. Both are the owner's judgment:
-#: one tapped on a keyboard Alfred no longer sends, one read out of the message
-#: they sent next. ``coverage`` is deliberately absent -- Alfred flagging its
+#: one tapped on a keyboard OpenDot no longer sends, one read out of the message
+#: they sent next. ``coverage`` is deliberately absent -- OpenDot flagging its
 #: own stale context is not an opinion about the answer, and mixing it in here
 #: would drag "answers marked helpful" down every time a connector went quiet.
 #: Live path first, so the legacy taps read as the footnote they now are.
@@ -73,12 +73,12 @@ class SourceQuality(BaseModel):
 
 
 class ContextGaps(BaseModel):
-    """Answers Alfred flagged against itself, counted per source.
+    """Answers OpenDot flagged against itself, counted per source.
 
     A different question from the one response feedback answers. These turns
     were not judged wrong by anyone; their context pack simply quoted a
     connector with no successful sync behind it, so the reply described a
-    state of the world Alfred had already lost track of. Read this as
+    state of the world OpenDot had already lost track of. Read this as
     connector health showing up where it actually costs something.
     """
 
@@ -157,7 +157,7 @@ class EvaluationService:
         return breakdown
 
     def _context_gaps(self, connection, cutoff: str) -> ContextGaps:
-        """Count Alfred's own flags per source, from the rule that fired.
+        """Count OpenDot's own flags per source, from the rule that fired.
 
         The rule reads ``stale:gmail`` or ``unsynced:github``. Only the source
         half is reported: whether a connector is behind or never connected is

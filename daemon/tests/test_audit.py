@@ -11,8 +11,8 @@ def test_audit_log_is_hash_chained_and_append_only(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     audit = AuditLog(database)
 
-    first_id = audit.append(AuditEvent(actor="nico", tool="task_upsert", outcome="ok"))
-    second_id = audit.append(AuditEvent(actor="nico", tool="brief_get", outcome="ok"))
+    first_id = audit.append(AuditEvent(actor="sam", tool="task_upsert", outcome="ok"))
+    second_id = audit.append(AuditEvent(actor="sam", tool="brief_get", outcome="ok"))
 
     assert first_id != second_id
     assert audit.verify() is True
@@ -28,7 +28,7 @@ def test_audit_log_is_hash_chained_and_append_only(tmp_path: Path) -> None:
 def test_audit_verification_detects_tampering(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     audit = AuditLog(database)
-    record_id = audit.append(AuditEvent(actor="nico", tool="task_upsert", outcome="ok"))
+    record_id = audit.append(AuditEvent(actor="sam", tool="task_upsert", outcome="ok"))
 
     with database.connect() as connection:
         connection.execute("DROP TRIGGER tool_runs_prevent_update")

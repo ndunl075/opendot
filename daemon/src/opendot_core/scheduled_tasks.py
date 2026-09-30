@@ -2,12 +2,12 @@
 
 A reminder delivers text that already exists. "Check the order at 3 and text
 me" is a different request: the text does not exist yet, because the work has
-not happened. Alfred could previously only do the first, so a request of the
+not happened. OpenDot could previously only do the first, so a request of the
 second kind either became a reminder to do it yourself, or -- what actually
-happened -- Hermes quietly scheduled it in *its own* cron, a second job store
-Alfred does not run, where it sat and never fired.
+happened -- the agent quietly scheduled it in *its own* cron, a second job store
+OpenDot does not run, where it sat and never fired.
 
-Section 2 makes Alfred the sole owner of schedules and delivery precisely to
+Section 2 makes OpenDot the sole owner of schedules and delivery precisely to
 prevent that split. This is the missing half of that ownership.
 
 When the job comes due, `JobRunner` does not run the agent inline. It queues

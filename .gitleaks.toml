@@ -1,0 +1,10 @@
+# Extends the default ruleset. The only allowed "secrets" are the fake values
+# used to test the redaction code; real secrets must never be committed.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake tokens used by the redaction tests"
+regexes = [
+  '''AKIAABCDEFGHIJKLMNOP''',
+]

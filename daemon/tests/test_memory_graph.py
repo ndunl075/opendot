@@ -15,11 +15,11 @@ def test_self_identity_is_permanent_and_singleton(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     graph = MemoryGraph(database)
 
-    first = graph.ensure_self("Nico")
+    first = graph.ensure_self("Sam")
     second = graph.ensure_self("Different label")
 
     assert first.id == second.id
-    assert second.label == "Nico"
+    assert second.label == "Sam"
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM entities WHERE entity_type = 'self'").fetchone()[0] == 1
 
@@ -34,7 +34,7 @@ def test_only_confirmed_registry_types_can_be_used(tmp_path: Path) -> None:
 def test_single_state_relationship_closes_the_previous_current_state(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     graph = MemoryGraph(database)
-    owner = graph.ensure_self("Nico")
+    owner = graph.ensure_self("Sam")
     first_school = graph.create_entity(entity_type="school", label="First University")
     second_school = graph.create_entity(entity_type="school", label="Second University")
 
@@ -64,12 +64,12 @@ def test_single_state_relationship_closes_the_previous_current_state(tmp_path: P
 def test_fts_search_returns_memory_and_one_hop_relationship_context(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     graph = MemoryGraph(database)
-    owner = graph.ensure_self("Nico")
-    project = graph.create_entity(entity_type="project", label="Alfred Capstone")
+    owner = graph.ensure_self("Sam")
+    project = graph.create_entity(entity_type="project", label="OpenDot Capstone")
     graph.add_relationship(source_entity_id=owner.id, predicate="works_on", target_entity_id=project.id)
-    memory = graph.remember("Nico wants Alfred Capstone to stay local first.")
+    memory = graph.remember("Sam wants OpenDot Capstone to stay local first.")
 
-    result = graph.search("Alfred Capstone")
+    result = graph.search("OpenDot Capstone")
 
     assert [entity.id for entity in result.entities] == [project.id]
     assert [item.id for item in result.memories] == [memory.id]
@@ -239,11 +239,11 @@ def test_supersede_carries_evidence_forward_to_the_replacement(tmp_path: Path) -
 
 def test_entity_and_relationship_creation_record_evidence(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
-    entity_event = _append_event(database, "three", "I work on Alfred Capstone")
-    relation_event = _append_event(database, "four", "Nico works on Alfred Capstone")
+    entity_event = _append_event(database, "three", "I work on OpenDot Capstone")
+    relation_event = _append_event(database, "four", "Sam works on OpenDot Capstone")
     graph = MemoryGraph(database)
-    owner = graph.ensure_self("Nico")
-    project = graph.create_entity(entity_type="project", label="Alfred Capstone", source_event_id=entity_event)
+    owner = graph.ensure_self("Sam")
+    project = graph.create_entity(entity_type="project", label="OpenDot Capstone", source_event_id=entity_event)
 
     relationship = graph.add_relationship(
         source_entity_id=owner.id,
@@ -321,30 +321,30 @@ def test_source_event_query_and_approval_frozen_bulk_forget(tmp_path: Path) -> N
 
     assert [memory.id for memory in graph.memories_by_source_event(event.id)] == [first.id, second.id]
     actions = MemoryActions(database, ApprovalService(database))
-    proposal = actions.propose_forget_by_source_event(event.id, actor="nico", reason="remove imported source")
+    proposal = actions.propose_forget_by_source_event(event.id, actor="sam", reason="remove imported source")
     assert proposal.preview["memory_ids"] == [first.id, second.id]
 
     # This arrives after the preview and therefore cannot be included in the approval's delete scope.
     later = graph.remember("Later derived fact.", source_event_id=event.id)
-    issued = actions.approvals.approve(proposal.id, actor="nico")
-    receipt = actions.execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
+    issued = actions.approvals.approve(proposal.id, actor="sam")
+    receipt = actions.execute_forget_by_source_event(proposal.id, actor="sam", token=issued.token)
 
     assert receipt.memory_ids == [first.id, second.id]
     assert [memory.id for memory in graph.memories_by_source_event(event.id)] == [later.id]
     assert graph.get_memory(unrelated.id).status == "confirmed"
     assert [memory.id for memory in graph.memories_by_source_event(event.id, include_deleted=True)] == [first.id, second.id, later.id]
-    replay = actions.execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
+    replay = actions.execute_forget_by_source_event(proposal.id, actor="sam", token=issued.token)
     assert replay.replayed is True
 
 
 def test_source_scoped_forget_does_not_consume_an_unrelated_approval(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     approvals = ApprovalService(database)
-    proposal = approvals.propose(actor="nico", action_type="send_message", preview={})
-    issued = approvals.approve(proposal.id, actor="nico")
+    proposal = approvals.propose(actor="sam", action_type="send_message", preview={})
+    issued = approvals.approve(proposal.id, actor="sam")
 
     with pytest.raises(PolicyError, match="not for source-scoped"):
-        MemoryActions(database, approvals).execute_forget_by_source_event(proposal.id, actor="nico", token=issued.token)
+        MemoryActions(database, approvals).execute_forget_by_source_event(proposal.id, actor="sam", token=issued.token)
 
     assert approvals.get(proposal.id).state == "approved"
 

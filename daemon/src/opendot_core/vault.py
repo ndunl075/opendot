@@ -30,8 +30,8 @@ _WINDOWS_MAX_PATH = 259
 def _fs(path: Path) -> Path:
     """Return a form of ``path`` Windows can actually open past MAX_PATH.
 
-    Alfred generates its own vault filenames -- a 36-character UUID plus, for
-    a conflict copy, a 33-character ``.alfred-conflict-<timestamp>`` suffix --
+    OpenDot generates its own vault filenames -- a 36-character UUID plus, for
+    a conflict copy, a 33-character ``.opendot-conflict-<timestamp>`` suffix --
     so a deeply nested vault root can push an otherwise ordinary export over
     the limit. Without this, that surfaces as a bare ``FileNotFoundError: No
     such file or directory``, which names the wrong problem entirely and sends
@@ -201,7 +201,7 @@ class VaultProjector:
         """Project confirmed, vault-safe memories matching a topic search.
 
         Uses the same retrieval path a question would, so what you export is
-        what Alfred would actually recall -- deliberately not a second,
+        what OpenDot would actually recall -- deliberately not a second,
         divergent matching rule. Sensitivity is restricted to the vault-safe
         set at query time as well as at projection time, so a `secret` match
         never even enters the candidate list.
@@ -259,7 +259,7 @@ class VaultProjector:
         _fs(path.parent).mkdir(parents=True, exist_ok=True)
         if _fs(path).exists() and not self._is_managed(path):
             timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            conflict = path.with_name(f"{path.stem}.alfred-conflict-{timestamp}{path.suffix}")
+            conflict = path.with_name(f"{path.stem}.opendot-conflict-{timestamp}{path.suffix}")
             _fs(conflict).write_text(contents, encoding="utf-8", newline="\n")
             return Projection(path=conflict, conflict_copy=True)
         _fs(path).write_text(contents, encoding="utf-8", newline="\n")
@@ -284,7 +284,7 @@ class VaultProjector:
         domains = ", ".join(entity.domains) if entity.domains else "none"
         return (
             "---\n"
-            f"alfred_id: {entity.id}\n"
+            f"opendot_id: {entity.id}\n"
             f"type: {entity.entity_type}\n"
             f"sensitivity: {entity.sensitivity}\n"
             "managed: true\n"
@@ -301,7 +301,7 @@ class VaultProjector:
         slug = re.sub(r"\s+", " ", memory.kind).strip() or "memory"
         return (
             "---\n"
-            f"alfred_id: {memory.id}\n"
+            f"opendot_id: {memory.id}\n"
             f"type: memory\n"
             f"kind: {slug}\n"
             "managed: true\n"
@@ -340,7 +340,7 @@ class VaultImportResult(BaseModel):
     updated: int
     skipped: int
     #: Wiki links resolved to exactly one existing entity and recorded as
-    #: provenance. Links naming nothing Alfred knows, or naming something
+    #: provenance. Links naming nothing OpenDot knows, or naming something
     #: ambiguous, are counted separately rather than guessed at.
     linked: int = 0
     unresolved_links: int = 0
@@ -350,13 +350,13 @@ class VaultImporter:
     """Read-only import: user-authored Markdown becomes confirmed, evidence-backed memory.
 
     This is the missing half of Section 5's vault sync, but it is a scan you
-    call periodically (via the CLI, or as a connector in AlfredRunner), not
+    call periodically (via the CLI, or as a connector in OpenDotRunner), not
     an OS-level file watcher -- no inotify/ReadDirectoryChangesW is involved,
     so a change is only picked up on the next sync(). Each import hashes the
     note, appends a file event, and proposes (here, directly creates, since
     the owner authoring a note in their own vault already counts as an
-    explicit statement) a memory from it. Alfred never writes back to an
-    imported file -- identity and change detection live entirely in Alfred's
+    explicit statement) a memory from it. OpenDot never writes back to an
+    imported file -- identity and change detection live entirely in OpenDot's
     own connector_records, keyed by the file's path relative to the vault
     root -- so importing can never overwrite user prose. Deleting a note does
     not delete the memory it produced; only the explicit `forget` command
@@ -401,8 +401,8 @@ class VaultImporter:
         raw = path.read_text(encoding="utf-8")
         frontmatter, body = _split_frontmatter(raw)
         if frontmatter.get("managed") == "true":
-            # Alfred's own generated output; never re-imported as testimony,
-            # and its links are Alfred's own writing rather than the owner's.
+            # OpenDot's own generated output; never re-imported as testimony,
+            # and its links are OpenDot's own writing rather than the owner's.
             return "skipped", (0, 0)
         statement = body.strip()
         if not statement:
@@ -505,19 +505,19 @@ class VaultImporter:
         connector data. The note's filename is the label, which is also what
         makes ``[[Alex Chen]]`` elsewhere resolve to it.
 
-        Only registry types are accepted and an existing ``alfred_id`` is left
+        Only registry types are accepted and an existing ``opendot_id`` is left
         alone: a projected note already has its entity, and re-creating one
-        from Alfred's own output would duplicate it.
+        from OpenDot's own output would duplicate it.
         """
         declared = (frontmatter.get("type") or "").strip().lower()
-        if not declared or frontmatter.get("alfred_id"):
+        if not declared or frontmatter.get("opendot_id"):
             return
         with self.database.connect() as connection:
             allowed = connection.execute(
                 "SELECT 1 FROM type_registry WHERE name = ? AND enabled = 1 AND confirmed = 1",
                 (declared,),
             ).fetchone()
-        # "self" is the single owner node, created once by `alfred memory-self`;
+        # "self" is the single owner node, created once by `opendot memory-self`;
         # a note must not mint a second one.
         if allowed is None or declared == "self":
             return
@@ -545,7 +545,7 @@ class VaultImporter:
         Turning "[[Alex]]" into a typed edge would require inventing a
         predicate, and this section requires relationships to be typed,
         registry-validated, and temporal. It also never creates an entity: a
-        link to a note Alfred has never heard of is counted as unresolved
+        link to a note OpenDot has never heard of is counted as unresolved
         rather than promoted into the graph, since a filename is not evidence
         that a thing exists. Ambiguous names resolve to nothing at all, per
         the rule that two possible "Alex" entities beat one wrong merge.

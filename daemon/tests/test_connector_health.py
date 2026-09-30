@@ -73,7 +73,7 @@ def test_error_takes_priority_even_with_a_recent_success(tmp_path: Path) -> None
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
     _insert_sync_state(
         database,
-        connector="canvas",
+        connector="github",
         account="self",
         last_success_at=(now - timedelta(minutes=5)).isoformat(),
         last_error="ConnectTimeout",

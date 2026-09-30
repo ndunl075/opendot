@@ -111,7 +111,7 @@ class JobRunner:
                         # reads this same database, and this method holds a
                         # write transaction. Instead this queues the request
                         # exactly the way an inbound Telegram message is
-                        # queued, so `hermes_bridge` picks it up on the next
+                        # queued, so the agent bridge picks it up on the next
                         # cycle and answers it through the whole normal path:
                         # tool selection, typing indicator, bubbles, feedback
                         # buttons. The user cannot tell it came from a

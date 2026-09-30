@@ -257,15 +257,15 @@ def test_calendar_event_is_never_created_without_a_consumed_approval(tmp_path: P
     start = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
     end = datetime(2026, 8, 15, 11, 0, tzinfo=UTC)
 
-    proposed = actions.propose_event(actor="nico", calendar_id="primary", summary="Advisor meeting", start=start, end=end)
+    proposed = actions.propose_event(actor="sam", calendar_id="primary", summary="Advisor meeting", start=start, end=end)
     assert transport.calls == []  # proposing alone must never touch Google
 
     with pytest.raises(PolicyError, match="not usable"):
-        actions.execute(proposed.id, actor="nico", token="not-a-real-token")
+        actions.execute(proposed.id, actor="sam", token="not-a-real-token")
     assert transport.calls == []
 
-    issued = approvals.approve(proposed.id, actor="nico")
-    receipt = actions.execute(proposed.id, actor="nico", token=issued.token)
+    issued = approvals.approve(proposed.id, actor="sam")
+    receipt = actions.execute(proposed.id, actor="sam", token=issued.token)
 
     assert receipt.replayed is False
     assert receipt.calendar_event_id == transport.calls[0]["event_id"]
@@ -282,11 +282,11 @@ def test_calendar_execute_replays_the_receipt_instead_of_creating_twice(tmp_path
     actions = GoogleCalendarActions(database, approvals, transport)
     start = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
     end = datetime(2026, 8, 15, 11, 0, tzinfo=UTC)
-    proposed = actions.propose_event(actor="nico", calendar_id="primary", summary="Advisor meeting", start=start, end=end)
-    issued = approvals.approve(proposed.id, actor="nico")
+    proposed = actions.propose_event(actor="sam", calendar_id="primary", summary="Advisor meeting", start=start, end=end)
+    issued = approvals.approve(proposed.id, actor="sam")
 
-    first = actions.execute(proposed.id, actor="nico", token=issued.token)
-    second = actions.execute(proposed.id, actor="nico", token=issued.token)
+    first = actions.execute(proposed.id, actor="sam", token=issued.token)
+    second = actions.execute(proposed.id, actor="sam", token=issued.token)
 
     assert first.replayed is False
     assert second.replayed is True
@@ -296,7 +296,7 @@ def test_calendar_execute_replays_the_receipt_instead_of_creating_twice(tmp_path
     with pytest.raises(PolicyError, match="does not match"):
         actions.execute(proposed.id, actor="someone-else", token=issued.token)
     with pytest.raises(PolicyError, match="invalid"):
-        actions.execute(proposed.id, actor="nico", token="wrong-token")
+        actions.execute(proposed.id, actor="sam", token="wrong-token")
 
 
 def test_calendar_execute_recovers_after_provider_success_before_local_receipt(tmp_path: Path) -> None:
@@ -309,7 +309,7 @@ def test_calendar_execute_recovers_after_provider_success_before_local_receipt(t
             self.calls += 1
             if self.event_id is None:
                 self.event_id = event_id  # Calendar accepted this create.
-                raise ConnectionError("Alfred crashed before it received the response")
+                raise ConnectionError("OpenDot crashed before it received the response")
             assert event_id == self.event_id
             return {"id": event_id}  # Calendar's duplicate-ID recovery lookup.
 
@@ -317,17 +317,17 @@ def test_calendar_execute_recovers_after_provider_success_before_local_receipt(t
     approvals = ApprovalService(database)
     transport = CrashAfterProviderSuccess()
     proposal = GoogleCalendarActions(database, approvals).propose_event(
-        actor="nico",
+        actor="sam",
         calendar_id="primary",
         summary="Advisor meeting",
         start=datetime(2026, 8, 15, 10, 0, tzinfo=UTC),
         end=datetime(2026, 8, 15, 11, 0, tzinfo=UTC),
     )
-    issued = approvals.approve(proposal.id, actor="nico")
+    issued = approvals.approve(proposal.id, actor="sam")
 
     with pytest.raises(ConnectionError):
-        GoogleCalendarActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
-    recovered = GoogleCalendarActions(database, approvals, transport).execute(proposal.id, actor="nico", token=issued.token)
+        GoogleCalendarActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
+    recovered = GoogleCalendarActions(database, approvals, transport).execute(proposal.id, actor="sam", token=issued.token)
 
     assert recovered.replayed is False
     assert recovered.calendar_event_id == transport.event_id
@@ -341,23 +341,23 @@ def test_calendar_client_recovers_an_uncertain_create_from_the_stable_event_id()
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, request.url.path))
         if request.method == "POST":
-            assert json.loads(request.content)["id"] == "alfred0123456789abcdef0123456789abcdef"
+            assert json.loads(request.content)["id"] == "opendot0123456789abcdef0123456789abcdef"
             return httpx.Response(409, json={"error": {"reason": "duplicate"}})
-        return httpx.Response(200, json={"id": "alfred0123456789abcdef0123456789abcdef"})
+        return httpx.Response(200, json={"id": "opendot0123456789abcdef0123456789abcdef"})
 
     client = GoogleCalendarClient("TOKEN", transport=httpx.MockTransport(handler))
     try:
         recovered = client.create_event(
             calendar_id="primary",
-            event_id="alfred0123456789abcdef0123456789abcdef",
+            event_id="opendot0123456789abcdef0123456789abcdef",
             summary="Advisor meeting",
             start=datetime(2026, 8, 15, 10, 0, tzinfo=UTC),
             end=datetime(2026, 8, 15, 11, 0, tzinfo=UTC),
         )
     finally:
         client.close()
-    assert recovered["id"] == "alfred0123456789abcdef0123456789abcdef"
+    assert recovered["id"] == "opendot0123456789abcdef0123456789abcdef"
     assert calls == [
         ("POST", "/calendar/v3/calendars/primary/events"),
-        ("GET", "/calendar/v3/calendars/primary/events/alfred0123456789abcdef0123456789abcdef"),
+        ("GET", "/calendar/v3/calendars/primary/events/opendot0123456789abcdef0123456789abcdef"),
     ]

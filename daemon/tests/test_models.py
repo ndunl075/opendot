@@ -157,7 +157,7 @@ def test_anthropic_compatible_client_raises_on_error_response() -> None:
 def test_redactor_masks_common_secret_and_pii_shapes() -> None:
     redactor = Redactor()
     cases = {
-        "email me at nico@example.com": "[REDACTED:email]",
+        "email me at sam@example.com": "[REDACTED:email]",
         "Authorization: Bearer abc123.def-456": "[REDACTED:bearer_token]",
         "key is sk-abcdefghij1234567890": "[REDACTED:openai_api_key]",
         "token ghp_abcdefghij1234567890": "[REDACTED:github_token]",
@@ -212,10 +212,10 @@ def test_guarded_cloud_provider_redacts_before_calling_the_inner_provider(tmp_pa
     provider = _FakeCloudProvider()
     guard = GuardedCloudProvider(provider, Database(tmp_path / "opendot.db"), pricing=_PRICING, monthly_budget_usd=10.0)
 
-    guard.generate("email me at nico@example.com", system="reply to advisor@school.example")
+    guard.generate("email me at sam@example.com", system="reply to advisor@school.example")
 
     prompt, system = provider.calls[0]
-    assert "nico@example.com" not in prompt
+    assert "sam@example.com" not in prompt
     assert "[REDACTED:email]" in prompt
     assert system is not None and "[REDACTED:email]" in system
 
@@ -271,7 +271,7 @@ def test_guarded_cloud_provider_audits_without_the_raw_prompt_or_response(tmp_pa
     database = Database(tmp_path / "opendot.db")
     guard = GuardedCloudProvider(provider, database, pricing=_PRICING, monthly_budget_usd=1.0)
 
-    guard.generate("a secret prompt nico@example.com")
+    guard.generate("a secret prompt sam@example.com")
 
     with database.connect() as connection:
         row = connection.execute("SELECT result_json FROM tool_runs WHERE tool = 'cloud_generate'").fetchone()

@@ -62,7 +62,7 @@ def test_an_inferred_verdict_moves_ranking_the_same_way_a_tap_did(tmp_path: Path
 def test_one_response_judged_twice_still_counts_once_and_the_owner_wins(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     database.migrate()
-    # Alfred flagged its own stale context, then the owner said it was fine.
+    # OpenDot flagged its own stale context, then the owner said it was fine.
     _record(database, response_id="160", outcome="missing_context", signal=SIGNAL_COVERAGE)
     _record(database, response_id="160", outcome="helpful", signal=SIGNAL_REPLY, index=1)
 

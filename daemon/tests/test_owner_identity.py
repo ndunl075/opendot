@@ -1,11 +1,11 @@
-"""Alfred writing as the owner, rather than as "[name]".
+"""OpenDot writing as the owner, rather than as "[name]".
 
-Asked to introduce itself to the owner's mother, Alfred proposed a letter
-beginning "I'm Alfred, a personal assistant that helps [name] manage emails".
+Asked to introduce itself to the owner's mother, OpenDot proposed a letter
+beginning "I'm OpenDot, a personal assistant that helps [name] manage emails".
 The placeholder survived all the way to the approval preview.
 
 The model was not careless. Nothing in the prompt named the owner -- the
-`self` entity is labelled "Alfred owner" with no properties -- so a letter
+`self` entity is labelled "OpenDot owner" with no properties -- so a letter
 that needed a name had no name to use.
 """
 
@@ -87,7 +87,7 @@ def test_the_prompt_line_says_who_to_write_as(tmp_path: Path) -> None:
 
 
 def test_the_live_placeholder_is_caught() -> None:
-    body = "Hi,\n\nI'm Alfred, a personal assistant that helps [name] manage emails."
+    body = "Hi,\n\nI'm OpenDot, a personal assistant that helps [name] manage emails."
 
     assert unfilled_placeholders(body) == ["[name]"]
 
@@ -115,6 +115,6 @@ def test_ordinary_bracketed_prose_is_left_alone() -> None:
 
 
 def test_a_finished_letter_passes() -> None:
-    body = "Hi Mom,\n\nI'm Alfred, the assistant Alex built. He asked me to say hello.\n\nAlex"
+    body = "Hi Mom,\n\nI'm OpenDot, the assistant Alex built. He asked me to say hello.\n\nAlex"
 
     assert unfilled_placeholders(body) == []

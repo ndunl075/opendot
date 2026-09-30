@@ -81,7 +81,7 @@ def _verdicts(database: Database) -> list[tuple[str, str, str, str]]:
         ("i never said that", "wrong_context"),
         ("i don't think that's right", "wrong_context"),
         ("thanks but you missed the one from sam", "missing_context"),
-        ("you didn't mention the canvas assignment", "missing_context"),
+        ("you didn't mention the school assignment", "missing_context"),
         ("that's not all of them", "missing_context"),
         ("did you check github too", "missing_context"),
         ("there's also the invoice from stripe", "missing_context"),
@@ -109,7 +109,7 @@ def test_the_next_message_carries_the_verdict_the_buttons_used_to_collect(
         # Declining an offer is not praise, even though it says "thanks".
         "no thanks",
         "nah i'm good",
-        # Alfred's replies end with offers, so a bare "no" answers a question
+        # OpenDot's replies end with offers, so a bare "no" answers a question
         # rather than disputing a fact.
         "no",
         "yeah do that",
@@ -190,7 +190,7 @@ def test_a_second_correction_does_not_pile_onto_the_same_answer(tmp_path: Path) 
     assert _verdicts(database) == [("80", "reply", "wrong_context", "denial")]
 
 
-def test_stale_context_is_flagged_by_alfred_rather_than_by_the_owner() -> None:
+def test_stale_context_is_flagged_by_opendot_rather_than_by_the_owner() -> None:
     now = datetime.now(UTC)
     fresh = (now - timedelta(minutes=5)).isoformat()
     old = (now - timedelta(days=3)).isoformat()

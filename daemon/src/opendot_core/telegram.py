@@ -94,7 +94,7 @@ _WEEKDAYS = {
     "saturday": 5,
     "sunday": 6,
 }
-#: Only reachable from keyboards already sitting in chat history; Alfred stopped
+#: Only reachable from keyboards already sitting in chat history; OpenDot stopped
 #: attaching feedback buttons to new answers.
 _FEEDBACK_CALLBACK = re.compile(r"^af:(?P<response_update_id>\d+):(?P<code>[hmw])$")
 _FEEDBACK_OUTCOME = {
@@ -147,7 +147,7 @@ def _contains_phrase(haystack: str, phrase: str) -> bool:
 class TelegramGateway:
     """Accept updates from locally paired identities and create durable intents."""
 
-    #: Casual conversation gets no synthetic acknowledgement. Hermes answers
+    #: Casual conversation gets no synthetic acknowledgement. The agent answers
     #: it directly; only explicit work gets an immediate progress message.
     agent_ack_text = ""
 
@@ -155,7 +155,7 @@ class TelegramGateway:
     #: on the MCP surface plus the connectors that feed them. This is a
     #: keyword match, not a model call, on purpose: the ack is produced inside
     #: the intake write transaction and has to be instant, which is the same
-    #: reason the real answer is deferred to `hermes_bridge` at all. Phrased
+    #: reason the real answer is deferred to the agent at all. Phrased
     #: to say what is being worked on, never to promise a result, since the
     #: agent decides for itself which tools it actually needs.
     #:
@@ -202,7 +202,7 @@ class TelegramGateway:
         (("add a task", "new task", "add task"), "adding that..."),
         (("mark", "done", "finished", "completed"), "marking that done..."),
         # Journal writes. Phrased as recording rather than as an opinion:
-        # Alfred stores what was said, it does not assess it.
+        # OpenDot stores what was said, it does not assess it.
         (("log my mood", "mood check", "feeling like a", "rate my day"), "logging that..."),
         (("grateful for", "gratitude", "thankful for"), "writing that down..."),
         (("birthday is", "anniversary is", "remember the date", "important date"),
@@ -215,7 +215,6 @@ class TelegramGateway:
     #: used to answer "checking github..." alone, which read as if half the
     #: question had been missed.
     agent_ack_reads: tuple[tuple[tuple[str, ...], str], ...] = (
-        (("canvas", "assignment", "homework", "syllabus", "coursework", "class", "course", "exam", "quiz"), "canvas"),
         # Before the general github entry, so "any prs waiting on me" names
         # the actual question rather than the connector it happens to use.
         (("open pr", "open prs", "stale pr", "my prs", "my pull requests", " prs ", " pr ",
@@ -238,7 +237,6 @@ class TelegramGateway:
          "your journal"),
         (("birthday", "birthdays", "anniversary", "important dates"), "upcoming dates"),
         (("slack",), "slack"),
-        (("steps", "sleep", "heart rate", "workout", "health", "fitness"), "your health data"),
         (("note", "notes", "obsidian", "vault"), "your notes"),
         (("inbox", "email", "e-mail", "gmail", "mail", "unread"), "your inbox"),
         (("task", "todo", "to-do", "to do"), "your tasks"),
@@ -269,7 +267,7 @@ class TelegramGateway:
         # Read topics are matched against the message with any email address
         # removed. An address carries its own provider name, so "gmail" inside
         # mom@example.com counted as a request to read the inbox: answering
-        # Alfred's own "what's your mom's email?" with just the address was
+        # OpenDot's own "what's your mom's email?" with just the address was
         # acknowledged "checking your inbox...". The write path above already
         # guards this for "send it to x@y.com"; a bare address had no such
         # guard because it names no verb at all.
@@ -324,11 +322,11 @@ class TelegramGateway:
         text = message.text
         pair = TelegramPair(chat_id=message.chat.id, user_id=message.sender.id)
         if pair not in self.allowed_pairs:
-            raise PermissionError("Telegram sender is not locally paired with Alfred")
+            raise PermissionError("Telegram sender is not locally paired with OpenDot")
 
         # Parsed once here rather than inside the transaction: the metadata
         # marker below has to be written by the same INSERT that stores the
-        # event, and `hermes_bridge` later reads that marker instead of
+        # event, and the agent bridge later reads that marker instead of
         # re-deriving the decision with its own copy of this parser.
         try:
             parsed: ParsedCommand | None = self._parse_command(text, received_at=datetime.fromtimestamp(message.date, UTC).astimezone())
@@ -394,7 +392,7 @@ class TelegramGateway:
                 return receipt
 
     def _handle_feedback_callback(self, update: TelegramUpdate) -> TelegramReceipt:
-        """Honor a tap on a keyboard Alfred no longer sends.
+        """Honor a tap on a keyboard OpenDot no longer sends.
 
         New answers carry approval buttons only; a verdict now comes from what
         the owner says next (``ResponseFeedbackService.record_reply_signal_in_transaction``).
@@ -412,10 +410,10 @@ class TelegramGateway:
             user_id=callback.sender.id,
         )
         if pair not in self.allowed_pairs:
-            raise PermissionError("Telegram sender is not locally paired with Alfred")
+            raise PermissionError("Telegram sender is not locally paired with OpenDot")
         match = _FEEDBACK_CALLBACK.fullmatch(callback.data)
         if match is None:
-            raise ValueError("Telegram callback is not an Alfred feedback action")
+            raise ValueError("Telegram callback is not an OpenDot feedback action")
         response_update_id = match.group("response_update_id")
         outcome = _FEEDBACK_OUTCOME[match.group("code")]
 
@@ -487,10 +485,10 @@ class TelegramGateway:
             raise ValueError("Telegram action callback is incomplete")
         pair = TelegramPair(chat_id=callback.message.chat.id, user_id=callback.sender.id)
         if pair not in self.allowed_pairs:
-            raise PermissionError("Telegram sender is not locally paired with Alfred")
+            raise PermissionError("Telegram sender is not locally paired with OpenDot")
         match = _ACTION_CALLBACK.fullmatch(callback.data)
         if match is None:
-            raise ValueError("Telegram callback is not an Alfred action")
+            raise ValueError("Telegram callback is not an OpenDot action")
         approval_id = match.group("approval_id")
         decision = "approve" if match.group("code").lower() == "y" else "reject"
 
@@ -575,7 +573,7 @@ class TelegramGateway:
             if deferred:
                 # Deliberately only an acknowledgement: the agent turn takes
                 # seconds and must not run inside this write transaction, so
-                # `hermes_bridge` sends the real answer as a second message.
+                # the agent bridge sends the real answer as a second message.
                 return TelegramReceipt(text=self.acknowledgement_for(text), agent_deferred=True)
             return TelegramReceipt(
                 text=f"{parse_error} Use /task, /remind, /status, or /restart."
@@ -587,14 +585,14 @@ class TelegramGateway:
             return TelegramReceipt(text=format_runtime_status(runtime_status(self.database)))
 
         if parsed.command == "runtime_restart":
-            from .runtime_control import _write_restart_request, restart_alfred
+            from .runtime_control import _write_restart_request, restart_daemon
 
             if parsed.title.strip() != "confirm":
                 return TelegramReceipt(
-                    text="this restarts the whole Alfred process. reply /restart confirm (or /wake confirm) to do it."
+                    text="this restarts the whole OpenDot process. reply /restart confirm (or /wake confirm) to do it."
                 )
 
-            restart = restart_alfred()
+            restart = restart_daemon()
             if restart.ok:
                 return TelegramReceipt(text=f"restarting via {restart.method}.")
             _write_restart_request(connection, requested_at=datetime.now(UTC))

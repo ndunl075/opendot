@@ -21,7 +21,7 @@ from .db import Database
 from .policy import Approval, ApprovalService, PolicyError
 
 
-MAGIC = b"ALFRED-BACKUP-1\n"
+MAGIC = b"OPENDOT-BACKUP-1\n"
 NONCE_BYTES = 12
 
 
@@ -152,7 +152,7 @@ class EncryptedBackupService:
                 return failed(str(error))
             # Deliberately a real Database on the copy: migrating and
             # verifying the chain here proves the backup would come back as a
-            # working Alfred, not just as a readable file.
+            # working OpenDot, not just as a readable file.
             from .audit import AuditLog
 
             staged_database = Database(staged)
@@ -281,7 +281,7 @@ def _validate_database(path: Path) -> None:
         if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("decrypted backup failed SQLite integrity check")
         if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").fetchone() is None:
-            raise ValueError("decrypted backup is not an Alfred database")
+            raise ValueError("decrypted backup is not an OpenDot database")
     finally:
         connection.close()
 

@@ -16,7 +16,7 @@ def test_append_links_a_document_to_its_event(tmp_path: Path) -> None:
                 source="obsidian_vault",
                 external_id="Decisions/local-first.md:abc123",
                 occurred_at=datetime(2026, 8, 11, tzinfo=UTC),
-                content="Alfred stays local-first.",
+                content="OpenDot stays local-first.",
                 metadata={},
             )
             document = DocumentStore.append(

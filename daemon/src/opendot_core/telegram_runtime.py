@@ -74,7 +74,7 @@ class TelegramTypingHeartbeat:
         if self.transport is not None and self.chat_ids:
             self._thread = Thread(
                 target=self._run,
-                name="alfred-telegram-typing",
+                name="opendot-telegram-typing",
                 daemon=True,
             )
             self._thread.start()

@@ -74,18 +74,15 @@ def test_declared_google_scopes_actually_appear_in_the_source() -> None:
     assert declared <= requested, f"declared but never requested: {sorted(declared - requested)}"
 
 
-def test_google_health_is_the_only_sensitive_connector() -> None:
-    """Section 9 tags every health value sensitive; client scopes exclude that
-    tier by default, so a second one appearing silently would widen exposure."""
-    assert sensitive_connectors() == ("google_health",)
+def test_no_connector_is_declared_sensitive_by_default() -> None:
+    """Client scopes exclude the sensitive tier by default, so a connector
+    that stores sensitive data must be added here on purpose."""
+    assert sensitive_connectors() == ()
 
 
-def test_health_scopes_are_all_read_only() -> None:
-    health = capability_for("google_health")
-
-    assert health is not None
-    assert health.writes is False
-    assert all(scope.endswith(".readonly") for scope in health.scopes)
+def test_removed_connectors_are_no_longer_declared() -> None:
+    for removed in ("canvas", "canvas_ical", "google_health"):
+        assert capability_for(removed) is None
 
 
 def test_writing_connectors_are_exactly_the_expected_set() -> None:
@@ -109,7 +106,7 @@ def test_every_connector_that_has_ever_synced_is_declared(tmp_path: Path) -> Non
     database.migrate()
     now = datetime.now(UTC).isoformat()
     # Names taken from the connector_name attributes across the package.
-    for connector in ("google_calendar", "gmail", "github", "canvas_ical", "telegram"):
+    for connector in ("google_calendar", "gmail", "github", "telegram"):
         with database.connect() as connection:
             with database.transaction(connection):
                 connection.execute(

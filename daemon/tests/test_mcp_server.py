@@ -11,7 +11,7 @@ from opendot_core.connector_records import ConnectorRecordStore
 from opendot_core.db import Database
 from opendot_core.gmail import _draft_message_id
 from opendot_core.google_calendar import _calendar_event_id
-from opendot_core.hermes_tools import HERMES_MCP_TOOL_FILTER_ENV, HERMES_TELEGRAM_CHAT_ID_ENV
+from opendot_core.mcp_server import TELEGRAM_CHAT_ID_ENV
 from opendot_core.mcp_server import MCP_TOOL_NAMES, create_server, main, parse_stdio_args
 from opendot_core.policy import ApprovalService, PolicyStore
 
@@ -19,14 +19,14 @@ from opendot_core.policy import ApprovalService, PolicyStore
 def test_mcp_server_can_be_constructed(tmp_path: Path) -> None:
     server = create_server(tmp_path / "opendot.db")
 
-    assert server.name == "Alfred"
+    assert server.name == "OpenDot"
     assert {tool.name for tool in asyncio.run(server.list_tools())} == MCP_TOOL_NAMES
 
 
 def test_mcp_server_registers_only_an_explicit_per_turn_tool_filter(tmp_path: Path) -> None:
     server = create_server(
         tmp_path / "opendot.db",
-        client_id="hermes",
+        client_id="agent",
         tool_filter=frozenset({"agenda_get", "brief_get"}),
     )
 
@@ -44,7 +44,7 @@ def test_mcp_server_rejects_an_unknown_filter_entry(tmp_path: Path) -> None:
 
 
 def test_parse_stdio_args_defaults_match_prior_hardcoded_behavior() -> None:
-    """alfred-mcp with no arguments must behave exactly as it did before
+    """opendot-mcp with no arguments must behave exactly as it did before
     --client-id existed: 'local-mcp', the default database path."""
     args = parse_stdio_args([])
 
@@ -71,23 +71,15 @@ def test_main_builds_the_server_with_the_parsed_client_id_and_db() -> None:
     run_mock.assert_called_once_with(transport="stdio")
 
 
-def test_main_applies_the_inherited_hermes_tool_filter() -> None:
+def test_main_ignores_any_inherited_tool_filter_environment() -> None:
     with (
-        mock.patch.dict(
-            "os.environ",
-            {HERMES_MCP_TOOL_FILTER_ENV: "brief_get, agenda_get"},
-            clear=False,
-        ),
+        mock.patch.dict("os.environ", {"OPENDOT_MCP_TOOLS": "brief_get, agenda_get"}, clear=False),
         mock.patch("opendot_core.mcp_server.create_server") as create_server_mock,
         mock.patch.object(create_server_mock.return_value, "run") as run_mock,
     ):
-        main(["--client-id", "hermes"])
+        main(["--client-id", "agent"])
 
-    create_server_mock.assert_called_once_with(
-        None,
-        client_id="hermes",
-        tool_filter=frozenset({"agenda_get", "brief_get"}),
-    )
+    create_server_mock.assert_called_once_with(None, client_id="agent")
     run_mock.assert_called_once_with(transport="stdio")
 
 
@@ -115,8 +107,8 @@ def test_remember_and_forget_round_trip_through_mcp(tmp_path: Path) -> None:
     _grant(database_path)
     server = create_server(database_path)
 
-    remembered = _call(server, "remember", {"statement": "Nico prefers a 7 AM brief."})
-    assert remembered["statement"] == "Nico prefers a 7 AM brief."
+    remembered = _call(server, "remember", {"statement": "Sam prefers a 7 AM brief."})
+    assert remembered["statement"] == "Sam prefers a 7 AM brief."
     assert remembered["sensitivity"] == "personal"
 
     found = _call(server, "memory_search", {"query": "7 AM brief"})
@@ -150,12 +142,12 @@ def test_memory_correction_and_feedback_round_trip_through_mcp(tmp_path: Path) -
         allowed_tools={"remember", "memory_search", "memory_correct", "memory_feedback"},
     )
     server = create_server(database_path)
-    original = _call(server, "remember", {"statement": "Nico prefers long answers."})
+    original = _call(server, "remember", {"statement": "Sam prefers long answers."})
 
     corrected = _call(
         server,
         "memory_correct",
-        {"memory_id": original["id"], "replacement_statement": "Nico prefers concise answers."},
+        {"memory_id": original["id"], "replacement_statement": "Sam prefers concise answers."},
     )
     feedback = _call(
         server,
@@ -197,7 +189,7 @@ def test_forget_rejects_a_memory_outside_the_client_scope(tmp_path: Path) -> Non
     database = Database(database_path)
     from opendot_core.memory_graph import MemoryGraph
 
-    sensitive = MemoryGraph(database).remember("Alfred project has private health notes.", sensitivity="sensitive")
+    sensitive = MemoryGraph(database).remember("OpenDot project has private health notes.", sensitivity="sensitive")
     _grant(database_path)  # only public/personal
     server = create_server(database_path)
 
@@ -283,7 +275,7 @@ def test_connector_records_get_filters_by_connector_and_record_type(tmp_path: Pa
                 account="self",
                 record_type="notification",
                 record_id="notif-1",
-                payload={"repository": "alfred", "reason": "mention"},
+                payload={"repository": "opendot", "reason": "mention"},
                 active=True,
             )
     _grant(database_path, allowed_tools={"connector_records_get"})
@@ -353,19 +345,20 @@ def test_connector_records_get_enforces_connector_sensitivity(tmp_path: Path) ->
         with database.transaction(connection):
             ConnectorRecordStore.replace_snapshot(
                 connection,
-                connector="google_health",
+                connector="fake_sensitive",
                 account="self",
-                record_type="sleep",
-                records={"one": {"stage": "deep"}},
+                record_type="reading",
+                records={"one": {"value": 1}},
             )
     _grant(database_path, allowed_tools={"connector_records_get"})
     server = create_server(database_path)
 
-    with pytest.raises(Exception, match="not scoped to read sensitive"):
-        asyncio.run(server.call_tool("connector_records_get", {"connector": "google_health"}))
+    with mock.patch("opendot_core.mcp_server.sensitive_connectors", return_value=("fake_sensitive",)):
+        with pytest.raises(Exception, match="not scoped to read sensitive"):
+            asyncio.run(server.call_tool("connector_records_get", {"connector": "fake_sensitive"}))
 
 
-def test_hermes_raw_connector_results_use_the_same_pii_redaction_floor(tmp_path: Path) -> None:
+def test_agent_raw_connector_results_use_the_same_pii_redaction_floor(tmp_path: Path) -> None:
     database_path = tmp_path / "opendot.db"
     database = Database(database_path)
     database.migrate()
@@ -379,12 +372,12 @@ def test_hermes_raw_connector_results_use_the_same_pii_redaction_floor(tmp_path:
                 records={"one": {"from": "person@example.com", "snippet": "call 513-555-1212"}},
             )
     PolicyStore(database).grant(
-        client_id="hermes",
+        client_id="agent",
         allowed_sensitivities={"public", "personal"},
         allowed_tools={"connector_records_get"},
         allow_write=False,
     )
-    server = create_server(database_path, client_id="hermes")
+    server = create_server(database_path, client_id="agent")
 
     records = _call(server, "connector_records_get", {"connector": "gmail"})
 
@@ -438,13 +431,13 @@ def test_reminder_set_creates_its_own_task_when_none_is_given(tmp_path: Path) ->
     assert (row["title"], row["state"]) == ("Call advisor", "open")
 
 
-def test_reminder_set_inherits_chat_id_from_the_hermes_turn_environment(
+def test_reminder_set_inherits_chat_id_from_the_agent_turn_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database_path = tmp_path / "opendot.db"
     _grant(database_path, allowed_tools={"reminder_set"})
     server = create_server(database_path)
-    monkeypatch.setenv(HERMES_TELEGRAM_CHAT_ID_ENV, "20")
+    monkeypatch.setenv(TELEGRAM_CHAT_ID_ENV, "20")
 
     job = _call(
         server,
@@ -460,13 +453,13 @@ def test_reminder_set_inherits_chat_id_from_the_hermes_turn_environment(
     assert payload["destination"] == "telegram:20"
 
 
-def test_task_schedule_inherits_chat_id_from_the_hermes_turn_environment(
+def test_task_schedule_inherits_chat_id_from_the_agent_turn_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database_path = tmp_path / "opendot.db"
     _grant(database_path, allowed_tools={"task_schedule"})
     server = create_server(database_path)
-    monkeypatch.setenv(HERMES_TELEGRAM_CHAT_ID_ENV, "20")
+    monkeypatch.setenv(TELEGRAM_CHAT_ID_ENV, "20")
 
     task = _call(
         server,

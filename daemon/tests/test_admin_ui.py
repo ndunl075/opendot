@@ -51,7 +51,7 @@ def test_login_page_loads_without_authentication(tmp_path: Path) -> None:
     response = client.get("/login")
 
     assert response.status_code == 200
-    assert "Alfred admin" in response.text
+    assert "OpenDot admin" in response.text
 
 
 def test_wrong_token_shows_an_error_and_sets_no_cookie(tmp_path: Path) -> None:
@@ -61,7 +61,7 @@ def test_wrong_token_shows_an_error_and_sets_no_cookie(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "Incorrect token" in response.text
-    assert "alfred_admin_token" not in client.cookies
+    assert "opendot_admin_token" not in client.cookies
 
 
 def test_correct_token_sets_a_cookie_and_grants_access(tmp_path: Path) -> None:
@@ -69,7 +69,7 @@ def test_correct_token_sets_a_cookie_and_grants_access(tmp_path: Path) -> None:
 
     _login(client)
 
-    assert client.cookies.get("alfred_admin_token") == TOKEN
+    assert client.cookies.get("opendot_admin_token") == TOKEN
     assert client.get("/").status_code == 200
 
 
@@ -130,14 +130,14 @@ def test_overview_shows_the_empty_state_with_no_tasks(tmp_path: Path) -> None:
 
 def test_approvals_page_lists_a_pending_approval(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
-    ApprovalService(database).propose(actor="nico", action_type="calendar_event_create", preview={"summary": "x"})
+    ApprovalService(database).propose(actor="sam", action_type="calendar_event_create", preview={"summary": "x"})
     client = _client(database)
     _login(client)
 
     response = client.get("/approvals")
 
     assert "calendar_event_create" in response.text
-    assert "nico" in response.text
+    assert "sam" in response.text
 
 
 def test_approvals_page_shows_empty_state_with_nothing_pending(tmp_path: Path) -> None:
@@ -194,33 +194,18 @@ def test_connector_icon_falls_back_to_a_generic_glyph_for_an_unknown_connector()
     assert "<path" in icon
 
 
-def test_connector_icon_returns_the_real_browseros_mark_not_the_generic_fallback() -> None:
-    icon = _connector_icon("browseros")
-
-    assert "connector-icon-browseros" in icon
-    assert "connector-icon-generic" not in icon
-    assert "<path" in icon
-
-
-def test_connectors_page_always_includes_a_live_browseros_row(tmp_path: Path) -> None:
-    # No sync_state rows at all -- browseros isn't sync_state-derived, so it
-    # must still show up even when every other connector is empty.
+def test_connectors_page_renders_when_no_connector_has_synced(tmp_path: Path) -> None:
+    # No sync_state rows at all: the page still renders, with the capability table.
     database = Database(tmp_path / "opendot.db")
     client = _client(database)
     _login(client)
 
     response = client.get("/connectors")
 
-    from opendot_core.browseros_health import browseros_port
+    assert response.status_code == 200
+    assert "What each connector may do" in response.text
+    assert "browseros" not in response.text
 
-    assert "browseros" in response.text
-    # The discovered port, not a hardcoded one: this machine's install serves
-    # 9210 while the documentation says 9200, and pinning the constant here
-    # would fail on exactly the setup the feature is meant to support.
-    assert f"127.0.0.1:{browseros_port()}" in response.text
-    # Whatever's actually listening on 9200 in the test environment, the
-    # row must resolve to one of the two states this probe can produce.
-    assert ">Connected<" in response.text or ">Disconnected<" in response.text
 
 
 def test_rate_filter_distinguishes_unmeasured_from_zero() -> None:
@@ -280,7 +265,7 @@ def test_evaluation_page_shows_rates_and_source_attribution(tmp_path: Path) -> N
     assert "75%" in response.text  # three helpful of four votes, none inferred
     assert "gmail" in response.text
     assert "nothing to attribute" not in response.text
-    # Alfred's own flag is reported apart from the votes, not folded into them.
+    # OpenDot's own flag is reported apart from the votes, not folded into them.
     assert "1 answer" in response.text
     assert "Read from what you said next" in response.text
 
@@ -292,7 +277,7 @@ def test_audit_page_shows_redacted_records_never_raw_content(tmp_path: Path) -> 
         with database.transaction(connection):
             AuditLog.append_in_transaction(
                 connection,
-                AuditEvent(actor="nico", client="cli", tool="task_upsert", outcome="ok", result={"task_id": "abc"}),
+                AuditEvent(actor="sam", client="cli", tool="task_upsert", outcome="ok", result={"task_id": "abc"}),
             )
     client = _client(database)
     _login(client)
@@ -385,6 +370,5 @@ def test_connectors_page_shows_what_each_connector_may_do(tmp_path: Path) -> Non
     assert "What each connector may do" in response.text
     assert "can write" in response.text
     assert "read-only" in response.text
-    # The one sensitive connector is called out by name.
-    assert "google_health" in response.text
-    assert "sensitive" in response.text
+    # No connector stores sensitive data by default any more, and none is named as one.
+    assert "google_health" not in response.text

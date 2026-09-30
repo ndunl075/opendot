@@ -1,4 +1,4 @@
-"""Durable Telegram approvals for Alfred's existing safe action proposals."""
+"""Durable Telegram approvals for OpenDot's existing safe action proposals."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def action_preview(action_type: str, preview: dict[str, Any]) -> str:
     The agent already describes its own proposal in prose, but that is the
     model's account of what it did, written before the record existed and
     free to differ from it. "i queued it up with the subject 'hi, it's
-    alfred'" told the owner the subject and nothing else, so approving meant
+    opendot'" told the owner the subject and nothing else, so approving meant
     sending a letter they had never read.
 
     This reads the record the executor will use, so what is shown and what is
@@ -85,7 +85,7 @@ def _trim(body: str) -> str:
 def action_keyboard(
     approvals: list[tuple[str, str]],
 ) -> dict[str, list[list[dict[str, str]]]]:
-    """The only keyboard Alfred still sends: a write it may not perform alone.
+    """The only keyboard OpenDot still sends: a write it may not perform alone.
 
     This used to carry the response-feedback buttons underneath as well.
     Ratings are now inferred from the conversation, so a keyboard appearing at
@@ -110,7 +110,7 @@ def action_keyboard(
 class TelegramActionWorker:
     """Execute button decisions outside Telegram intake's database transaction."""
 
-    actor = "mcp:hermes"
+    actor = "mcp:agent"
 
     def __init__(
         self,

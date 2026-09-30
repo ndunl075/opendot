@@ -1,10 +1,10 @@
 """Who the owner is, learned from their own sent mail.
 
-Alfred wrote an email that introduced itself as "a personal assistant that
+OpenDot wrote an email that introduced itself as "a personal assistant that
 helps [name] manage emails" -- the placeholder shipped intact, and only the
 approval preview caught it before it reached the owner's mother.
 
-The cause is that Alfred did not know. The `self` entity is labelled "Alfred
+The cause is that OpenDot did not know. The `self` entity is labelled "OpenDot
 owner" with no properties, so nothing in the prompt could tell the model whose
 assistant it is, and a model asked to write a letter with no name available
 does the reasonable thing and leaves a slot.
@@ -105,7 +105,7 @@ _PLACEHOLDER = re.compile(
 def unfilled_placeholders(text: str) -> list[str]:
     """Every unfilled slot in a proposed message, in order.
 
-    A letter that reaches the owner's mother introducing Alfred as the
+    A letter that reaches the owner's mother introducing OpenDot as the
     assistant of "[name]" is not a small blemish: it is unrecoverable once
     sent, and the owner approving a preview is not a reliable filter because
     the whole point of the preview is that it is usually fine.

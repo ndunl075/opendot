@@ -10,7 +10,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
 
     assert main(["--db", str(database_path), "init"]) == 0
     initialized = json.loads(capsys.readouterr().out)
-    assert initialized["schema_version"] == 17
+    assert initialized["schema_version"] == 18
 
     assert (
         main(
@@ -19,7 +19,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
                 str(database_path),
                 "audit",
                 "--actor",
-                "nico",
+                "sam",
                 "--tool",
                 "system_status",
                 "--outcome",
@@ -41,40 +41,6 @@ def test_cli_reports_connector_status_without_any_configured_connector(tmp_path:
     assert json.loads(capsys.readouterr().out) == []
 
 
-def test_cli_reports_empty_latency_status_without_message_content(tmp_path: Path, capsys) -> None:
-    database_path = tmp_path / "opendot.db"
-
-    assert main(["--db", str(database_path), "latency-status", "--limit", "5"]) == 0
-    report = json.loads(capsys.readouterr().out)
-
-    assert report["instrumented_turns"] == 0
-    assert report["delivered_turns"] == 0
-    assert report["recent"] == []
-
-
-def test_cli_exposes_opt_in_canvas_ical_sync_without_a_url_argument() -> None:
-    one_shot = build_parser().parse_args(["canvas-ical-sync"])
-    setup = build_parser().parse_args(["canvas-ical-setup"])
-    continuous = build_parser().parse_args(["run", "--canvas-ical"])
-
-    assert one_shot.secret_name == "canvas-ical-feed-url"
-    assert setup.secret_name == "canvas-ical-feed-url"
-    assert continuous.canvas_ical is True
-    assert continuous.canvas_ical_secret_name == "canvas-ical-feed-url"
-    assert continuous.canvas_ical_interval == 900.0
-
-
-def test_cli_exposes_opt_in_google_health_grant_without_replacing_calendar_scopes() -> None:
-    default_grant = build_parser().parse_args(["google-auth"])
-    health_grant = build_parser().parse_args(["google-auth", "--include-health"])
-    continuous = build_parser().parse_args(["run", "--google-health"])
-
-    assert default_grant.include_health is False
-    assert health_grant.include_health is True
-    assert continuous.google_health is True
-    assert continuous.google_health_lookback_days == 14
-
-
 def test_cli_exposes_composio_free_tier_commands_without_a_key_argument() -> None:
     setup = build_parser().parse_args(["composio-setup"])
     status = build_parser().parse_args(["composio-status"])
@@ -87,53 +53,12 @@ def test_cli_exposes_composio_free_tier_commands_without_a_key_argument() -> Non
     assert connect.toolkit == "spotify"
 
 
-def test_health_sync_once_soft_fails_when_fitbit_is_not_linked(tmp_path: Path, monkeypatch) -> None:
-    from opendot_core.cli import _health_sync_once
-    from opendot_core.google_health import GoogleHealthSync, HealthAccountNotLinked
-
-    database = Database(tmp_path / "opendot.db")
-    database.migrate()
-
-    class FakeClient:
-        def close(self) -> None:
-            return None
-
-    def sync_raises(self) -> None:
-        self._store_error("HealthAccountNotLinked")
-        raise HealthAccountNotLinked("not linked")
-
-    monkeypatch.setattr("opendot_core.cli.GoogleHealthClient", lambda token: FakeClient())
-    monkeypatch.setattr("opendot_core.cli._google_health_access_token", lambda: "TOKEN")
-    monkeypatch.setattr(GoogleHealthSync, "sync", sync_raises)
-
-    _health_sync_once(database, 14)
-
-    with database.connect() as connection:
-        row = connection.execute(
-            "SELECT last_error FROM sync_state WHERE connector = 'google_health'"
-        ).fetchone()
-    assert row["last_error"] == "HealthAccountNotLinked"
-
-
-def test_cli_exposes_windows_safe_hermes_python_launch() -> None:
-    args = build_parser().parse_args(
-        ["run", "--hermes-profile", "alfred", "--hermes-python", r"C:\Hermes\python.exe"]
-    )
-
-    assert args.hermes_python == r"C:\Hermes\python.exe"
-    assert args.hermes_conversation_model == "poolside/laguna-xs-2.1:free"
-    # Paid inference is opt-in on both halves, so the documented $0 running
-    # cost is what you get from a bare `alfred run`.
-    assert args.hermes_work_model is None
-    assert args.hermes_provider_key_secret is None
-
-
 def test_cli_imports_a_vault_note_as_a_confirmed_memory(tmp_path: Path, capsys) -> None:
     database_path = tmp_path / "opendot.db"
     vault = tmp_path / "vault"
     note = vault / "Decisions" / "local-first.md"
     note.parent.mkdir(parents=True)
-    note.write_text("Alfred stays local-first.\n", encoding="utf-8")
+    note.write_text("OpenDot stays local-first.\n", encoding="utf-8")
 
     assert main(["--db", str(database_path), "vault-import", "--vault", str(vault)]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -141,7 +66,7 @@ def test_cli_imports_a_vault_note_as_a_confirmed_memory(tmp_path: Path, capsys) 
 
     assert main(["--db", str(database_path), "memory-search", "local-first"]) == 0
     found = json.loads(capsys.readouterr().out)
-    assert [memory["statement"] for memory in found["memories"]] == ["Alfred stays local-first."]
+    assert [memory["statement"] for memory in found["memories"]] == ["OpenDot stays local-first."]
 
 
 def test_cli_handles_a_paired_telegram_task(tmp_path: Path, capsys) -> None:
@@ -185,9 +110,9 @@ def test_cli_handles_a_paired_telegram_task(tmp_path: Path, capsys) -> None:
 def test_cli_creates_and_searches_local_graph_records(tmp_path: Path, capsys) -> None:
     database_path = tmp_path / "opendot.db"
 
-    assert main(["--db", str(database_path), "memory-self", "--label", "Nico"]) == 0
+    assert main(["--db", str(database_path), "memory-self", "--label", "Sam"]) == 0
     owner_id = json.loads(capsys.readouterr().out)["id"]
-    assert main(["--db", str(database_path), "memory-entity", "--type", "project", "--label", "Alfred"]) == 0
+    assert main(["--db", str(database_path), "memory-entity", "--type", "project", "--label", "OpenDot"]) == 0
     project_id = json.loads(capsys.readouterr().out)["id"]
     assert (
         main(
@@ -206,17 +131,17 @@ def test_cli_creates_and_searches_local_graph_records(tmp_path: Path, capsys) ->
         == 0
     )
     assert json.loads(capsys.readouterr().out)["predicate"] == "works_on"
-    assert main(["--db", str(database_path), "memory-search", "Alfred"]) == 0
+    assert main(["--db", str(database_path), "memory-search", "OpenDot"]) == 0
     assert json.loads(capsys.readouterr().out)["entities"][0]["id"] == project_id
 
-    assert main(["--db", str(database_path), "memory-alias", "--entity-id", project_id, "AlfredCore"]) == 0
+    assert main(["--db", str(database_path), "memory-alias", "--entity-id", project_id, "OpenDotCore"]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "entity_id": project_id,
-        "alias": "AlfredCore",
+        "alias": "OpenDotCore",
         "source": "user:cli",
         "confidence": 1.0,
     }
-    assert main(["--db", str(database_path), "memory-search", "AlfredCore"]) == 0
+    assert main(["--db", str(database_path), "memory-search", "OpenDotCore"]) == 0
     assert json.loads(capsys.readouterr().out)["entities"][0]["id"] == project_id
 
 
@@ -242,7 +167,7 @@ def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None
                 "--reason",
                 "test cleanup",
                 "--actor",
-                "nico",
+                "sam",
             ]
         )
         == 0
@@ -251,7 +176,7 @@ def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None
     assert proposal["action_type"] == "memory_forget"
     assert proposal["preview"] == {"memory_id": corrected["id"], "reason": "test cleanup"}
 
-    assert main(["--db", str(database_path), "approval-approve", "--approval-id", proposal["id"], "--actor", "nico"]) == 0
+    assert main(["--db", str(database_path), "approval-approve", "--approval-id", proposal["id"], "--actor", "sam"]) == 0
     issued = json.loads(capsys.readouterr().out)
 
     assert (
@@ -263,7 +188,7 @@ def test_cli_corrects_and_forgets_a_local_memory(tmp_path: Path, capsys) -> None
                 "--approval-id",
                 proposal["id"],
                 "--actor",
-                "nico",
+                "sam",
                 "--token",
                 issued["token"],
             ]
@@ -295,7 +220,7 @@ def test_cli_proposes_a_calendar_event_without_any_google_credential(tmp_path: P
                 str(database_path),
                 "calendar-event-propose",
                 "--actor",
-                "nico",
+                "sam",
                 "--summary",
                 "Advisor meeting",
                 "--start",
@@ -378,7 +303,7 @@ def test_cli_proposes_a_gmail_draft_without_any_google_credential(tmp_path: Path
                 str(database_path),
                 "gmail-draft-propose",
                 "--actor",
-                "nico",
+                "sam",
                 "--to",
                 "advisor@school.example",
                 "--subject",
@@ -398,19 +323,43 @@ def test_cli_proposes_a_gmail_draft_without_any_google_credential(tmp_path: Path
     assert proposed["state"] == "pending"
 
 
-def test_cli_service_configure_stores_the_run_args_for_the_windows_service(
-    tmp_path: Path, capsys, monkeypatch
-) -> None:
-    # service-configure always writes to ./.opendot (matching scripts/install.ps1
-    # and README's fixed local-data convention), so redirect CWD rather than
-    # using --db, which only controls the database path.
-    monkeypatch.chdir(tmp_path)
+def test_cli_google_auth_requests_only_the_default_calendar_and_gmail_scopes() -> None:
+    from opendot_core.google_oauth import DEFAULT_SCOPES
 
-    assert main(["service-configure", "run", "--pair", "123:456", "--chat-id", "123"]) == 0
+    args = build_parser().parse_args(["google-auth"])
 
-    result = json.loads(capsys.readouterr().out)
-    assert result["args"] == ["run", "--pair", "123:456", "--chat-id", "123"]
-    assert Path(result["config_path"]).resolve() == (tmp_path / ".opendot" / "service.json").resolve()
-    from opendot_core.winservice import load_configured_args
+    assert not hasattr(args, "include_health")
+    assert tuple(args.scope) == () and DEFAULT_SCOPES
 
-    assert load_configured_args(alfred_dir=tmp_path / ".opendot") == ["run", "--pair", "123:456", "--chat-id", "123"]
+
+def test_cli_run_has_no_removed_connector_or_agent_flags_and_learning_is_off_by_default() -> None:
+    import pytest
+
+    default = build_parser().parse_args(["run"])
+    learning = build_parser().parse_args(["run", "--learning"])
+
+    assert default.learning is False
+    assert learning.learning is True
+    for removed in ("--canvas-ical", "--google-health", "--hermes-profile"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["run", removed])
+    for removed in ("preflight", "latency-status", "canvas-sync", "health-sync", "service-configure"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args([removed])
+
+
+def test_cli_watchdog_check_takes_the_chat_ids_allowed_to_wake_it() -> None:
+    args = build_parser().parse_args(["watchdog-check", "--chat-id", "20", "--chat-id", "21"])
+
+    assert args.chat_id == [20, 21]
+
+
+def test_cli_rebuilds_calendar_history_on_an_empty_database(tmp_path: Path, capsys) -> None:
+    database_path = tmp_path / "opendot.db"
+
+    assert main(["--db", str(database_path), "calendar-history-rebuild"]) == 0
+    report = json.loads(capsys.readouterr().out)
+
+    assert report["rollup"]["changed"] is True
+    assert report["history"]["active_items"] == 0
+

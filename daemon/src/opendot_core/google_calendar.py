@@ -146,7 +146,7 @@ class GoogleCalendarClient:
             },
         )
         if response.status_code == 409:
-            # A prior call may have reached Calendar just before Alfred crashed
+            # A prior call may have reached Calendar just before OpenDot crashed
             # or lost its response.  The stable event ID makes this a safe
             # recovery lookup rather than a second create.
             response = self._client.get(
@@ -647,7 +647,7 @@ def _calendar_event_id(approval_id: str) -> str:
     # UUID hex is a subset of Calendar's lower-case base32hex alphabet (a-v,
     # 0-9); the prefix also keeps the value safely above Calendar's 5-char
     # minimum.  The approval ID has already been generated locally.
-    return f"alfred{approval_id.replace('-', '')}"
+    return f"opendot{approval_id.replace('-', '')}"
 
 
 def _event_status(items: list[dict[str, Any]], event_id: str) -> str | None:

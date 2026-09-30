@@ -31,7 +31,7 @@ calendar organizer.
 Everything here is derived rather than stated, so it lands `confirmed=False`:
 section 5's rule is that inferred claims stay softly quarantined until
 confirmed or repeatedly supported, while an explicit statement from the owner
-is high-trust. Naming someone yourself (`alfred memory-entity --type person`,
+is high-trust. Naming someone yourself (`opendot memory-entity --type person`,
 or a `type: person` vault note) creates a confirmed entity; this only ever
 proposes.
 """

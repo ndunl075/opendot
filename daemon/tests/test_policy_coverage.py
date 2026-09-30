@@ -1,6 +1,6 @@
 """The check that would have caught eleven unreachable tools.
 
-Alfred served 33 MCP tools and granted the agent 22. Every recently built
+OpenDot served 33 MCP tools and granted the agent 22. Every recently built
 tool was routed to, offered, and then refused at the policy boundary. Nothing
 reported it at any layer: `require_read` raises for the caller, the caller is
 a language model, and the model apologised -- "the connector's not talking to
@@ -42,7 +42,7 @@ def _grant(database: Database, client_id: str, tools: set[str], *, active: bool 
 def test_a_fully_granted_client_leaves_nothing_unreachable(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     database.migrate()
-    _grant(database, "hermes", set(MCP_TOOL_NAMES))
+    _grant(database, "agent", set(MCP_TOOL_NAMES))
 
     report = _report(database)
 
@@ -56,7 +56,7 @@ def test_the_real_failure_is_caught(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     database.migrate()
     ungranted = {"availability_get", "threads_awaiting_reply", "pull_requests_get"}
-    _grant(database, "hermes", set(MCP_TOOL_NAMES) - ungranted)
+    _grant(database, "agent", set(MCP_TOOL_NAMES) - ungranted)
 
     report = _report(database)
 
@@ -70,7 +70,7 @@ def test_a_narrow_second_client_does_not_raise_a_false_alarm(tmp_path: Path) -> 
     problem would make the check noise that nobody reads."""
     database = Database(tmp_path / "opendot.db")
     database.migrate()
-    _grant(database, "hermes", set(MCP_TOOL_NAMES))
+    _grant(database, "agent", set(MCP_TOOL_NAMES))
     _grant(database, "cursor", {"agenda_get", "memory_search"})
 
     report = _report(database)
@@ -109,7 +109,7 @@ def test_a_tool_removed_from_the_server_is_reported_as_stale(tmp_path: Path) -> 
     """The opposite drift: a grant naming a tool that no longer exists."""
     database = Database(tmp_path / "opendot.db")
     database.migrate()
-    _grant(database, "hermes", set(MCP_TOOL_NAMES) | {"tool_that_was_renamed"})
+    _grant(database, "agent", set(MCP_TOOL_NAMES) | {"tool_that_was_renamed"})
 
     report = _report(database)
 
@@ -120,11 +120,11 @@ def test_a_tool_removed_from_the_server_is_reported_as_stale(tmp_path: Path) -> 
 def test_a_corrupt_grant_does_not_crash_the_report(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     database.migrate()
-    _grant(database, "hermes", set(MCP_TOOL_NAMES))
+    _grant(database, "agent", set(MCP_TOOL_NAMES))
     with database.connect() as connection:
         with database.transaction(connection):
             connection.execute(
-                "UPDATE client_scopes SET allowed_tools_json = '{not json' WHERE client_id = 'hermes'"
+                "UPDATE client_scopes SET allowed_tools_json = '{not json' WHERE client_id = 'agent'"
             )
 
     report = _report(database)
@@ -137,7 +137,7 @@ def test_the_report_names_tools_and_clients_only(tmp_path: Path) -> None:
     paste into an issue."""
     database = Database(tmp_path / "opendot.db")
     database.migrate()
-    _grant(database, "hermes", {"agenda_get"})
+    _grant(database, "agent", {"agenda_get"})
 
     payload = json.loads(_report(database).model_dump_json())
 

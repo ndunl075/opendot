@@ -496,9 +496,9 @@ def parse_message_headers(payload: object) -> dict[str, str]:
 
 def _draft_message_id(approval_id: str) -> str:
     """Return an RFC 2822 Message-ID used only to recover one local draft action."""
-    return f"<alfred-{approval_id}@local.invalid>"
+    return f"<opendot-{approval_id}@local.invalid>"
 
 
 def _sent_message_id(approval_id: str) -> str:
     """Return an RFC 2822 Message-ID used only to recover one send action."""
-    return f"<alfred-send-{approval_id}@local.invalid>"
+    return f"<opendot-send-{approval_id}@local.invalid>"

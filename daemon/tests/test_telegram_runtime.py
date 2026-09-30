@@ -243,7 +243,7 @@ def test_bubbles_enqueued_in_one_second_deliver_in_order(tmp_path: Path) -> None
                     connection,
                     destination="telegram:20",
                     payload={"text": text},
-                    idempotency_key=f"hermes-reply:99:{index}",
+                    idempotency_key=f"agent-reply:99:{index}",
                 )
     fake = FakeTelegram()
 

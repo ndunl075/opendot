@@ -1,8 +1,8 @@
 """Shared health classification over every connector's sync_state row.
 
 ARCHITECTURE.md's connector contract lists health() -> status as part of
-every connector's interface, but each connector (canvas.py, github.py,
-gmail.py, google_calendar.py) is an independent class with no shared base,
+every connector's interface, but each connector (github.py, gmail.py,
+google_calendar.py) is an independent class with no shared base,
 and each already writes its outcome to the same sync_state table using the
 same success/error convention. Rather than add a redundant health() method
 to every class that would just re-query that same table, classification

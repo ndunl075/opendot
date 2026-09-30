@@ -1,12 +1,12 @@
 """Overflow app tools via Composio's free cloud API.
 
-Alfred already owns Gmail, Calendar, GitHub, Slack, Telegram, and Google
+OpenDot already owns Gmail, Calendar, GitHub, Slack, Telegram, and Google
 Health with local credentials and the section 8 approval boundary. Composio
 is the rest of the catalog -- Notion, Spotify, Linear, and so on -- without
 standing up an OAuth app per provider. The API key lives in the OS keyring;
 connected-account tokens stay on Composio's side. Writes still preview and
-wait for a human. Hermes never talks to Composio's hosted MCP URL: that
-path skips Alfred's modifiers and would auto-approve under YOLO.
+wait for a human. The agent never talks to Composio's hosted MCP URL: that
+path skips OpenDot's modifiers and would auto-approve under YOLO.
 """
 
 from __future__ import annotations
@@ -27,14 +27,14 @@ from .policy import Approval, ApprovalService, PolicyError
 
 API_BASE = "https://backend.composio.dev/api/v3.1"
 SECRET_NAME = "composio-api-key"
-USER_ID = "alfred"
+USER_ID = "opendot"
 # New signups from 15 Aug 2026: 100k tool calls/mo, hard-capped, no card.
 # Grandfathered Hobby plans were 20k; override with OPENDOT_COMPOSIO_MONTHLY_CALL_LIMIT.
 DEFAULT_MONTHLY_CALL_LIMIT = 100_000
 CONNECTOR_NAME = "composio"
 ACTION_TYPE = "composio_tool_execute"
 
-# First-party Alfred connectors. Asking Composio for these would duplicate
+# First-party OpenDot connectors. Asking Composio for these would duplicate
 # auth, skip local sync, and let a write around the dedicated approval tools.
 RESERVED_TOOLKITS = frozenset(
     {
@@ -45,11 +45,6 @@ RESERVED_TOOLKITS = frozenset(
         "github",
         "slack",
         "telegram",
-        "fitbit",
-        "googlefit",
-        "google_fit",
-        "googlehealth",
-        "google_health",
     }
 )
 
@@ -122,7 +117,7 @@ class ComposioQuotaExceeded(ComposioError):
 
 
 class ComposioReservedToolkit(ComposioError):
-    """Caller asked Composio for an app Alfred already owns first-party."""
+    """Caller asked Composio for an app OpenDot already owns first-party."""
 
 
 class ComposioTool(BaseModel):
@@ -206,7 +201,7 @@ def assert_overflow_toolkit(toolkit: str) -> str:
     reserved = {name.replace("_", "") for name in RESERVED_TOOLKITS}
     if compact in reserved:
         raise ComposioReservedToolkit(
-            f"{slug} is a first-party Alfred connector; use the dedicated tools, not Composio"
+            f"{slug} is a first-party OpenDot connector; use the dedicated tools, not Composio"
         )
     if not slug:
         raise ComposioError("toolkit slug cannot be empty")
@@ -214,7 +209,7 @@ def assert_overflow_toolkit(toolkit: str) -> str:
 
 
 def tool_writes(slug: str, tags: tuple[str, ...] = ()) -> bool:
-    """True when executing this tool would change something outside Alfred.
+    """True when executing this tool would change something outside OpenDot.
 
     Unknown slugs default to write so a new destructive tool cannot sneak
     through as a live MCP call. Tags named 'read' only win when no write
@@ -372,7 +367,7 @@ class ComposioClient:
             "/auth_configs",
             json_body={
                 "toolkit": {"slug": toolkit},
-                "auth_config": {"type": "use_composio_managed_auth", "name": f"alfred-{toolkit}"},
+                "auth_config": {"type": "use_composio_managed_auth", "name": f"opendot-{toolkit}"},
             },
             audit_tool="composio_auth_config_create",
             extra_arguments={"toolkit": toolkit},

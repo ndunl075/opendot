@@ -89,7 +89,7 @@ class SearchResult(BaseModel):
 
 
 class GraphError(ValueError):
-    """Raised when an operation violates Alfred's graph invariants."""
+    """Raised when an operation violates OpenDot's graph invariants."""
 
 
 class MemoryGraph:
@@ -501,7 +501,7 @@ class MemoryGraph:
     ) -> list[Memory]:
         """Return memories recorded in a half-open ``[since, until)`` window.
 
-        Filters on ``created_at`` -- when Alfred recorded the claim -- not
+        Filters on ``created_at`` -- when OpenDot recorded the claim -- not
         ``valid_from``, which is when the fact itself became true. "Export
         everything from last March" means what was written down then; a
         birthday recorded in March that has been true for decades belongs to

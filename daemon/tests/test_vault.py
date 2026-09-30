@@ -14,16 +14,16 @@ from opendot_core.vault import VaultError, VaultImporter, VaultProjector, _fs
 
 def test_projected_entity_is_plain_markdown_with_stable_id(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
-    entity = MemoryGraph(database).create_entity(entity_type="project", label="Alfred", properties={"stage": "MVP"})
+    entity = MemoryGraph(database).create_entity(entity_type="project", label="OpenDot", properties={"stage": "MVP"})
     vault = tmp_path / "vault"
 
     projection = VaultProjector(database, vault).project_entity(entity.id)
 
     assert projection.conflict_copy is False
     contents = projection.path.read_text(encoding="utf-8")
-    assert f"alfred_id: {entity.id}" in contents
+    assert f"opendot_id: {entity.id}" in contents
     assert "managed: true" in contents
-    assert "# Alfred" in contents
+    assert "# OpenDot" in contents
     assert "\"stage\": \"MVP\"" in contents
     assert AuditLog(database).verify() is True
 
@@ -38,7 +38,7 @@ def test_sensitive_graph_records_are_not_exported(tmp_path: Path) -> None:
 
 def test_manual_file_is_preserved_with_a_conflict_copy(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
-    entity = MemoryGraph(database).create_entity(entity_type="project", label="Alfred")
+    entity = MemoryGraph(database).create_entity(entity_type="project", label="OpenDot")
     vault = tmp_path / "vault"
     path = vault / "Generated" / "Entities" / f"{entity.id}.md"
     path.parent.mkdir(parents=True)
@@ -48,7 +48,7 @@ def test_manual_file_is_preserved_with_a_conflict_copy(tmp_path: Path) -> None:
 
     assert projection.conflict_copy is True
     assert path.read_text(encoding="utf-8") == "# My manual note\n"
-    assert projection.path.name.startswith(f"{entity.id}.alfred-conflict-")
+    assert projection.path.name.startswith(f"{entity.id}.opendot-conflict-")
     assert "managed: true" in projection.path.read_text(encoding="utf-8")
 
 
@@ -245,8 +245,8 @@ def test_an_alias_resolves_a_link_to_its_entity(tmp_path: Path) -> None:
     assert len(graph.evidence_for("entity", entity.id)) == 1
 
 
-def test_links_in_alfreds_own_generated_notes_are_never_imported(tmp_path: Path) -> None:
-    """Generated notes are Alfred's writing, not the owner's testimony."""
+def test_links_in_opendots_own_generated_notes_are_never_imported(tmp_path: Path) -> None:
+    """Generated notes are OpenDot's writing, not the owner's testimony."""
     database = Database(tmp_path / "opendot.db")
     graph = MemoryGraph(database)
     entity = graph.create_entity(entity_type="project", label="Northwind")
@@ -293,12 +293,12 @@ def test_fs_leaves_ordinary_paths_untouched() -> None:
 def test_projection_survives_a_vault_root_deep_enough_to_pass_max_path(tmp_path: Path) -> None:
     """A deep vault root must not turn an export into a bare FileNotFoundError.
 
-    Alfred picks the filename here (a 36-character UUID, plus 33 more for a
+    OpenDot picks the filename here (a 36-character UUID, plus 33 more for a
     conflict copy), so the limit can be crossed by an ordinary export into a
     vault the operator nested a few levels too deep.
     """
     database = Database(tmp_path / "opendot.db")
-    entity = MemoryGraph(database).create_entity(entity_type="project", label="Alfred")
+    entity = MemoryGraph(database).create_entity(entity_type="project", label="OpenDot")
     # Pad the root until the generated conflict filename is comfortably past
     # the limit rather than hovering at it.
     vault = tmp_path / "vault"
@@ -396,7 +396,7 @@ def test_new_note_becomes_a_confirmed_evidence_backed_memory(tmp_path: Path) -> 
 def test_reimporting_an_unchanged_note_does_not_create_a_second_memory(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     vault = tmp_path / "vault"
-    _write_note(vault, "Decisions/local-first.md", "Alfred stays local-first.\n")
+    _write_note(vault, "Decisions/local-first.md", "OpenDot stays local-first.\n")
     importer = VaultImporter(database, vault)
 
     first = importer.sync()
@@ -411,11 +411,11 @@ def test_reimporting_an_unchanged_note_does_not_create_a_second_memory(tmp_path:
 def test_editing_a_note_supersedes_its_memory_instead_of_duplicating(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     vault = tmp_path / "vault"
-    path = _write_note(vault, "Projects/alfred.md", "Alfred targets Windows first.\n")
+    path = _write_note(vault, "Projects/opendot.md", "OpenDot targets Windows first.\n")
     importer = VaultImporter(database, vault)
     first = importer.sync()
 
-    path.write_text("Alfred targets Windows and Linux.\n", encoding="utf-8")
+    path.write_text("OpenDot targets Windows and Linux.\n", encoding="utf-8")
     second = importer.sync()
 
     assert (first.imported, second.updated) == (1, 1)
@@ -426,12 +426,12 @@ def test_editing_a_note_supersedes_its_memory_instead_of_duplicating(tmp_path: P
             for row in connection.execute("SELECT statement, status FROM memories")
         }
     assert statuses == {
-        "Alfred targets Windows first.": "superseded",
-        "Alfred targets Windows and Linux.": "confirmed",
+        "OpenDot targets Windows first.": "superseded",
+        "OpenDot targets Windows and Linux.": "confirmed",
     }
-    # The superseded original stays visible as history, per Alfred's usual correction rule.
-    confirmed = [memory for memory in graph.search("Alfred targets").memories if memory.status == "confirmed"]
-    assert [memory.statement for memory in confirmed] == ["Alfred targets Windows and Linux."]
+    # The superseded original stays visible as history, per OpenDot's usual correction rule.
+    confirmed = [memory for memory in graph.search("OpenDot targets").memories if memory.status == "confirmed"]
+    assert [memory.statement for memory in confirmed] == ["OpenDot targets Windows and Linux."]
 
 
 def test_deleting_a_note_does_not_forget_its_memory(tmp_path: Path) -> None:
@@ -452,7 +452,7 @@ def test_deleting_a_note_does_not_forget_its_memory(tmp_path: Path) -> None:
 def test_generated_notes_are_never_reimported_as_testimony(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
     vault = tmp_path / "vault"
-    entity = MemoryGraph(database).create_entity(entity_type="project", label="Alfred")
+    entity = MemoryGraph(database).create_entity(entity_type="project", label="OpenDot")
     VaultProjector(database, vault).project_entity(entity.id)
 
     result = VaultImporter(database, vault).sync()

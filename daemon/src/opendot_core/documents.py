@@ -2,7 +2,7 @@
 
 A document is not the memory extracted from a file; it is the file itself --
 its URI/path, MIME type, and checksum -- linked to the event that observed
-it. Alfred stores this pointer, never the file's bytes, matching the
+it. OpenDot stores this pointer, never the file's bytes, matching the
 "documents/chunks ... linked to raw events" layer distinct from derived
 memory.
 """

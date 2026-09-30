@@ -1,4 +1,4 @@
-"""SQLite connection and migration ownership for Alfred Core."""
+"""SQLite connection and migration ownership for OpenDot Core."""
 
 from __future__ import annotations
 

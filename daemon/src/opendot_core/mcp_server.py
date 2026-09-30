@@ -1,6 +1,6 @@
-"""Alfred's MCP surface: stdio plus loopback-only Streamable HTTP.
+"""OpenDot's MCP surface: stdio plus loopback-only Streamable HTTP.
 
-Section 7's transport policy: stdio for local Hermes/Claude/Cursor, and
+Section 7's transport policy: stdio for local Claude/Cursor and the agent, and
 Streamable HTTP on ``/mcp`` for other local/private clients -- bound to
 ``127.0.0.1`` only, with every remote request authenticated. Full OAuth
 2.1/RFC 9728 is reserved for public remote access, a separate, larger
@@ -26,6 +26,7 @@ from mcp.types import ToolAnnotations
 
 from .briefing import BriefingService
 from .config import Settings
+from .connector_capabilities import sensitive_connectors
 from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
@@ -36,7 +37,6 @@ from .availability import AvailabilityService
 from .gmail import GmailActions, GmailSendActions
 from .github import GitHubActions
 from .google_calendar import GoogleCalendarActions
-from .hermes_tools import HERMES_MCP_TOOL_FILTER_ENV, HERMES_TELEGRAM_CHAT_ID_ENV
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
 from .http_auth import bearer_token as _bearer_token
 from .http_auth import generate_token as generate_http_token
@@ -55,9 +55,12 @@ from .scheduled_tasks import ScheduledTaskStore
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
 from .threads import ThreadService
-from .turn_handshake import read_tools as read_turn_tools
-from .turn_handshake import read_turn_id
-from .workflow_learning import WorkflowObservationStore
+from .workflow_learning import WORKFLOW_TURN_ID_ENV, WorkflowObservationStore
+
+TELEGRAM_CHAT_ID_ENV = "OPENDOT_TELEGRAM_CHAT_ID"
+#: MCP client ids whose tool results are sent on to a model provider. Their
+#: raw connector reads pass through the same PII floor as prompts.
+MODEL_FACING_CLIENT_IDS: frozenset[str] = frozenset({"agent"})
 
 ALLOWED_SENSITIVITIES: frozenset[str] = frozenset({"public", "personal", "sensitive", "secret"})
 MCP_TOOL_NAMES: frozenset[str] = frozenset(
@@ -105,7 +108,7 @@ def create_server(
     client_id: str = "local-mcp",
     tool_filter: frozenset[str] | None = None,
 ) -> FastMCP:
-    """Create Alfred's MCP server: local memory reads/writes and connector status.
+    """Create OpenDot's MCP server: local memory reads/writes and connector status.
 
     Every tool is gated by PolicyStore, so an unregistered or narrowly scoped
     client gets nothing by default. Consequential actions are two calls, not
@@ -127,9 +130,9 @@ def create_server(
     policy = PolicyStore(database)
     approvals = ApprovalService(database)
     workflow_observations = WorkflowObservationStore(database)
-    server = FastMCP("Alfred")
+    server = FastMCP("OpenDot")
 
-    def alfred_tool(
+    def opendot_tool(
         *,
         read_only: bool = False,
         destructive: bool = False,
@@ -144,7 +147,7 @@ def create_server(
         until now -- silently downgrades every tool to "unknown", and a client
         that would have paused on a destructive call has nothing to pause on.
 
-        They are hints about intent, not enforcement: Alfred's own policy
+        They are hints about intent, not enforcement: OpenDot's own policy
         checks, previews, and approval tokens remain the actual boundary. A
         client that ignores annotations entirely still cannot commit an action
         without a one-time token.
@@ -156,7 +159,7 @@ def create_server(
             @wraps(function)
             def observed(*args, **kwargs):
                 result = function(*args, **kwargs)
-                turn_id = read_turn_id(settings.database_path)
+                turn_id = os.environ.get(WORKFLOW_TURN_ID_ENV, "").strip()
                 if turn_id:
                     try:
                         bound = signature.bind(*args, **kwargs)
@@ -167,7 +170,7 @@ def create_server(
                         )
                     except Exception:
                         # Learning is strictly ancillary. Its storage must
-                        # never turn a successful Alfred tool into a failure.
+                        # never turn a successful OpenDot tool into a failure.
                         pass
                 return result
 
@@ -185,24 +188,24 @@ def create_server(
 
         return decorate
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def system_status() -> dict[str, int | str]:
-        """Return Alfred's non-sensitive local health and schema status."""
+        """Return OpenDot's non-sensitive local health and schema status."""
         return database.status()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def agenda_get() -> str:
-        """Return Alfred's deterministic local task agenda with freshness."""
+        """Return OpenDot's deterministic local task agenda with freshness."""
         policy.require_read(client_id, "agenda_get")
         return BriefingService(database).morning_brief().render()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def memory_search(query: str) -> dict:
         """Search local memory anchors and their one-hop active graph context."""
         scope = policy.require_read(client_id, "memory_search")
         return MemoryGraph(database).search(query, allowed_sensitivities=scope.allowed_sensitivities).model_dump(mode="json")
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def profile_get() -> dict:
         """Return the local owner node and current, evidence-backed profile relationships."""
         scope = policy.require_read(client_id, "profile_get")
@@ -212,7 +215,7 @@ def create_server(
             "relationships": [relationship.model_dump(mode="json") for relationship in relationships],
         }
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def remember(statement: str, kind: str = "note", sensitivity: str = "personal") -> dict:
         """Store a confirmed local memory; the calling client is recorded as actor."""
         if sensitivity not in ALLOWED_SENSITIVITIES:
@@ -225,7 +228,7 @@ def create_server(
         )
         return memory.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def memory_correct(memory_id: str, replacement_statement: str) -> dict:
         """Correct one recalled memory while preserving its superseded history and evidence."""
         policy.require_write(client_id, "memory_correct")
@@ -235,7 +238,7 @@ def create_server(
             actor=f"mcp:{client_id}",
         ).model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def memory_feedback(memory_id: str, query: str, outcome: str) -> dict:
         """Record whether a recalled memory was relevant, irrelevant, or incorrect."""
         policy.require_write(client_id, "memory_feedback")
@@ -246,7 +249,7 @@ def create_server(
             actor=f"mcp:{client_id}",
         )
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def forget(memory_id: str, reason: str = "user requested deletion") -> dict:
         """Preview deleting one memory; nothing is deleted until action_commit confirms it.
 
@@ -264,7 +267,7 @@ def create_server(
         approval = MemoryActions(database, approvals).propose_forget(memory_id, actor=f"mcp:{client_id}", reason=reason)
         return approval.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def calendar_event_propose(summary: str, start: str, end: str, calendar_id: str = "primary") -> dict:
         """Preview a calendar event write; nothing reaches Google until action_commit confirms it."""
         policy.require_write(client_id, "calendar_event_propose")
@@ -275,7 +278,7 @@ def create_server(
         )
         return approval.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def message_draft(to: str, subject: str, body: str) -> dict:
         """Preview a Gmail draft; nothing reaches Gmail until a human confirms it."""
         policy.require_write(client_id, "message_draft")
@@ -293,7 +296,7 @@ def create_server(
         approval = actions.propose_draft(actor=f"mcp:{client_id}", to=to, subject=subject, body=body)
         return approval.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def message_send_propose(to: str, subject: str, body: str) -> dict:
         """Preview sending Gmail. Telegram attaches approve/cancel; do not paste the letter in chat."""
         policy.require_write(client_id, "message_send_propose")
@@ -312,7 +315,7 @@ def create_server(
             actor=f"mcp:{client_id}", to=to, subject=subject, body=body
         ).model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def github_issue_propose(repository: str, title: str, body: str | None = None) -> dict:
         """Preview a GitHub issue creation; nothing reaches GitHub until action_commit confirms it."""
         policy.require_write(client_id, "github_issue_propose")
@@ -325,32 +328,32 @@ def create_server(
         try:
             api_key = SystemKeyringSecretStore().get_required(COMPOSIO_SECRET_NAME)
         except SecretStoreError as error:
-            raise ComposioError("Composio API key is not stored. Run `alfred composio-setup`.") from error
+            raise ComposioError("Composio API key is not stored. Run `opendot composio-setup`.") from error
         client = ComposioClient(api_key, database=database)
         try:
             return callback(ComposioActions(database, approvals, client))
         finally:
             client.close()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def composio_search(query: str, toolkit: str | None = None) -> dict:
         """Find overflow-app tools on Composio's free tier (Notion, Spotify, Linear, …).
 
         Do not use this for Gmail, Calendar, GitHub, Slack, Telegram, or Fitbit —
-        those are first-party Alfred connectors. Returns slugs, whether they write,
+        those are first-party OpenDot connectors. Returns slugs, whether they write,
         and required argument names. Then call composio_execute with a slug.
         """
         policy.require_read(client_id, "composio_search")
         tools = _with_composio(lambda actions: actions.search(query, toolkit=toolkit))
         return {"tools": [item.model_dump(mode="json") for item in tools]}
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def composio_status() -> dict:
         """Show Composio connected accounts and this UTC month's free-tier usage."""
         policy.require_read(client_id, "composio_status")
         return _with_composio(lambda actions: actions.status()).model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def composio_connect(toolkit: str) -> dict:
         """Return a Composio Connect Link so the owner can sign into an overflow app.
 
@@ -360,7 +363,7 @@ def create_server(
         policy.require_write(client_id, "composio_connect")
         return _with_composio(lambda actions: actions.connect(toolkit)).model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def composio_execute(slug: str, arguments_json: str = "{}") -> dict:
         """Run a Composio read now, or preview a write for Telegram approval.
 
@@ -380,7 +383,7 @@ def create_server(
             )
         )
 
-    @alfred_tool(destructive=True, idempotent=True, open_world=True)
+    @opendot_tool(destructive=True, idempotent=True, open_world=True)
     def action_commit(approval_id: str, token: str) -> dict:
         """Consume a fresh approval token and perform the action it previewed."""
         policy.require_write(client_id, "action_commit")
@@ -388,26 +391,26 @@ def create_server(
             approval_id, actor=f"mcp:{client_id}", token=token
         )
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def brief_get(now: str | None = None) -> str:
         """Render the deterministic local morning brief on demand, not just on schedule."""
         policy.require_read(client_id, "brief_get")
         parsed = datetime.fromisoformat(now) if now else None
         return BriefingService(database).morning_brief(parsed).render()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def threads_awaiting_reply() -> str:
         """List unread Gmail threads that look like they need a reply.
 
         Groups active unread mail by thread_id and drops messages that carry a
         List-Unsubscribe header (newsletters Gmail often labels PERSONAL).
-        Run ``alfred gmail-thread-backfill`` once if older rows are missing
+        Run ``opendot gmail-thread-backfill`` once if older rows are missing
         thread_id / list_unsubscribe.
         """
         policy.require_read(client_id, "threads_awaiting_reply")
         return ThreadService(database).awaiting_reply().render()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def availability_get(
         days: int = 7,
         timezone: str = "UTC",
@@ -425,7 +428,7 @@ def create_server(
             days=days, timezone_name=timezone, min_minutes=min_minutes
         ).render()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def pull_requests_get(stale_after_days: int = 14) -> str:
         """List open GitHub pull requests you authored or were asked to review.
 
@@ -439,18 +442,18 @@ def create_server(
         finally:
             client.close()
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def connector_status() -> list[dict]:
         """Report each connector's health; never its credentials or synced content."""
         policy.require_read(client_id, "connector_status")
         return [health.model_dump(mode="json") for health in connector_health(database)]
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def connector_records_get(connector: str, record_type: str | None = None, limit: int = 20) -> list[dict]:
         """Return one connector's currently-active synced records, most recently observed first.
 
         brief_get/agenda_get already fold calendar events, GitHub
-        notifications, and Canvas missing assignments into one ranked digest,
+        notifications, and other items into one ranked digest,
         but nothing else exposes a connector's raw synced content directly --
         for example gmail-sync's unread-message records (subject/from/snippet)
         never reach an MCP caller otherwise. This reads the same
@@ -458,7 +461,7 @@ def create_server(
         (ConnectorRecordStore), so it needs no new storage or sync logic.
         """
         scope = policy.require_read(client_id, "connector_records_get")
-        connector_sensitivity = "sensitive" if connector == "google_health" else "personal"
+        connector_sensitivity = "sensitive" if connector in sensitive_connectors() else "personal"
         if connector_sensitivity not in scope.allowed_sensitivities:
             raise PolicyError(
                 f"client is not scoped to read {connector_sensitivity} connector records: {connector}"
@@ -483,14 +486,14 @@ def create_server(
             }
             for row in rows
         ]
-        if client_id == "hermes":
-            # Tool results leave Alfred through Hermes's provider connection,
-            # outside the bridge prompt boundary. Apply the same PII floor
-            # here so a raw connector read cannot bypass bridge redaction.
+        if client_id in MODEL_FACING_CLIENT_IDS:
+            # Tool results leave OpenDot through the agent's provider
+            # connection, outside the prompt boundary. Apply the same PII
+            # floor here so a raw connector read cannot bypass redaction.
             return json.loads(Redactor().redact(json.dumps(records)))
         return records
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def task_upsert(title: str, task_id: str | None = None, due_at: str | None = None) -> dict:
         """Create a task, or update an existing one's title/due date when task_id is given.
 
@@ -518,7 +521,7 @@ def create_server(
                     task = TaskStore.upsert(connection, task_id=task_id, title=title, due_at=parsed_due)
         return task.model_dump(mode="json")
 
-    @alfred_tool(destructive=False, idempotent=True)
+    @opendot_tool(destructive=False, idempotent=True)
     def task_complete(task_id: str) -> dict:
         """Mark an open task completed; completing an already-completed task is a no-op."""
         policy.require_write(client_id, "task_complete")
@@ -528,7 +531,7 @@ def create_server(
                 task = TaskStore.complete(connection, task_id)
         return task.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def reminder_set(
         text: str,
         run_at: str,
@@ -539,9 +542,9 @@ def create_server(
     ) -> dict:
         """Schedule a Telegram reminder; chat_id must already be locally paired to receive it.
 
-        Alfred's only delivery channel today is Telegram, so the caller must
+        OpenDot's only delivery channel today is Telegram, so the caller must
         say which paired chat this goes to -- there is no channel-agnostic
-        queue to defer that choice to. When Hermes is answering an inbound
+        queue to defer that choice to. When the agent is answering an inbound
         Telegram turn, ``chat_id`` may be omitted and is read from
         ``OPENDOT_TELEGRAM_CHAT_ID``.
 
@@ -584,7 +587,7 @@ def create_server(
                 )
         return job.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def nag_until_done(
         text: str,
         chat_id: int,
@@ -633,7 +636,7 @@ def create_server(
                 )
         return job.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def important_date_set(
         label: str,
         month: int,
@@ -669,7 +672,7 @@ def create_server(
                 )
         return recorded.model_dump(mode="json")
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def important_dates_get(within_days: int = 7) -> list[dict]:
         """List upcoming birthdays and important dates inside the weekly window.
 
@@ -683,7 +686,7 @@ def create_server(
             for item in ImportantDateStore.upcoming(database, within_days=within_days)
         ]
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def mood_record(rating: int, note: str | None = None) -> dict:
         """Record a 1–5 mood check-in with an optional short note.
 
@@ -698,7 +701,7 @@ def create_server(
                 recorded = JournalStore.mood_record(connection, rating=rating, note=note)
         return recorded.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def gratitude_record(text: str) -> dict:
         """Append a free-text gratitude journal entry."""
         policy.require_write(client_id, "gratitude_record")
@@ -708,7 +711,7 @@ def create_server(
                 recorded = JournalStore.gratitude_record(connection, text=text)
         return recorded.model_dump(mode="json")
 
-    @alfred_tool(read_only=True, idempotent=True)
+    @opendot_tool(read_only=True, idempotent=True)
     def journal_get(days: int = 30) -> dict:
         """Return recent mood check-ins, gratitude entries, and mood trend.
 
@@ -721,7 +724,7 @@ def create_server(
         snapshot = JournalStore.get(database, days=days)
         return snapshot.model_dump(mode="json")
 
-    @alfred_tool(destructive=False)
+    @opendot_tool(destructive=False)
     def task_schedule(
         prompt: str,
         run_at: str,
@@ -738,12 +741,12 @@ def create_server(
 
         When it comes due the instruction is queued as an ordinary agent turn,
         so the reply arrives looking exactly like any other answer. Never
-        schedule this kind of work in your own runtime's cron: Alfred owns
+        schedule this kind of work in your own runtime's cron: OpenDot owns
         schedules and delivery here, and a job elsewhere silently never fires.
 
         ``run_at`` is ISO-8601 with an offset. ``daily`` repeats it, and then
         ``timezone`` must be an IANA name (America/New_York) so the task keeps
-        its local hour across a daylight-saving change. When Hermes is
+        its local hour across a daylight-saving change. When the agent is
         answering an inbound Telegram turn, ``chat_id`` may be omitted and is
         read from ``OPENDOT_TELEGRAM_CHAT_ID``.
         """
@@ -775,34 +778,27 @@ def create_server(
     return server
 
 
-def _tool_filter_from_environment() -> frozenset[str] | None:
-    value = os.environ.get(HERMES_MCP_TOOL_FILTER_ENV)
-    if value is None:
-        return None
-    return frozenset(name.strip() for name in value.split(",") if name.strip())
-
-
 def _telegram_chat_id(chat_id: int | None) -> int:
     """Resolve a paired Telegram chat, preferring an explicit tool argument.
 
-    Hermes turns inherit ``OPENDOT_TELEGRAM_CHAT_ID`` so reminder_set and
+    Agent turns may inherit ``OPENDOT_TELEGRAM_CHAT_ID`` so reminder_set and
     task_schedule still work when the model omits chat_id.
     """
     if chat_id is not None:
         return chat_id
-    inherited = os.environ.get(HERMES_TELEGRAM_CHAT_ID_ENV, "").strip()
+    inherited = os.environ.get(TELEGRAM_CHAT_ID_ENV, "").strip()
     if inherited:
         try:
             return int(inherited)
         except ValueError as error:
             raise ValueError(
-                f"{HERMES_TELEGRAM_CHAT_ID_ENV} must be an integer chat id"
+                f"{TELEGRAM_CHAT_ID_ENV} must be an integer chat id"
             ) from error
     raise ValueError("chat_id is required unless OPENDOT_TELEGRAM_CHAT_ID is set")
 
 
 def parse_stdio_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse alfred-mcp's own tiny CLI surface.
+    """Parse opendot-mcp's own tiny CLI surface.
 
     Separate from ``main()`` so a caller (or a test) can get a parsed
     namespace without also starting a blocking stdio server.
@@ -818,7 +814,7 @@ def parse_stdio_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run Alfred's local-only stdio MCP server.
+    """Run OpenDot's local-only stdio MCP server.
 
     Running this with no arguments behaves exactly as before --
     ``--client-id`` exists so a second stdio client (for example, OpenAI's
@@ -827,46 +823,4 @@ def main(argv: Sequence[str] | None = None) -> None:
     Claude/Cursor's default ``local-mcp`` grant.
     """
     args = parse_stdio_args(argv)
-    # The environment is consulted first and still wins, so a direct run
-    # (Claude, Cursor, the OpenAI tunnel) is unchanged. The file exists for
-    # the Hermes path only, where Hermes strips the parent environment when
-    # it spawns a stdio server -- see turn_handshake for the measurement.
-    settings = Settings.from_environment(Path(args.db) if args.db else None)
-    tool_filter = read_turn_tools(settings.database_path)
-    if tool_filter is None:
-        create_server(args.db, client_id=args.client_id).run(transport="stdio")
-    else:
-        create_server(args.db, client_id=args.client_id, tool_filter=tool_filter).run(transport="stdio")
-
-
-def run_streamable_http(
-    database_path: Path | str | None = None,
-    *,
-    client_id: str,
-    port: int,
-    bearer_token: str,
-) -> None:
-    """Serve Alfred's MCP surface over Streamable HTTP, loopback-only.
-
-    The host is deliberately not a parameter: this always binds
-    ``127.0.0.1``, matching section 7's "Local server binds 127.0.0.1 only"
-    as a hard invariant rather than a default that could be overridden away
-    from it. FastMCP auto-enables DNS-rebinding protection (Host/Origin
-    header validation) whenever the host is a loopback address, so no extra
-    ``transport_security`` wiring is needed as long as this stays that way.
-    Every request additionally needs the exact configured bearer token --
-    see the module docstring for why that, not OAuth, is enough here.
-
-    ``client_id`` must already have a scope from ``PolicyStore.grant()``
-    (the CLI's ``client-grant``) before any tool call succeeds; this
-    function itself performs no default grant.
-    """
-    import uvicorn
-
-    server = create_server(database_path, client_id=client_id)
-    protected_app = _BearerAuthMiddleware(server.streamable_http_app(), expected_token=bearer_token)
-    uvicorn.Server(uvicorn.Config(protected_app, host="127.0.0.1", port=port, log_level="warning")).run()
-
-
-if __name__ == "__main__":
-    main()
+    create_server(args.db, client_id=args.client_id).run(transport="stdio")

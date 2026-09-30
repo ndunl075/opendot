@@ -1,6 +1,6 @@
 """Hold proactive (job-backed) deliveries during a local quiet window.
 
-Interactive replies (Hermes / gateway outbox rows with no ``job_id``) still
+Interactive replies (the agent / gateway outbox rows with no ``job_id``) still
 deliver so a late-night chat is not silence. Reminders, briefs, and nags stay
 ``pending`` until the window ends.
 """

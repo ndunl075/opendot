@@ -34,7 +34,7 @@ def _turn(
             "connector": "gmail",
             "record_type": "message",
             "limit": 20,
-            "private_query": "nico@example.com Project Zephyr 2026-08-20",
+            "private_query": "sam@example.com Project Zephyr 2026-08-20",
         },
         observed_at=observed_at,
     )
@@ -49,7 +49,7 @@ def _turn(
         turn_id,
         "message_draft",
         {
-            "to": "nico@example.com",
+            "to": "sam@example.com",
             "subject": "Project Zephyr",
             "body": "Meet on 2026-08-20 about the secret acquisition",
         },
@@ -87,7 +87,7 @@ def test_observations_store_structure_but_never_content(tmp_path: Path) -> None:
     }
     assert payloads[1]["literals"] == {}
     for private_value in (
-        "nico@example.com",
+        "sam@example.com",
         "Project Zephyr",
         "2026-08-20",
         "secret acquisition",
@@ -100,13 +100,13 @@ def test_mcp_records_only_a_successful_correlated_call(
 ) -> None:
     database_path = tmp_path / "opendot.db"
     PolicyStore(Database(database_path)).grant(
-        client_id="hermes",
+        client_id="agent",
         allowed_sensitivities={"personal"},
         allowed_tools={"connector_records_get"},
         allow_write=False,
     )
     monkeypatch.setenv(WORKFLOW_TURN_ID_ENV, "telegram:123")
-    server = create_server(database_path, client_id="hermes")
+    server = create_server(database_path, client_id="agent")
 
     asyncio.run(
         server.call_tool(
@@ -183,7 +183,7 @@ def test_repeated_successes_create_one_inert_versioned_diff(tmp_path: Path) -> N
     assert "`action_commit`" in proposal.skill_markdown
     assert "Call `action_commit`" not in proposal.skill_markdown
     for private_value in (
-        "nico@example.com",
+        "sam@example.com",
         "Project Zephyr",
         "2026-08-20",
         "secret acquisition",

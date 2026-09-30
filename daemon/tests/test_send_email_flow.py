@@ -1,8 +1,8 @@
 """The send-an-email turn, from a live failure the owner hit on their phone.
 
 Asked to "send an email to my mom (mom@example.com) and tell her who you
-are", Alfred replied "what's your mom's email? the address was redacted from
-what i see here". The owner sent the address on its own. Alfred answered
+are", OpenDot replied "what's your mom's email? the address was redacted from
+what i see here". The owner sent the address on its own. OpenDot answered
 "checking your inbox...". No email was ever drafted.
 
 Two independent bugs met in one turn:
@@ -45,13 +45,13 @@ def test_the_recipient_the_owner_typed_survives() -> None:
 
 
 def test_a_bare_address_survives_too() -> None:
-    """The second half of the loop: answering Alfred's own question with just
+    """The second half of the loop: answering OpenDot's own question with just
     the address."""
     assert ADDRESS in _redact_except_current_request(_prompt(ADDRESS), Redactor())
 
 
 def test_synced_content_is_still_scrubbed() -> None:
-    """The point of redaction is unchanged: Alfred's stored content about
+    """The point of redaction is unchanged: OpenDot's stored content about
     other people must not reach a cloud model as a side effect."""
     out = _redact_except_current_request(_prompt("what's up"), Redactor())
 
@@ -85,7 +85,7 @@ def test_a_real_inbox_question_still_says_inbox() -> None:
 
 def test_each_action_gets_its_own_acknowledgement() -> None:
     """One "on it..." for every write told the owner nothing about which
-    promise Alfred had just made."""
+    promise OpenDot had just made."""
     gateway = _gateway()
     expected = {
         "keep reminding me to file the fafsa": "i'll keep on you about it...",

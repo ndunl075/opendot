@@ -98,7 +98,7 @@ def test_bare_restart_asks_for_confirmation_without_restarting(
         nonlocal called
         called = True
 
-    monkeypatch.setattr("opendot_core.runtime_control.restart_alfred", _fail_if_called)
+    monkeypatch.setattr("opendot_core.runtime_control.restart_daemon", _fail_if_called)
     receipt = _gateway(tmp_path / "opendot.db").handle(_update(51, "/restart"))
 
     assert "confirm" in receipt.text
@@ -110,7 +110,7 @@ def test_restart_command_queues_recovery_when_restart_task_missing(
 ) -> None:
     database_path = tmp_path / "opendot.db"
     monkeypatch.setattr(
-        "opendot_core.runtime_control.restart_alfred",
+        "opendot_core.runtime_control.restart_daemon",
         lambda: type("RestartResult", (), {"ok": False, "method": "none", "detail": "missing"})(),
     )
     receipt = _gateway(database_path).handle(_update(51, "/restart confirm"))
@@ -123,8 +123,8 @@ def test_restart_command_queues_recovery_when_restart_task_missing(
 
 def test_wake_is_an_alias_for_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "opendot_core.runtime_control.restart_alfred",
-        lambda: type("RestartResult", (), {"ok": True, "method": "scheduled_task", "detail": "AlfredRestart"})(),
+        "opendot_core.runtime_control.restart_daemon",
+        lambda: type("RestartResult", (), {"ok": True, "method": "scheduled_task", "detail": "OpenDotRestart"})(),
     )
     receipt = _gateway(tmp_path / "opendot.db").handle(_update(52, "/wake confirm"))
 
@@ -143,7 +143,7 @@ def test_bad_command_gets_a_help_receipt_without_a_task(tmp_path: Path) -> None:
 
 def test_unparsed_message_is_deferred_to_the_agent_when_enabled(tmp_path: Path) -> None:
     """With the bridge on, a free-form message is acknowledged and marked for
-    `hermes_bridge` instead of getting the /task|/remind help text. The agent
+    the agent bridge instead of getting the /task|/remind help text. The agent
     turn itself must not happen here -- handle() holds a write transaction."""
     database_path = tmp_path / "opendot.db"
     gateway = _gateway(database_path, defer_unparsed_to_agent=True)
@@ -183,9 +183,8 @@ def test_the_acknowledgement_names_the_topic_that_was_asked_about() -> None:
     assert ack("what do you remember about the trip") == "checking what i know..."
     # "assignments due for class" genuinely spans both, and saying so is
     # more honest than suppressing one to keep the ack short.
-    assert ack("any assignments due for class") == "checking canvas and your agenda..."
+    assert ack("what is due on my agenda") == "checking your agenda..."
     assert ack("check my notes on that") == "checking your notes..."
-    assert ack("how did i sleep last night") == "checking your health data..."
     assert ack("anything in slack") == "checking slack..."
     assert ack("is everything still connected") == "checking your connections..."
 
@@ -201,7 +200,7 @@ def test_a_message_about_two_topics_names_both_in_the_order_asked() -> None:
 
 def test_no_more_than_two_topics_are_named() -> None:
     """"checking a, b and c..." stops sounding like a person."""
-    ack = TelegramGateway.acknowledgement_for("inbox, github, canvas and slack?")
+    ack = TelegramGateway.acknowledgement_for("inbox, github, notes and slack?")
 
     assert ack.count(" and ") == 1
     assert ack.startswith("checking ") and ack.endswith("...")
@@ -220,7 +219,7 @@ def test_action_phrasing_wins_over_the_read_topic_it_overlaps_with() -> None:
     assert ack("search the web for the latest Python release") == "searching the web..."
     assert ack("anything new in my email") == "checking your inbox..."
 
-    assert ack("open an issue on the alfred repo") == "writing that issue..."
+    assert ack("open an issue on the opendot repo") == "writing that issue..."
     assert ack("any open issues on github") == "checking github..."
 
 

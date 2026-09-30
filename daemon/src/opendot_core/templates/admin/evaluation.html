@@ -58,7 +58,7 @@
   </div>
 
   <div class="section">
-    <p class="section-label">Answers Alfred flagged against itself</p>
+    <p class="section-label">Answers OpenDot flagged against itself</p>
     <div class="card">
       {% for source, count in report.context_gaps.by_source.items() %}
         <div class="row">
@@ -71,7 +71,7 @@
     </div>
     <p class="section-note">
       Replies that quoted a connector with no successful sync behind it. Nobody
-      judged these wrong; they were written from a state of the world Alfred had
+      judged these wrong; they were written from a state of the world OpenDot had
       already lost track of, which is why they are counted apart from the rates
       above.
     </p>

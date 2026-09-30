@@ -1,4 +1,4 @@
-"""Conservative, approval-gated learning of repeated Alfred tool workflows.
+"""Conservative, approval-gated learning of repeated OpenDot tool workflows.
 
 Only structural metadata is observed: tool names, argument names, and a tiny
 allowlist of non-content routing values. Prompts and argument values such as
@@ -6,7 +6,7 @@ names, titles, dates, message bodies, and addresses never enter these tables.
 Successful turns must repeat across multiple days before a versioned skill
 proposal is created. A proposal is inert Markdown until a separate human
 approval is reviewed. Activation and execution are deliberately outside this
-slice, so merely approving a proposal cannot change Hermes's skill files.
+slice, so merely approving a proposal cannot change the agent's skill files.
 """
 
 from __future__ import annotations
@@ -497,7 +497,7 @@ class WorkflowLearningService:
         return WorkflowDefinition(
             name=name,
             description=(
-                f"Approval-gated workflow suggested from repeated successful Alfred turns: {labels}."
+                f"Approval-gated workflow suggested from repeated successful OpenDot turns: {labels}."
             ),
             steps=steps,
         )
@@ -538,10 +538,10 @@ class WorkflowLearningService:
             f"name: {definition.name}",
             f"description: {definition.description}",
             f"version: 0.1.{version}",
-            "author: Alfred workflow learning",
+            "author: OpenDot workflow learning",
             "license: Apache-2.0",
             "metadata:",
-            "  alfred:",
+            "  opendot:",
             "    generated: true",
             f"    evidence_count: {len(occurrences)}",
             f"    distinct_days: {len({item['day'] for item in occurrences})}",
@@ -556,7 +556,7 @@ class WorkflowLearningService:
             "",
             "- Use this workflow only when the current request clearly matches it.",
             "- Never infer missing people, destinations, content, dates, or identifiers from past runs.",
-            "- Every underlying Alfred tool keeps its own scopes, previews, and approval requirements.",
+            "- Every underlying OpenDot tool keeps its own scopes, previews, and approval requirements.",
             "- This skill cannot call `action_commit` or approve its own consequential actions.",
             "",
             "## Steps",

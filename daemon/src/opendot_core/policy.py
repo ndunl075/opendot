@@ -17,7 +17,7 @@ from .db import Database
 
 
 class PolicyError(PermissionError):
-    """Raised when a client or approval does not satisfy Alfred's policy."""
+    """Raised when a client or approval does not satisfy OpenDot's policy."""
 
 
 class ClientScope(BaseModel):

@@ -59,7 +59,7 @@ def _linked_approval(database: Database) -> str:
     gateway = TelegramGateway(database, {TelegramPair(chat_id=20, user_id=10)}, defer_unparsed_to_agent=True)
     gateway.handle(_message(1))
     approval = ApprovalService(database).propose(
-        actor="mcp:hermes",
+        actor="mcp:agent",
         action_type="gmail_message_send",
         preview={"to": "person@example.com", "subject": "hello", "body": "hi"},
     )
@@ -90,7 +90,7 @@ def test_bridge_attaches_a_new_proposal_to_the_answer_keyboard(tmp_path: Path) -
 
     def proposing_agent(prompt: str) -> AgentRunResult:
         ApprovalService(database).propose(
-            actor="mcp:hermes",
+            actor="mcp:agent",
             action_type="gmail_draft_create",
             preview={"to": "person@example.com", "subject": "hello", "body": "hi"},
         )
@@ -100,7 +100,7 @@ def test_bridge_attaches_a_new_proposal_to_the_answer_keyboard(tmp_path: Path) -
 
     with database.connect() as connection:
         rows = connection.execute(
-            "SELECT payload_json FROM outbox WHERE idempotency_key LIKE 'hermes-reply:11:%' "
+            "SELECT payload_json FROM outbox WHERE idempotency_key LIKE 'agent-reply:11:%' "
             "ORDER BY idempotency_key"
         ).fetchall()
         link_count = connection.execute("SELECT COUNT(*) FROM telegram_action_links").fetchone()[0]
