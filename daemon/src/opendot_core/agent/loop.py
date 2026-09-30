@@ -706,6 +706,18 @@ class AgentLoop:
             yield from self._run_auto(task_id, step, name, arguments)
             return
 
+        if step["state"] == "started":
+            # It was running as auto when the daemon stopped, so it may already have happened, and
+            # a new approval would carry a new idempotency key and could do it twice. Never guess.
+            message = (
+                f"{name} may already have run before a restart, and your rules now ask first for it. "
+                "Please check whether it happened before asking again."
+            )
+            self._tool_done(task_id, step, behavior=behavior.value, result=message, ok=False)
+            self._skip_remaining(task_id)
+            yield ToolEvent(tool=name, behavior=behavior.value, ok=False)
+            yield from self._end(task_id, TaskState.HANDED_OFF, message)
+
         # ask: reviewer pass first, then an approval the user decides on. Nothing runs yet. If the
         # review cannot run now (a 429 or a budget), the step stays pending and no card is shown.
         if getattr(self.reviewer, "use_model", False):

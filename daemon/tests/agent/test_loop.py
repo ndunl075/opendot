@@ -468,3 +468,26 @@ def test_f10_paid_provider_needs_its_feature_switch(tmp_path: Path) -> None:
     task_id = loop.start_task("hello")
     list(loop.run(task_id))
     assert loop.task(task_id).state is TaskState.COMPLETED and paid.calls == 1
+
+
+def test_f12_started_step_that_now_asks_is_handed_off_not_reproposed(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("reminder_set", {"text": "x", "minutes": 5}), text_turn("ok")])
+    task_id = stack.loop.start_task("remind me")
+
+    class Crash(BaseException):
+        pass
+
+    def crash(*args: object, **kwargs: object) -> str:
+        raise Crash
+
+    real_run = stack.tools.run
+    stack.tools.run = crash  # type: ignore[method-assign]
+    with pytest.raises(Crash):
+        stack.run(task_id)
+    stack.tools.run = real_run  # type: ignore[method-assign]
+    restarted = stack.restart()
+    restarted.rules.add_rule(tool="reminder_set", action="create", behavior="ask", max_sensitivity="personal")
+    restarted.loop.resume_all()
+    assert restarted.loop.task(task_id).state is TaskState.HANDED_OFF
+    assert restarted.approvals.list_pending() == []
+    assert restarted.world.executed("reminder_set") == []

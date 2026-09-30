@@ -65,15 +65,30 @@ DEFAULT_BY_TOOL: dict[str, DefaultRule] = {rule.tool: rule for rule in DEFAULT_R
 
 UNMATCHED_BEHAVIOR = "ask"
 
-ASK_EVERY_TIME_TOOLS = frozenset({"message_send_propose"})
-"""Tools that send or post for the user: always ``ask`` (section 10), whatever a rule says."""
-_SEND_WORDS = frozenset({"send", "post", "publish", "tweet", "broadcast", "forward"})
+ASK_EVERY_TIME_TOOLS = frozenset(
+    {"message_send_propose", "gmail_message_send", "github_pr_comment_create", "slack_post", "telegram_send"}
+)
+"""Tools and approval types that send or post for the user: always ``ask`` (section 10)."""
+_SEND_WORDS = frozenset(
+    {
+        "send", "sends", "sent", "post", "posts", "publish", "tweet", "broadcast", "forward", "comment",
+        "comments", "invite", "share", "announce", "dm", "chat", "message_send",
+    }
+)
 _SPLIT = re.compile(r"[^a-z0-9]+")
 
 
 def is_send_or_post(tool: str, action: str) -> bool:
-    """True for an intent that sends, posts or publishes to other people."""
-    if tool in ASK_EVERY_TIME_TOOLS:
+    """True for an intent that sends, posts, comments or publishes to other people.
+
+    Outside-app tools only: OpenDot's own local tools (memory, tasks, reminders ...) never reach
+    other people. Matching errs toward asking, which is always safe.
+    """
+    from .deny_list import is_local_tool
+
+    if tool in ASK_EVERY_TIME_TOOLS or action in ASK_EVERY_TIME_TOOLS:
         return True
+    if is_local_tool(tool):
+        return False
     words = {part for part in _SPLIT.split(f"{tool} {action}".lower()) if part}
     return bool(words & _SEND_WORDS)

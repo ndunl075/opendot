@@ -397,7 +397,18 @@ def test_add_rule_accepts_a_rule_object_and_rejects_deny_list(engine: RuleEngine
         engine.add_rule()
 
 
-@pytest.mark.parametrize(("tool", "action"), [("message_send_propose", "create"), ("gmail", "send"), ("slack", "post_message")])
+@pytest.mark.parametrize(
+    ("tool", "action"),
+    [
+        ("message_send_propose", "create"),
+        ("gmail", "send"),
+        ("slack", "post_message"),
+        ("github_pr_comment_create", "create"),
+        ("github", "comment_create"),
+        ("gmail", "send_reply"),
+        ("composio_execute", "SLACK_CHAT_POST_MESSAGE"),
+    ],
+)
 def test_send_and_post_ask_every_time_even_with_an_auto_rule(engine: RuleEngine, tool: str, action: str) -> None:
     engine.add_rule(tool=tool, action=action, behavior="auto")
     decision = engine.decide(intent(tool, action))
@@ -408,3 +419,9 @@ def test_always_allow_uses_the_real_composio_action_type(database: Database, eng
     approval = approved(database, COMPOSIO_ACTION_TYPE, {"slug": "GITHUB_CREATE_ISSUE", "arguments": {}})
     rule = engine.always_allow(approval.id, "agent")
     assert rule.tool == "composio_execute" and rule.action == "GITHUB_CREATE_ISSUE"
+
+
+@pytest.mark.parametrize(("tool", "action"), [("message_draft", "create"), ("calendar_event_propose", "create"), ("reminder_set", "send")])
+def test_drafts_events_and_local_tools_can_still_be_auto(engine: RuleEngine, tool: str, action: str) -> None:
+    engine.add_rule(tool=tool, action=action, behavior="auto")
+    assert engine.decide(intent(tool, action)).behavior is Behavior.AUTO
