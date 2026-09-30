@@ -528,6 +528,70 @@ class SettingsUpdateRequest(ApiModel):
     style_preset: StylePreset | None = None
 
 
+# --- opt-in providers: feature switches, spend caps, API keys --------------------------------
+# Saving an API key enables nothing; enabling a provider and turning on a feature are separate,
+# explicit calls. No response model may carry a key or token: the key travels only in
+# ProviderApiKeyRequest and the answer is ProviderKeyStatus (a boolean).
+
+FeatureName = Literal["paid_fallback_when_plan_runs_out", "claude_as_reviewer", "smarter_memory_search"]
+PaidProviderId = Literal["openai_key", "anthropic_key", "openrouter"]
+OptInProviderId = Literal["openai_key", "anthropic_key", "openrouter", "local"]
+
+
+class FeatureSwitchState(ApiModel):
+    name: FeatureName
+    title: str
+    enabled: bool = False
+    available: bool = False
+    """True only when the switch is on AND a required provider is enabled."""
+    cost_warning: str
+    """Show this before the user turns the switch on."""
+    requires_any_of: list[OptInProviderId]
+    """At least one of these providers must be enabled for the switch to do anything."""
+    requirement: str
+    """Plain-language version of ``requires_any_of`` for the UI."""
+
+
+class FeatureSwitchList(ApiModel):
+    features: list[FeatureSwitchState]
+
+
+class FeatureSwitchSetRequest(ApiModel):
+    enabled: bool
+
+
+class ProviderSpend(ApiModel):
+    provider: PaidProviderId
+    cap_usd: float = Field(ge=0)
+    """Monthly cap in USD (UTC calendar month). 0 means no cap is set, so the provider refuses every call."""
+    spent_usd: float = Field(ge=0)
+    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    cap_set: bool
+
+
+class ProviderSpendList(ApiModel):
+    providers: list[ProviderSpend]
+
+
+class ProviderSpendCapRequest(ApiModel):
+    cap_usd: float = Field(ge=0)
+
+
+class ProviderApiKeyRequest(ApiModel):
+    api_key: str = Field(min_length=1, repr=False)
+    """Stored in the OS keychain. Never returned by any endpoint."""
+
+
+class ProviderKeyStatus(ApiModel):
+    provider: PaidProviderId
+    key_saved: bool
+    """Whether a key is stored. Saving a key does not enable the provider."""
+
+
+class ProviderEnabledRequest(ApiModel):
+    enabled: bool
+
+
 class BackupInfo(ApiModel):
     id: str
     created_at: datetime

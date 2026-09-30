@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "cap_set": {
+      "title": "Cap Set",
+      "type": "boolean"
+    },
+    "cap_usd": {
+      "minimum": 0,
+      "title": "Cap Usd",
+      "type": "number"
+    },
+    "month": {
+      "pattern": "^\\d{4}-\\d{2}$",
+      "title": "Month",
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "openai_key",
+        "anthropic_key",
+        "openrouter"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "spent_usd": {
+      "minimum": 0,
+      "title": "Spent Usd",
+      "type": "number"
+    }
+  },
+  "required": [
+    "provider",
+    "cap_usd",
+    "spent_usd",
+    "month",
+    "cap_set"
+  ],
+  "title": "ProviderSpend",
+  "type": "object"
+}

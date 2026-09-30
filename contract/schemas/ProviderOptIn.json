@@ -1,0 +1,55 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "configured": {
+      "default": false,
+      "title": "Configured",
+      "type": "boolean"
+    },
+    "cost_warning": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost Warning"
+    },
+    "enabled": {
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "feature_switches": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Feature Switches",
+      "type": "array"
+    },
+    "label": {
+      "title": "Label",
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "chatgpt_plan",
+        "openai_key",
+        "anthropic_key",
+        "openrouter",
+        "local"
+      ],
+      "title": "Provider",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "label",
+    "enabled"
+  ],
+  "title": "ProviderOptIn",
+  "type": "object"
+}

@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "FeatureSwitchState": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "default": false,
+          "title": "Available",
+          "type": "boolean"
+        },
+        "cost_warning": {
+          "title": "Cost Warning",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "enum": [
+            "paid_fallback_when_plan_runs_out",
+            "claude_as_reviewer",
+            "smarter_memory_search"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "requirement": {
+          "title": "Requirement",
+          "type": "string"
+        },
+        "requires_any_of": {
+          "items": {
+            "enum": [
+              "openai_key",
+              "anthropic_key",
+              "openrouter",
+              "local"
+            ],
+            "type": "string"
+          },
+          "title": "Requires Any Of",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "cost_warning",
+        "requires_any_of",
+        "requirement"
+      ],
+      "title": "FeatureSwitchState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "features": {
+      "items": {
+        "$ref": "#/$defs/FeatureSwitchState"
+      },
+      "title": "Features",
+      "type": "array"
+    }
+  },
+  "required": [
+    "features"
+  ],
+  "title": "FeatureSwitchList",
+  "type": "object"
+}

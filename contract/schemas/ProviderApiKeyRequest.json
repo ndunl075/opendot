@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "api_key": {
+      "minLength": 1,
+      "title": "Api Key",
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_key"
+  ],
+  "title": "ProviderApiKeyRequest",
+  "type": "object"
+}

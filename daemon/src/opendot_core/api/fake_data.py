@@ -210,6 +210,16 @@ def _fixup(model_name: str, data: dict[str, Any], idx: int) -> dict[str, Any]:
              "configured": False, "feature_switches": []},
         ], tier_overrides=[{"job_type": "routine", "tier": "luna", "effort": "low"}],
             auto_top_tier=False, style_preset="warm")
+    elif model_name == "FeatureSwitchState":
+        data.update(enabled=False, available=False, **_feature(idx))
+    elif model_name == "FeatureSwitchList":
+        data["features"] = [_feature_state(i) for i in range(3)]
+    elif model_name == "ProviderSpend":
+        data.update(_spend(data["provider"]))
+    elif model_name == "ProviderSpendList":
+        data["providers"] = [_spend(p) for p in ("openai_key", "anthropic_key", "openrouter")]
+    elif model_name == "ProviderKeyStatus":
+        data.update(key_saved=True)
     elif model_name == "BackupStatus":
         data.update(encryption_key_present=True, last_backup_at=data["backups"][0].created_at)
     elif model_name == "BackupInfo":
@@ -227,6 +237,35 @@ def _fixup(model_name: str, data: dict[str, Any], idx: int) -> dict[str, Any]:
     elif model_name == "OkResponse":
         data.update(ok=True, message=None)
     return data
+
+
+_FEATURE_FAKES = (
+    ("paid_fallback_when_plan_runs_out", "Use a paid model when the plan runs out",
+     "When your plan runs out, OpenDot offers to retry with a paid provider you choose. You approve each retry "
+     "and it costs real money per token, up to that provider's monthly cap.",
+     ["openai_key", "anthropic_key", "openrouter"], "Needs at least one paid provider turned on."),
+    ("claude_as_reviewer", "Use Claude as the reviewer",
+     "Risky actions are reviewed by Claude through your Anthropic API key and cost money per token.",
+     ["anthropic_key"], "Needs the Anthropic API key provider turned on."),
+    ("smarter_memory_search", "Smarter memory search",
+     "Memory search queries are sent to the provider you turned on. Key-based providers cost money per token.",
+     ["local", "openai_key", "anthropic_key", "openrouter"], "Needs a local model or a paid provider turned on."),
+)
+
+
+def _feature(idx: int) -> dict[str, Any]:
+    name, title, warning, requires, requirement = _FEATURE_FAKES[idx % 3]
+    return {"name": name, "title": title, "cost_warning": warning, "requires_any_of": requires,
+            "requirement": requirement}
+
+
+def _feature_state(i: int) -> dict[str, Any]:
+    return {"enabled": False, "available": False, **_feature(i)}
+
+
+def _spend(provider: str) -> dict[str, Any]:
+    return {"provider": provider, "cap_usd": 20.0, "spent_usd": 3.47, "month": BASE_TIME.strftime("%Y-%m"),
+            "cap_set": True}
 
 
 def _rule(i: int, name: str, action: str, behavior: str, core: bool) -> dict[str, Any]:
