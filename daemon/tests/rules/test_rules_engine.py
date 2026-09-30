@@ -407,6 +407,11 @@ def test_add_rule_accepts_a_rule_object_and_rejects_deny_list(engine: RuleEngine
         ("github", "comment_create"),
         ("gmail", "send_reply"),
         ("composio_execute", "SLACK_CHAT_POST_MESSAGE"),
+        ("composio_execute", "GMAIL_REPLY_TO_EMAIL"),
+        ("composio_execute", "GMAIL_SEND_EMAIL"),
+        ("composio_execute", "GITHUB_CREATE_ISSUE_COMMENT"),
+        ("composio_execute", "SLACK_SEND_MESSAGE"),
+        ("composio_execute", "LINKEDIN_CREATE_POST"),
     ],
 )
 def test_send_and_post_ask_every_time_even_with_an_auto_rule(engine: RuleEngine, tool: str, action: str) -> None:
@@ -425,3 +430,13 @@ def test_always_allow_uses_the_real_composio_action_type(database: Database, eng
 def test_drafts_events_and_local_tools_can_still_be_auto(engine: RuleEngine, tool: str, action: str) -> None:
     engine.add_rule(tool=tool, action=action, behavior="auto")
     assert engine.decide(intent(tool, action)).behavior is Behavior.AUTO
+
+
+@pytest.mark.parametrize(
+    "slug",
+    ["GITHUB_LIST_ISSUE_COMMENTS", "SLACK_FETCH_CONVERSATION_HISTORY", "GMAIL_FETCH_EMAILS", "SLACK_SEARCH_MESSAGES",
+     "GMAIL_GET_EMAIL", "GMAIL_CREATE_EMAIL_DRAFT", "GOOGLECALENDAR_CREATE_EVENT"],
+)
+def test_reads_drafts_and_events_are_not_sends(engine: RuleEngine, slug: str) -> None:
+    engine.add_rule(tool="composio_execute", action=slug, behavior="auto")
+    assert engine.decide(intent("composio_execute", slug)).behavior is Behavior.AUTO

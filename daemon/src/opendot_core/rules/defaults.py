@@ -69,26 +69,46 @@ ASK_EVERY_TIME_TOOLS = frozenset(
     {"message_send_propose", "gmail_message_send", "github_pr_comment_create", "slack_post", "telegram_send"}
 )
 """Tools and approval types that send or post for the user: always ``ask`` (section 10)."""
-_SEND_WORDS = frozenset(
-    {
-        "send", "sends", "sent", "post", "posts", "publish", "tweet", "broadcast", "forward", "comment",
-        "comments", "invite", "share", "announce", "dm", "chat", "message_send",
-    }
+
+#: Verbs that by themselves mean something goes out to other people.
+_SEND_VERBS = frozenset(
+    {"send", "post", "publish", "reply", "respond", "forward", "tweet", "retweet", "broadcast", "invite",
+     "share", "announce", "dm", "mention", "notify"}
+)
+#: Things that go out to other people once they are created.
+_MESSAGE_NOUNS = frozenset({"comment", "comments", "message", "messages", "chat", "review", "reaction", "status"})
+_CREATE_VERBS = frozenset({"create", "add", "new", "write", "make", "submit", "leave", "put"})
+#: Verbs that only read. A read never sends, whatever nouns it names.
+_READ_VERBS = frozenset(
+    {"list", "get", "fetch", "search", "read", "find", "retrieve", "view", "lookup", "count", "check",
+     "download", "export", "history", "watch", "subscribe"}
+)
+_READ_DEFAULTS = frozenset(
+    rule.tool for rule in DEFAULT_RULES if rule.note == "reading and syncing connected apps"
 )
 _SPLIT = re.compile(r"[^a-z0-9]+")
 
 
 def is_send_or_post(tool: str, action: str) -> bool:
-    """True for an intent that sends, posts, comments or publishes to other people.
+    """True for an intent that sends, posts, replies, comments or publishes to other people.
 
-    Outside-app tools only: OpenDot's own local tools (memory, tasks, reminders ...) never reach
-    other people. Matching errs toward asking, which is always safe.
+    Outside-app tools only: OpenDot's own local tools never reach other people, and the built-in
+    read tools (section 10's "reading and syncing") only read. Otherwise the tool name and action
+    are split into words: any send verb means a send (``GMAIL_REPLY_TO_EMAIL``); a read verb with no
+    send verb means a read (``GITHUB_LIST_ISSUE_COMMENTS``); a message noun with a create verb means
+    a post (``GITHUB_CREATE_ISSUE_COMMENT``). Drafts and calendar events stay relaxable.
     """
     from .deny_list import is_local_tool
 
     if tool in ASK_EVERY_TIME_TOOLS or action in ASK_EVERY_TIME_TOOLS:
         return True
-    if is_local_tool(tool):
+    if is_local_tool(tool) or tool in _READ_DEFAULTS:
         return False
     words = {part for part in _SPLIT.split(f"{tool} {action}".lower()) if part}
-    return bool(words & _SEND_WORDS)
+    if "draft" in words or "drafts" in words:
+        return bool(words & {"send", "post", "publish"})
+    if words & _SEND_VERBS:
+        return True
+    if words & _READ_VERBS:
+        return False
+    return bool(words & _MESSAGE_NOUNS and words & _CREATE_VERBS)

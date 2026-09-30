@@ -491,3 +491,30 @@ def test_f12_started_step_that_now_asks_is_handed_off_not_reproposed(tmp_path: P
     assert restarted.loop.task(task_id).state is TaskState.HANDED_OFF
     assert restarted.approvals.list_pending() == []
     assert restarted.world.executed("reminder_set") == []
+
+
+def test_f12_uncertainty_survives_a_pause_before_the_rerun(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("reminder_set", {"text": "x", "minutes": 5}), text_turn("ok")])
+    task_id = stack.loop.start_task("remind me")
+
+    class Crash(BaseException):
+        pass
+
+    def crash(*args: object, **kwargs: object) -> str:
+        raise Crash
+
+    real_run = stack.tools.run
+    stack.tools.run = crash  # type: ignore[method-assign]
+    with pytest.raises(Crash):
+        stack.run(task_id)
+    stack.tools.run = real_run  # type: ignore[method-assign]
+    restarted = stack.restart()
+    restarted.loop.pause("user")  # still auto on resume, but paused before the rerun
+    restarted.loop.resume_all()
+    assert restarted.loop.task(task_id).state is TaskState.PAUSED
+    restarted.rules.add_rule(tool="reminder_set", action="create", behavior="ask", max_sensitivity="personal")
+    restarted.loop.unpause()
+    restarted.run(task_id)
+    assert restarted.loop.task(task_id).state is TaskState.HANDED_OFF
+    assert restarted.approvals.list_pending() == []
+    assert restarted.world.executed("reminder_set") == []

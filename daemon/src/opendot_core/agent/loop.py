@@ -702,7 +702,9 @@ class AgentLoop:
             yield from self._end(task_id, TaskState.HANDED_OFF, message)
 
         if behavior is Behavior.AUTO:
-            self._finish_step(step["id"], "pending", behavior=Behavior.AUTO.value)
+            # Record the behavior only. A step that ever reached "started" stays "started" until it
+            # is done, so the fact that it may already have run survives any later pause (F12).
+            self._finish_step(step["id"], step["state"], behavior=Behavior.AUTO.value)
             yield from self._run_auto(task_id, step, name, arguments)
             return
 
