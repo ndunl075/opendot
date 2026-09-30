@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "UsageBudgets": {
+      "additionalProperties": false,
+      "properties": {
+        "daily_credits": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Daily Credits"
+        },
+        "daily_hard_stop": {
+          "default": true,
+          "title": "Daily Hard Stop",
+          "type": "boolean"
+        },
+        "task_credits": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Credits"
+        }
+      },
+      "title": "UsageBudgets",
+      "type": "object"
+    },
+    "UsageByDay": {
+      "additionalProperties": false,
+      "properties": {
+        "credits": {
+          "title": "Credits",
+          "type": "number"
+        },
+        "day": {
+          "title": "Day",
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "credits"
+      ],
+      "title": "UsageByDay",
+      "type": "object"
+    },
+    "UsageByJobType": {
+      "additionalProperties": false,
+      "properties": {
+        "credits": {
+          "title": "Credits",
+          "type": "number"
+        },
+        "job_type": {
+          "title": "Job Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_type",
+        "credits"
+      ],
+      "title": "UsageByJobType",
+      "type": "object"
+    },
+    "UsageByTask": {
+      "additionalProperties": false,
+      "properties": {
+        "credits": {
+          "title": "Credits",
+          "type": "number"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "title",
+        "credits"
+      ],
+      "title": "UsageByTask",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "budgets": {
+      "$ref": "#/$defs/UsageBudgets"
+    },
+    "by_day": {
+      "items": {
+        "$ref": "#/$defs/UsageByDay"
+      },
+      "title": "By Day",
+      "type": "array"
+    },
+    "by_job_type": {
+      "items": {
+        "$ref": "#/$defs/UsageByJobType"
+      },
+      "title": "By Job Type",
+      "type": "array"
+    },
+    "by_task": {
+      "items": {
+        "$ref": "#/$defs/UsageByTask"
+      },
+      "title": "By Task",
+      "type": "array"
+    },
+    "daily_budget_remaining": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Daily Budget Remaining"
+    },
+    "days": {
+      "title": "Days",
+      "type": "integer"
+    },
+    "manage_usage_url": {
+      "title": "Manage Usage Url",
+      "type": "string"
+    },
+    "paused_for_budget": {
+      "default": false,
+      "title": "Paused For Budget",
+      "type": "boolean"
+    },
+    "plan_label": {
+      "title": "Plan Label",
+      "type": "string"
+    },
+    "today_credits": {
+      "title": "Today Credits",
+      "type": "number"
+    },
+    "total_credits": {
+      "title": "Total Credits",
+      "type": "number"
+    }
+  },
+  "required": [
+    "days",
+    "total_credits",
+    "today_credits",
+    "by_day",
+    "by_task",
+    "by_job_type",
+    "budgets",
+    "plan_label",
+    "manage_usage_url"
+  ],
+  "title": "UsageSummary",
+  "type": "object"
+}

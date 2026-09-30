@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "disconnected": {
+      "title": "Disconnected",
+      "type": "boolean"
+    },
+    "forgotten_count": {
+      "default": 0,
+      "title": "Forgotten Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "disconnected"
+  ],
+  "title": "ConnectionDisconnectResult",
+  "type": "object"
+}

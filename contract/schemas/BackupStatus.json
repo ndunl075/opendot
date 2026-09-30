@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "BackupInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "size_bytes": {
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "verified": {
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "created_at",
+        "size_bytes",
+        "verified"
+      ],
+      "title": "BackupInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "backups": {
+      "items": {
+        "$ref": "#/$defs/BackupInfo"
+      },
+      "title": "Backups",
+      "type": "array"
+    },
+    "encryption_key_present": {
+      "title": "Encryption Key Present",
+      "type": "boolean"
+    },
+    "last_backup_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Backup At"
+    }
+  },
+  "required": [
+    "backups",
+    "encryption_key_present"
+  ],
+  "title": "BackupStatus",
+  "type": "object"
+}

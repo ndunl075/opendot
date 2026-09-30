@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "backup_id": {
+      "title": "Backup Id",
+      "type": "string"
+    },
+    "confirm": {
+      "const": "restore",
+      "title": "Confirm",
+      "type": "string"
+    }
+  },
+  "required": [
+    "backup_id",
+    "confirm"
+  ],
+  "title": "BackupRestoreRequest",
+  "type": "object"
+}

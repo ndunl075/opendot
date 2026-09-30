@@ -1,0 +1,33 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "text": {
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "type": {
+      "const": "send",
+      "default": "send",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "title": "ClientSendFrame",
+  "type": "object"
+}

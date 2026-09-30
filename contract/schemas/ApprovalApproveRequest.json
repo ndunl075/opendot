@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Note"
+    }
+  },
+  "title": "ApprovalApproveRequest",
+  "type": "object"
+}

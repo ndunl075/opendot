@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "app": {
+      "enum": [
+        "gmail",
+        "google_calendar",
+        "github"
+      ],
+      "title": "App",
+      "type": "string"
+    },
+    "authorize_url": {
+      "title": "Authorize Url",
+      "type": "string"
+    },
+    "state": {
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "app",
+    "authorize_url",
+    "state"
+  ],
+  "title": "ConnectionStart",
+  "type": "object"
+}

@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "ToolCallRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "ok",
+            "error",
+            "needs_approval",
+            "denied"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "name",
+        "summary",
+        "status"
+      ],
+      "title": "ToolCallRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "call": {
+      "$ref": "#/$defs/ToolCallRecord"
+    },
+    "conversation_id": {
+      "title": "Conversation Id",
+      "type": "string"
+    },
+    "message_id": {
+      "title": "Message Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "type": {
+      "const": "tool_call",
+      "default": "tool_call",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "seq",
+    "conversation_id",
+    "message_id",
+    "call"
+  ],
+  "title": "ToolCallEvent",
+  "type": "object"
+}

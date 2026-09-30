@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "ChatGPTStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "account_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Label"
+        },
+        "credits_enabled": {
+          "default": false,
+          "title": "Credits Enabled",
+          "type": "boolean"
+        },
+        "eligible": {
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "ineligible_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ineligible Reason"
+        },
+        "manage_usage_url": {
+          "title": "Manage Usage Url",
+          "type": "string"
+        },
+        "plan": {
+          "enum": [
+            "unknown",
+            "eligible_plus",
+            "eligible_pro",
+            "ineligible"
+          ],
+          "title": "Plan",
+          "type": "string"
+        },
+        "plan_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Label"
+        },
+        "state": {
+          "enum": [
+            "signed_out",
+            "pending",
+            "signed_in",
+            "error"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "plan",
+        "eligible",
+        "manage_usage_url"
+      ],
+      "title": "ChatGPTStatus",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "avatar_seed": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Avatar Seed"
+    },
+    "chatgpt": {
+      "$ref": "#/$defs/ChatGPTStatus"
+    },
+    "companion_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Companion Name"
+    },
+    "completed_steps": {
+      "items": {
+        "enum": [
+          "companion",
+          "chatgpt",
+          "weekly_limit",
+          "connections",
+          "intro",
+          "done"
+        ],
+        "type": "string"
+      },
+      "title": "Completed Steps",
+      "type": "array"
+    },
+    "credits_off_acknowledged": {
+      "default": false,
+      "title": "Credits Off Acknowledged",
+      "type": "boolean"
+    },
+    "current_step": {
+      "enum": [
+        "companion",
+        "chatgpt",
+        "weekly_limit",
+        "connections",
+        "intro",
+        "done"
+      ],
+      "title": "Current Step",
+      "type": "string"
+    },
+    "intro_message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Intro Message"
+    },
+    "weekly_limit_acknowledged": {
+      "default": false,
+      "title": "Weekly Limit Acknowledged",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "current_step",
+    "completed_steps",
+    "chatgpt"
+  ],
+  "title": "OnboardingState",
+  "type": "object"
+}

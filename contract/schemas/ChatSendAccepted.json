@@ -1,0 +1,24 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "conversation_id": {
+      "title": "Conversation Id",
+      "type": "string"
+    },
+    "message_id": {
+      "title": "Message Id",
+      "type": "string"
+    },
+    "stream_path": {
+      "title": "Stream Path",
+      "type": "string"
+    }
+  },
+  "required": [
+    "conversation_id",
+    "message_id",
+    "stream_path"
+  ],
+  "title": "ChatSendAccepted",
+  "type": "object"
+}

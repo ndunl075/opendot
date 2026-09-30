@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "ConversationSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "message_count": {
+          "title": "Message Count",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "updated_at",
+        "message_count"
+      ],
+      "title": "ConversationSummary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "conversations": {
+      "items": {
+        "$ref": "#/$defs/ConversationSummary"
+      },
+      "title": "Conversations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "conversations"
+  ],
+  "title": "ConversationList",
+  "type": "object"
+}

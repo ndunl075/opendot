@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "approve": {
+      "default": true,
+      "title": "Approve",
+      "type": "boolean"
+    },
+    "payload": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Payload",
+      "type": "object"
+    }
+  },
+  "required": [
+    "payload"
+  ],
+  "title": "ApprovalEditRequest",
+  "type": "object"
+}

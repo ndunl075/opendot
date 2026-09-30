@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "daily_credits": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Daily Credits"
+    },
+    "daily_hard_stop": {
+      "default": true,
+      "title": "Daily Hard Stop",
+      "type": "boolean"
+    },
+    "task_credits": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Credits"
+    }
+  },
+  "title": "UsageBudgets",
+  "type": "object"
+}

@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "ClientPingFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ping",
+          "default": "ping",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ClientPingFrame",
+      "type": "object"
+    },
+    "ClientResumeFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "after_seq": {
+          "minimum": 0,
+          "title": "After Seq",
+          "type": "integer"
+        },
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "resume",
+          "default": "resume",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "after_seq"
+      ],
+      "title": "ClientResumeFrame",
+      "type": "object"
+    },
+    "ClientSendFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "send",
+          "default": "send",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ClientSendFrame",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "ping": "#/$defs/ClientPingFrame",
+      "resume": "#/$defs/ClientResumeFrame",
+      "send": "#/$defs/ClientSendFrame"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ClientSendFrame"
+    },
+    {
+      "$ref": "#/$defs/ClientResumeFrame"
+    },
+    {
+      "$ref": "#/$defs/ClientPingFrame"
+    }
+  ]
+}

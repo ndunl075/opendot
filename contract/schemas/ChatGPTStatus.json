@@ -1,0 +1,94 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "account_label": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Account Label"
+    },
+    "credits_enabled": {
+      "default": false,
+      "title": "Credits Enabled",
+      "type": "boolean"
+    },
+    "eligible": {
+      "title": "Eligible",
+      "type": "boolean"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "ineligible_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ineligible Reason"
+    },
+    "manage_usage_url": {
+      "title": "Manage Usage Url",
+      "type": "string"
+    },
+    "plan": {
+      "enum": [
+        "unknown",
+        "eligible_plus",
+        "eligible_pro",
+        "ineligible"
+      ],
+      "title": "Plan",
+      "type": "string"
+    },
+    "plan_label": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plan Label"
+    },
+    "state": {
+      "enum": [
+        "signed_out",
+        "pending",
+        "signed_in",
+        "error"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "state",
+    "plan",
+    "eligible",
+    "manage_usage_url"
+  ],
+  "title": "ChatGPTStatus",
+  "type": "object"
+}

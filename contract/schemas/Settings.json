@@ -1,0 +1,197 @@
+{
+  "$defs": {
+    "KeepAwakeSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "only_while_plugged_in": {
+          "default": true,
+          "title": "Only While Plugged In",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "KeepAwakeSettings",
+      "type": "object"
+    },
+    "ModelTierOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "job_type": {
+          "title": "Job Type",
+          "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "luna",
+            "terra",
+            "sol"
+          ],
+          "title": "Tier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_type",
+        "tier"
+      ],
+      "title": "ModelTierOverride",
+      "type": "object"
+    },
+    "ProviderOptIn": {
+      "additionalProperties": false,
+      "properties": {
+        "configured": {
+          "default": false,
+          "title": "Configured",
+          "type": "boolean"
+        },
+        "cost_warning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Warning"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "feature_switches": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Feature Switches",
+          "type": "array"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "chatgpt_plan",
+            "openai_key",
+            "anthropic_key",
+            "openrouter",
+            "local"
+          ],
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "label",
+        "enabled"
+      ],
+      "title": "ProviderOptIn",
+      "type": "object"
+    },
+    "QuietHoursSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "end": {
+          "pattern": "^\\d{2}:\\d{2}$",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "pattern": "^\\d{2}:\\d{2}$",
+          "title": "Start",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "start",
+        "end",
+        "timezone"
+      ],
+      "title": "QuietHoursSettings",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "auto_top_tier": {
+      "default": false,
+      "title": "Auto Top Tier",
+      "type": "boolean"
+    },
+    "keep_awake": {
+      "$ref": "#/$defs/KeepAwakeSettings"
+    },
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/ProviderOptIn"
+      },
+      "title": "Providers",
+      "type": "array"
+    },
+    "quiet_hours": {
+      "$ref": "#/$defs/QuietHoursSettings"
+    },
+    "style_preset": {
+      "enum": [
+        "concise",
+        "warm",
+        "formal",
+        "playful"
+      ],
+      "title": "Style Preset",
+      "type": "string"
+    },
+    "tier_overrides": {
+      "items": {
+        "$ref": "#/$defs/ModelTierOverride"
+      },
+      "title": "Tier Overrides",
+      "type": "array"
+    }
+  },
+  "required": [
+    "keep_awake",
+    "quiet_hours",
+    "providers",
+    "tier_overrides",
+    "style_preset"
+  ],
+  "title": "Settings",
+  "type": "object"
+}

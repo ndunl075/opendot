@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "avatar_seed": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Avatar Seed"
+    }
+  },
+  "title": "CompanionAvatarRequest",
+  "type": "object"
+}

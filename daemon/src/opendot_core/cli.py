@@ -12,6 +12,8 @@ from typing import Iterator, Sequence
 from uuid import uuid4
 
 from .admin_ui import run_admin_ui
+from .api.cli_glue import add_parsers as api_contract_add_parsers
+from .api.cli_glue import dispatch as api_contract_dispatch
 from .audit import AuditEvent, AuditLog
 from .availability import AvailabilityService
 from .backup import EncryptedBackupService, latest_backup
@@ -243,6 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", help="SQLite database path; defaults to OPENDOT_DB_PATH or .opendot/opendot.db")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
+    api_contract_add_parsers(subcommands)
     subcommands.add_parser("init", help="create or migrate the local database")
     subcommands.add_parser("status", help="show non-sensitive local status")
     subcommands.add_parser(
@@ -822,6 +825,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    api_contract_exit = api_contract_dispatch(args)
+    if api_contract_exit is not None:
+        return api_contract_exit
     if args.command == "measure":
         from .measure import cli as measure_cli
 
