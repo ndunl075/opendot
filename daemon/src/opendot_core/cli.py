@@ -814,11 +814,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="telegram-bot-token",
         help="credential-manager key for the Telegram bot token used during rescue polling",
     )
+    from .measure import cli as measure_cli
+
+    measure_cli.register(subcommands)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "measure":
+        from .measure import cli as measure_cli
+
+        return measure_cli.run(args)
     database = database_from_args(args)
     if args.command == "init":
         print(json.dumps({"schema_version": database.migrate(), "database_path": str(database.path)}))
