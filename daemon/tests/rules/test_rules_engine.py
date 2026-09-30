@@ -412,6 +412,9 @@ def test_add_rule_accepts_a_rule_object_and_rejects_deny_list(engine: RuleEngine
         ("composio_execute", "GITHUB_CREATE_ISSUE_COMMENT"),
         ("composio_execute", "SLACK_SEND_MESSAGE"),
         ("composio_execute", "LINKEDIN_CREATE_POST"),
+        ("composio_execute", "SLACK_CHAT_SCHEDULE_MESSAGE"),
+        ("composio_execute", "SLACK_CHAT_UPDATE"),
+        ("composio_execute", "GITHUB_UPDATE_ISSUE_COMMENT"),
     ],
 )
 def test_send_and_post_ask_every_time_even_with_an_auto_rule(engine: RuleEngine, tool: str, action: str) -> None:

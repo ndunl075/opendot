@@ -75,9 +75,8 @@ _SEND_VERBS = frozenset(
     {"send", "post", "publish", "reply", "respond", "forward", "tweet", "retweet", "broadcast", "invite",
      "share", "announce", "dm", "mention", "notify"}
 )
-#: Things that go out to other people once they are created.
+#: Things other people see: any action on them that is not a read counts as outgoing.
 _MESSAGE_NOUNS = frozenset({"comment", "comments", "message", "messages", "chat", "review", "reaction", "status"})
-_CREATE_VERBS = frozenset({"create", "add", "new", "write", "make", "submit", "leave", "put"})
 #: Verbs that only read. A read never sends, whatever nouns it names.
 _READ_VERBS = frozenset(
     {"list", "get", "fetch", "search", "read", "find", "retrieve", "view", "lookup", "count", "check",
@@ -95,8 +94,8 @@ def is_send_or_post(tool: str, action: str) -> bool:
     Outside-app tools only: OpenDot's own local tools never reach other people, and the built-in
     read tools (section 10's "reading and syncing") only read. Otherwise the tool name and action
     are split into words: any send verb means a send (``GMAIL_REPLY_TO_EMAIL``); a read verb with no
-    send verb means a read (``GITHUB_LIST_ISSUE_COMMENTS``); a message noun with a create verb means
-    a post (``GITHUB_CREATE_ISSUE_COMMENT``). Drafts and calendar events stay relaxable.
+    send verb means a read (``GITHUB_LIST_ISSUE_COMMENTS``); any other action on a message, comment
+    or chat (create, schedule, update, edit ...) is outgoing. Drafts and calendar events stay relaxable.
     """
     from .deny_list import is_local_tool
 
@@ -111,4 +110,6 @@ def is_send_or_post(tool: str, action: str) -> bool:
         return True
     if words & _READ_VERBS:
         return False
-    return bool(words & _MESSAGE_NOUNS and words & _CREATE_VERBS)
+    # Any other action on something other people see (create, schedule, update, edit, pin ...) is
+    # outgoing: when unsure, ask.
+    return bool(words & _MESSAGE_NOUNS)
