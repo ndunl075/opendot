@@ -389,6 +389,69 @@
       "summary": "Update settings"
     },
     {
+      "method": "PUT",
+      "name": "provider_enabled_set",
+      "path": "/v1/providers/{provider}/enabled",
+      "request": "ProviderEnabledRequest",
+      "request_in": "body",
+      "response": "ProviderOptIn",
+      "summary": "Enable or disable an opt-in provider (saving a key never does this)"
+    },
+    {
+      "method": "PUT",
+      "name": "provider_api_key_save",
+      "path": "/v1/providers/{provider}/api-key",
+      "request": "ProviderApiKeyRequest",
+      "request_in": "body",
+      "response": "ProviderKeyStatus",
+      "summary": "Save an API key to the keychain; the key is never echoed back"
+    },
+    {
+      "method": "DELETE",
+      "name": "provider_api_key_remove",
+      "path": "/v1/providers/{provider}/api-key",
+      "request": null,
+      "request_in": null,
+      "response": "ProviderKeyStatus",
+      "summary": "Remove a saved API key"
+    },
+    {
+      "method": "GET",
+      "name": "features_list",
+      "path": "/v1/providers/features",
+      "request": null,
+      "request_in": null,
+      "response": "FeatureSwitchList",
+      "summary": "Feature switches with cost warnings and requirements"
+    },
+    {
+      "method": "PUT",
+      "name": "feature_set",
+      "path": "/v1/providers/features/{feature}",
+      "request": "FeatureSwitchSetRequest",
+      "request_in": "body",
+      "response": "FeatureSwitchState",
+      "summary": "Turn a feature switch on or off"
+    },
+    {
+      "method": "GET",
+      "name": "spend_get",
+      "path": "/v1/providers/spend",
+      "request": null,
+      "request_in": null,
+      "response": "ProviderSpendList",
+      "summary": "Monthly spend cap and month-to-date spend per paid provider"
+    },
+    {
+      "method": "PUT",
+      "name": "spend_cap_set",
+      "path": "/v1/providers/{provider}/spend-cap",
+      "request": "ProviderSpendCapRequest",
+      "request_in": "body",
+      "response": "ProviderSpend",
+      "summary": "Set a paid provider's monthly spend cap in USD"
+    },
+    {
       "method": "GET",
       "name": "backup_status",
       "path": "/v1/backup",
@@ -459,6 +522,9 @@
     "schemas/Conversation.json",
     "schemas/ConversationList.json",
     "schemas/ErrorEvent.json",
+    "schemas/FeatureSwitchList.json",
+    "schemas/FeatureSwitchSetRequest.json",
+    "schemas/FeatureSwitchState.json",
     "schemas/HealthResponse.json",
     "schemas/MemoryCorrectRequest.json",
     "schemas/MemoryCorrectResult.json",
@@ -471,6 +537,13 @@
     "schemas/OnboardingAcknowledgeRequest.json",
     "schemas/OnboardingState.json",
     "schemas/PausedEvent.json",
+    "schemas/ProviderApiKeyRequest.json",
+    "schemas/ProviderEnabledRequest.json",
+    "schemas/ProviderKeyStatus.json",
+    "schemas/ProviderOptIn.json",
+    "schemas/ProviderSpend.json",
+    "schemas/ProviderSpendCapRequest.json",
+    "schemas/ProviderSpendList.json",
     "schemas/Rule.json",
     "schemas/RuleCreateRequest.json",
     "schemas/RuleList.json",

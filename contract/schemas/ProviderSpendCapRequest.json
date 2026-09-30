@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "cap_usd": {
+      "minimum": 0,
+      "title": "Cap Usd",
+      "type": "number"
+    }
+  },
+  "required": [
+    "cap_usd"
+  ],
+  "title": "ProviderSpendCapRequest",
+  "type": "object"
+}
