@@ -438,7 +438,8 @@ def test_drafts_events_and_local_tools_can_still_be_auto(engine: RuleEngine, too
 @pytest.mark.parametrize(
     "slug",
     ["GITHUB_LIST_ISSUE_COMMENTS", "SLACK_FETCH_CONVERSATION_HISTORY", "GMAIL_FETCH_EMAILS", "SLACK_SEARCH_MESSAGES",
-     "GMAIL_GET_EMAIL", "GMAIL_CREATE_EMAIL_DRAFT", "GOOGLECALENDAR_CREATE_EVENT"],
+     "GMAIL_GET_EMAIL", "GMAIL_CREATE_EMAIL_DRAFT", "GOOGLECALENDAR_CREATE_EVENT", "GMAIL_MODIFY_MESSAGE",
+     "GMAIL_ADD_LABEL_TO_EMAIL", "GMAIL_MARK_MESSAGE_AS_READ", "OUTLOOK_MOVE_MESSAGE", "SLACK_STAR_MESSAGE"],
 )
 def test_reads_drafts_and_events_are_not_sends(engine: RuleEngine, slug: str) -> None:
     engine.add_rule(tool="composio_execute", action=slug, behavior="auto")

@@ -82,6 +82,11 @@ _READ_VERBS = frozenset(
     {"list", "get", "fetch", "search", "read", "find", "retrieve", "view", "lookup", "count", "check",
      "download", "export", "history", "watch", "subscribe"}
 )
+#: Changes that stay in the user's own mailbox or workspace view (nobody else sees them).
+_MAILBOX_ONLY = frozenset(
+    {"label", "labels", "archive", "unarchive", "star", "unstar", "mark", "unread", "mute", "unmute", "snooze",
+     "move", "flag", "unflag"}
+)
 _READ_DEFAULTS = frozenset(
     rule.tool for rule in DEFAULT_RULES if rule.note == "reading and syncing connected apps"
 )
@@ -108,8 +113,10 @@ def is_send_or_post(tool: str, action: str) -> bool:
         return bool(words & {"send", "post", "publish"})
     if words & _SEND_VERBS:
         return True
-    if words & _READ_VERBS:
+    if words & _READ_VERBS or words & _MAILBOX_ONLY:
         return False
+    if "gmail" in words and "modify" in words:
+        return False  # Gmail's messages.modify only changes labels; sent mail cannot be edited
     # Any other action on something other people see (create, schedule, update, edit, pin ...) is
     # outgoing: when unsure, ask.
     return bool(words & _MESSAGE_NOUNS)
