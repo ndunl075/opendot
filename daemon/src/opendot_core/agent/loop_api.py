@@ -21,6 +21,8 @@ class TaskState(StrEnum):
     PAUSED_TASK_BUDGET = "paused_task_budget"
     PAUSED_DAILY_BUDGET = "paused_daily_budget"
     PAUSED_PLAN_LIMIT = "paused_plan_limit"
+    PAUSED = "paused"
+    """Stopped by the kill switch (the user's Pause) or by anomaly auto-pause."""
     COMPLETED = "completed"
     FAILED = "failed"
     HANDED_OFF = "handed_off"
@@ -55,6 +57,9 @@ class ApprovalEvent(BaseModel):
     type: Literal["approval_required"] = "approval_required"
     approval_id: str
     action_type: str
+    review: str = ""
+    """The reviewer's note, shown on the approval card."""
+    review_verdict: str = "ok"
 
 
 class PausedEvent(BaseModel):
@@ -108,4 +113,18 @@ class AgentLoopProtocol(Protocol):
 
     def resume_after_plan_limit(self) -> None:
         """The user raised their ChatGPT limit (or waited); clear the plan-request pause."""
+        ...
+
+    def task_for_approval(self, approval_id: str) -> str | None:
+        """The task waiting on this approval, so the API can run it again once the user decides."""
+        ...
+
+    def pause(self, reason: str = "user") -> None:
+        """Kill switch: no task sends a model request or runs a tool until ``unpause``."""
+        ...
+
+    def unpause(self) -> None: ...
+
+    def paused(self) -> str | None:
+        """The kill-switch reason when paused, else None."""
         ...
