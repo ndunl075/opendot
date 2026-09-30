@@ -1,0 +1,10 @@
+data: {"id":"c1","model":"gpt-4o-2024","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"}}]}
+
+data: {"id":"c1","model":"gpt-4o-2024","choices":[{"index":0,"delta":{"content":"lo"}}]}
+
+data: {"id":"c1","model":"gpt-4o-2024","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"c1","model":"gpt-4o-2024","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":10},"completion_tokens_details":{"reasoning_tokens":5}}}
+
+data: [DONE]
+

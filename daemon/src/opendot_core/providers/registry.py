@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .base import Provider
 from .errors import ProviderDisabled, ProviderError, ProviderSwitchForbidden
+from .features import FeatureSwitches
 from .types import ChatRequest, StreamEvent
 
 #: The only provider that is on without the user turning it on.
@@ -26,6 +27,8 @@ class ProviderSettings(BaseModel):
     """Which providers the user has switched on. Everything else is off."""
 
     enabled: set[str] = Field(default_factory=lambda: {DEFAULT_PROVIDER})
+    features: FeatureSwitches = Field(default_factory=FeatureSwitches)
+    """Feature switches (all off by default). Saving a key changes neither field."""
 
     def is_enabled(self, name: str) -> bool:
         return name in self.enabled
