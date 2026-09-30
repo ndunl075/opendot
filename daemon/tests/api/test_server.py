@@ -335,3 +335,45 @@ def test_edit_is_not_implemented_and_changes_nothing(client: TestClient, parts) 
     assert response.status_code == 501
     assert parts["approvals"].get(approval_id).state == "pending"
     assert parts["escrow"].get(approval_id) is None
+
+
+# -- M2 review F1: browsers cannot set Authorization on a WebSocket ------------------------------
+
+
+def test_websocket_accepts_the_token_as_a_subprotocol(tmp_path: Path) -> None:
+    from opendot_core.api.server import WS_SUBPROTOCOL, WS_TOKEN_PREFIX
+
+    database = Database(tmp_path / "ws.db")
+    database.migrate()
+    approvals = ApprovalService(database)
+    app = create_app(loop=FakeLoop(approvals), approvals=approvals, rules=RuleEngine(database), token=TOKEN,
+                     token_escrow=TokenEscrow())
+    client = TestClient(app)
+    with client.websocket_connect(
+        CHAT_STREAM_PATH,
+        subprotocols=[WS_SUBPROTOCOL, WS_TOKEN_PREFIX + TOKEN],
+        headers={"Origin": "http://127.0.0.1:8765"},
+    ) as ws:
+        assert ws.accepted_subprotocol == WS_SUBPROTOCOL
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(CHAT_STREAM_PATH, subprotocols=[WS_SUBPROTOCOL, WS_TOKEN_PREFIX + "wrong"]):
+            pass
+
+
+@pytest.mark.parametrize("origin", ["https://evil.example", "http://127.0.0.1.evil.example", "null"])
+def test_websocket_refuses_foreign_origins_even_with_the_token(tmp_path: Path, origin: str) -> None:
+    database = Database(tmp_path / "ws.db")
+    database.migrate()
+    approvals = ApprovalService(database)
+    app = create_app(loop=FakeLoop(approvals), approvals=approvals, rules=RuleEngine(database), token=TOKEN,
+                     token_escrow=TokenEscrow())
+    with pytest.raises(WebSocketDisconnect):
+        with TestClient(app).websocket_connect(CHAT_STREAM_PATH, headers={**AUTH, "Origin": origin}):
+            pass
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:5173", "https://tauri.localhost", "tauri://localhost", "http://[::1]:80"])
+def test_local_origins_are_allowed(origin: str) -> None:
+    from opendot_core.api.server import origin_allowed
+
+    assert origin_allowed(origin)

@@ -11,7 +11,7 @@ from opendot_core.agent.reviewer import Proposal, Reviewer, known_recipient_doma
 from opendot_core.db import Database
 from opendot_core.eval.fake_provider import ScriptedProvider, error_turn, text_turn
 from opendot_core.policy import ApprovalService
-from opendot_core.providers.errors import UsageLimitExceeded
+from opendot_core.providers.errors import ProviderUnavailable, UsageLimitExceeded
 from opendot_core.providers.registry import ProviderRegistry, ProviderSettings
 from opendot_core.router import Router
 from opendot_core.usage.meter import UsageMeter
@@ -107,9 +107,34 @@ def test_block_skips_the_model(database: Database) -> None:
 
 
 def test_model_errors_become_a_concern_never_a_switch(database: Database) -> None:
-    reviewer, provider, _ = _model_reviewer(database, [error_turn(UsageLimitExceeded("429"))])
+    reviewer, provider, _ = _model_reviewer(database, [error_turn(ProviderUnavailable("down"))])
     note = reviewer.review(draft(to="amy@example.com", body="hi"))
     assert note.verdict == "concern" and provider.calls == 1
+
+
+def test_a_429_propagates_so_the_loop_pauses_every_plan_request(database: Database) -> None:
+    reviewer, _, _ = _model_reviewer(database, [error_turn(UsageLimitExceeded("429"))])
+    with pytest.raises(UsageLimitExceeded):
+        reviewer.review(draft(to="amy@example.com", body="hi"))
+
+
+def test_budget_errors_propagate(database: Database) -> None:
+    from opendot_core.usage.errors import DailyBudgetExceeded
+
+    reviewer, provider, meter = _model_reviewer(database, [])
+    meter.set_budgets(daily_credits=0)
+    with pytest.raises(DailyBudgetExceeded):
+        reviewer.review(draft(to="amy@example.com", body="hi"))
+    assert provider.calls == 0
+
+
+def test_paid_reviewer_needs_its_feature_switch(database: Database) -> None:
+    provider = ScriptedProvider([text_turn("{}")], name="anthropic_key", paid=True)
+    registry = ProviderRegistry(ProviderSettings(enabled={"chatgpt_plan", "anthropic_key"}))
+    registry.register(provider)
+    reviewer = Reviewer(database, registry, Router(provider.list_models()), None, provider_name="anthropic_key")
+    note = reviewer.review(draft(to="amy@example.com", body="hi"))
+    assert provider.calls == 0 and any("not switched on" in r for r in note.reasons)
 
 
 def test_unreadable_model_answer_is_a_concern(database: Database) -> None:

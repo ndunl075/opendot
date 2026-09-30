@@ -91,8 +91,41 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(ErrorResponse(code=code, message=message).model_dump(mode="json"), status_code=status)
 
 
+WS_SUBPROTOCOL = "opendot"
+"""The subprotocol the server selects. Browsers cannot set an Authorization header on a WebSocket,
+so they offer ``["opendot", "opendot.bearer.<token>"]``; the server answers ``opendot`` and never
+echoes the token."""
+WS_TOKEN_PREFIX = "opendot.bearer."
+ALLOWED_ORIGIN_HOSTS = ("127.0.0.1", "localhost", "[::1]", "tauri.localhost")
+"""Browser origins allowed to open the chat WebSocket (the UI served locally, or the Tauri shell).
+A WebSocket is not covered by CORS, so without this any web page could try to connect."""
+
+
+def origin_allowed(origin: str | None) -> bool:
+    if origin is None:
+        return True  # not a browser (CLI, tests); the bearer token still applies
+    scheme, _, rest = origin.partition("://")
+    host = rest.split("/", 1)[0]
+    host = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+    if scheme == "tauri":
+        return host == "localhost"
+    return scheme in ("http", "https") and host in ALLOWED_ORIGIN_HOSTS
+
+
+def _ws_protocol_token(value: bytes) -> bytes:
+    for item in value.split(b","):
+        item = item.strip()
+        if item.startswith(WS_TOKEN_PREFIX.encode()):
+            return item[len(WS_TOKEN_PREFIX) :]
+    return b""
+
+
 class BearerAuth:
-    """Pure ASGI middleware: reject HTTP and WebSocket requests without the right bearer token."""
+    """Pure ASGI middleware: reject HTTP and WebSocket requests without the right bearer token.
+
+    HTTP uses ``Authorization: Bearer``. The WebSocket accepts that header or, for browsers, the
+    token as an offered subprotocol, and also checks the Origin header.
+    """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         self.app = app
@@ -103,13 +136,18 @@ class BearerAuth:
             await self.app(scope, receive, send)
             return
         supplied = b""
+        origin: str | None = None
         for key, value in scope.get("headers", []):
-            if key == b"authorization":
+            if key == b"authorization" and not supplied:
                 prefix, _, rest = value.partition(b" ")
                 if prefix.lower() == b"bearer":
                     supplied = rest.strip()
-                break
-        if supplied and secrets.compare_digest(supplied, self._token):
+            elif key == b"sec-websocket-protocol" and scope["type"] == "websocket" and not supplied:
+                supplied = _ws_protocol_token(value)
+            elif key == b"origin":
+                origin = value.decode("latin-1")
+        allowed_origin = scope["type"] != "websocket" or origin_allowed(origin)
+        if supplied and allowed_origin and secrets.compare_digest(supplied, self._token):
             await self.app(scope, receive, send)
             return
         if scope["type"] == "websocket":
@@ -441,7 +479,8 @@ def create_app(
         return JSONResponse(profile().model_dump(mode="json"))
 
     async def chat_stream(ws: WebSocket) -> None:
-        await ws.accept()
+        offered = [item.strip() for item in ws.headers.get("sec-websocket-protocol", "").split(",") if item.strip()]
+        await ws.accept(subprotocol=WS_SUBPROTOCOL if WS_SUBPROTOCOL in offered else None)
         sub = _Subscriber(asyncio.get_running_loop())
         hub.subscribe(sub)
 

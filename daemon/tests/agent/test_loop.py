@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -312,3 +313,158 @@ def test_resume_after_plan_limit_also_resumes_the_provider(tmp_path: Path) -> No
     stack.provider.resume = lambda: resumed.append(True)  # type: ignore[attr-defined]
     stack.loop.resume_after_plan_limit()
     assert resumed == [True]
+
+
+# -- M2 review fixes (docs/reviews/m2.md) ------------------------------------------------------
+
+
+def _lose_tokens(stack: Stack) -> None:
+    """Drop the scenario's token store, as a daemon restart drops the in-memory escrow."""
+    stack.world.tokens.clear()
+
+
+def test_f3_resume_all_runs_tasks_whose_approval_was_decided(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("gmail_draft_create", DRAFT), text_turn("done")])
+    task_id, events = stack.start_and_run("draft an email to bob@example.com about lunch")
+    stack.approve(events_of(events, "approval_required")[0].approval_id)
+    restarted = stack.restart()
+    assert task_id in restarted.loop.resume_all()
+    assert restarted.loop.task(task_id).state is TaskState.COMPLETED
+    assert len(restarted.world.gmail.create_calls) == 1
+
+
+def test_f3_lost_token_asks_again_and_does_nothing(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("gmail_draft_create", DRAFT), text_turn("done")])
+    task_id, events = stack.start_and_run("draft an email to bob@example.com about lunch")
+    first = events_of(events, "approval_required")[0].approval_id
+    stack.approve(first)
+    _lose_tokens(stack)
+    restarted = stack.restart()
+    restarted.loop.resume_all()
+    assert restarted.loop.task(task_id).state is TaskState.WAITING_APPROVAL
+    assert restarted.world.gmail.create_calls == []
+    fresh = restarted.approvals.list_pending()
+    assert len(fresh) == 1 and fresh[0].id != first
+    assert restarted.loop.task_for_approval(fresh[0].id) == task_id
+    restarted.approve(fresh[0].id)
+    restarted.run(task_id)
+    assert restarted.loop.task(task_id).state is TaskState.COMPLETED
+    assert len(restarted.world.gmail.create_calls) == 1
+
+
+def test_f3_consumed_approval_with_lost_token_hands_off(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("gmail_draft_create", DRAFT)])
+    task_id, events = stack.start_and_run("draft an email to bob@example.com about lunch")
+    approval_id = events_of(events, "approval_required")[0].approval_id
+    stack.approve(approval_id)
+    stack.approvals.consume(approval_id, actor=stack.tools.actor, token=stack.world.tokens[approval_id])
+    _lose_tokens(stack)
+    stack.run(task_id)
+    assert stack.loop.task(task_id).state is TaskState.HANDED_OFF
+    assert stack.world.gmail.create_calls == []
+
+
+def test_f4_budget_is_checked_again_after_compaction(tmp_path: Path) -> None:
+    long = "word " * 400
+    stack = build_stack(
+        tmp_path,
+        budgets=make_budgets(task_credits=1000.0, daily_credits=0.02),
+        script=[
+            tool_turn("memory_search", {"query": long}, usage=Usage(input_tokens=1000)),  # 0.005 credits
+            text_turn("SUMMARY", usage=Usage(input_tokens=3000)),  # 0.015: the daily budget is now reached
+            text_turn("never"),
+        ],
+    )
+    stack.loop.compaction_threshold = 500
+    stack.loop.compaction_keep_recent = 2
+    task_id, _ = stack.start_and_run("hello")
+    assert stack.provider.calls == 2
+    assert stack.loop.task(task_id).state is TaskState.PAUSED_DAILY_BUDGET
+
+
+def _model_reviewed_stack(path: Path, script: list) -> Stack:
+    from opendot_core.agent.reviewer import Reviewer
+
+    stack = build_stack(path, script=script)
+    stack.loop.reviewer = Reviewer(stack.database, stack.registry, stack.router, stack.meter, clock=stack.clock)
+    return stack
+
+
+def test_f5_reviewer_429_pauses_all_plan_requests_and_shows_no_card(tmp_path: Path) -> None:
+    ok = json.dumps({"verdict": "ok", "reasons": []})
+    stack = _model_reviewed_stack(
+        tmp_path,
+        [tool_turn("gmail_draft_create", DRAFT), error_turn(UsageLimitExceeded("429")), text_turn(ok)],
+    )
+    task_id, events = stack.start_and_run("draft an email to bob@example.com about lunch")
+    assert stack.loop.task(task_id).state is TaskState.PAUSED_PLAN_LIMIT
+    assert events_of(events, "approval_required") == [] and stack.approvals.list_pending() == []
+    other, _ = stack.start_and_run("hello")
+    assert stack.loop.task(other).state is TaskState.PAUSED_PLAN_LIMIT and stack.provider.calls == 2
+    stack.loop.resume_after_plan_limit()
+    events = stack.run(task_id)
+    assert events_of(events, "approval_required") and len(stack.approvals.list_pending()) == 1
+
+
+def test_f6_default_reviewer_runs_the_mid_tier_model_pass(tmp_path: Path) -> None:
+    concern = json.dumps({"verdict": "concern", "reasons": ["hm"]})
+    stack = build_stack(tmp_path, script=[tool_turn("gmail_draft_create", DRAFT), text_turn(concern)])
+    loop = AgentLoop(
+        stack.database, stack.registry, stack.router, stack.meter, stack.rules, PromptPacker(), stack.tools,
+        clock=stack.clock,
+    )
+    task_id = loop.start_task("draft an email to bob@example.com about lunch")
+    events = list(loop.run(task_id))
+    assert stack.provider.requests[1].model == "fake-terra"
+    assert "hm" in events_of(events, "approval_required")[0].review
+
+
+def test_f8_restarted_tool_step_rechecks_the_rules(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("reminder_set", {"text": "x", "minutes": 5}), text_turn("ok")])
+    task_id = stack.loop.start_task("remind me")
+    real_run = stack.tools.run
+
+    class Crash(BaseException):
+        pass
+
+    def crash(*args: object, **kwargs: object) -> str:
+        raise Crash
+
+    stack.tools.run = crash  # type: ignore[method-assign]
+    with pytest.raises(Crash):
+        stack.run(task_id)
+    stack.tools.run = real_run  # type: ignore[method-assign]
+    restarted = stack.restart()
+    restarted.rules.add_rule(tool="reminder_set", action="create", behavior="handoff", max_sensitivity="personal")
+    restarted.loop.resume_all()
+    assert restarted.loop.task(task_id).state is TaskState.HANDED_OFF
+    assert restarted.world.executed("reminder_set") == []
+
+
+def test_f9_tool_outside_the_task_group_is_refused(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("memory_search", {"query": "x"}), text_turn("ok")])
+    task_id = stack.loop.start_task("hello")
+    with stack.database.connect() as connection:
+        connection.execute("UPDATE agent_tasks SET tool_group_json = ? WHERE id = ?", (json.dumps(["reminder_set"]), task_id))
+        connection.commit()
+    events = stack.run(task_id)
+    assert stack.world.executed("memory_search") == []
+    assert events_of(events, "tool")[0].behavior == "unknown"
+
+
+def test_f10_paid_provider_needs_its_feature_switch(tmp_path: Path) -> None:
+    from opendot_core.eval.fake_provider import ScriptedProvider
+
+    paid = ScriptedProvider([text_turn("paid")], name="openai_key", paid=True)
+    stack = build_stack(tmp_path, extra_providers=[paid])
+    loop = AgentLoop(
+        stack.database, stack.registry, stack.router, stack.meter, stack.rules, PromptPacker(), stack.tools,
+        stack.reviewer, provider_name="openai_key", clock=stack.clock,
+    )
+    task_id = loop.start_task("hello")
+    list(loop.run(task_id))
+    assert loop.task(task_id).state is TaskState.FAILED and paid.calls == 0
+    stack.registry.settings.features.enabled.add("paid_fallback_when_plan_runs_out")
+    task_id = loop.start_task("hello")
+    list(loop.run(task_id))
+    assert loop.task(task_id).state is TaskState.COMPLETED and paid.calls == 1

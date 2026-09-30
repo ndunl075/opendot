@@ -22,7 +22,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from ..db import Database
-from ..providers.errors import ProviderError
+from ..providers.errors import ProviderError, RateLimited, UsageLimitExceeded
+from ..providers.features import provider_allowed
 from ..providers.types import ChatRequest, Completed, InputItem
 from ..rules.deny_list import deny_item_for
 
@@ -208,11 +209,14 @@ class Reviewer:
         except Exception as error:  # no model for the tier: deterministic checks still stand
             return ReviewNote(verdict="concern", reasons=[f"Reviewer model unavailable ({type(error).__name__})."])
         task_id = proposal.task_id or "reviewer"
+        settings = getattr(self.registry, "settings", None)
+        if settings is not None and not provider_allowed("review", self.provider_name, settings):
+            return ReviewNote(
+                verdict="concern", reasons=[f"Reviewer model skipped: {self.provider_name} is not switched on for reviews."]
+            )
         if self.meter is not None:
-            try:
-                self.meter.check_before_request(task_id)
-            except Exception as error:
-                return ReviewNote(verdict="concern", reasons=[f"Reviewer skipped: {error}"])
+            # Budget errors propagate: the caller pauses instead of showing a card without its review.
+            self.meter.check_before_request(task_id)
         payload = {
             "tool": proposal.tool,
             "arguments": proposal.arguments,
@@ -230,6 +234,8 @@ class Reviewer:
             for event in self.registry.stream(self.provider_name, request):
                 if isinstance(event, Completed):
                     completed = event
+        except (UsageLimitExceeded, RateLimited):
+            raise  # a 429 pauses every plan request; the caller sets that pause
         except ProviderError as error:
             # Never switch provider: the card simply says the model pass did not run.
             return ReviewNote(verdict="concern", reasons=[f"Reviewer model unavailable: {error.user_message}"])

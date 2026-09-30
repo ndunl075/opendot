@@ -30,6 +30,16 @@ Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — DONE** (2026-09-
 - [x] 1.6 `opendot measure` (`--dry-run` works without an account)
 - [x] 1.7 cross-vendor review into `docs/reviews/m1.md` (all findings fixed or accepted; F3/F4 carried into M2)
 
+- [x] 2.1 scenario suite S1-S10 (`opendot eval --suite core`) with a scripted fake provider
+- [x] 2.2 agent loop (`agent/loop.py`, migration 0021): durable steps, resume after restart, tool group per task
+- [x] 2.3 context packer (`agent/packer.py`): cache-friendly layout, budgets, compaction, trimming
+- [x] 2.4 router (`router/`): section 7.1 table, tier discovery, one-step escalation, top tier asks first
+- [x] 2.5 usage meter and budgets (`usage/`, migration 0019), daily hard stop
+- [x] 2.6 rules engine (`rules/`, migration 0020): four behaviors, core deny list, always-allow
+- [x] 2.7 reviewer pass and anomaly auto-pause (`agent/reviewer.py`), kill switch
+- [x] 2.8 API server (`api/server.py`, `api/escrow.py`): chat WebSocket and approval endpoints
+- [ ] 2.9 cross-vendor review into `docs/reviews/m2.md` (in progress)
+
 ## Needs you
 
 1. **Live ChatGPT sign-in** (needs your Plus or Pro account and a browser): the `chatgpt_plan` provider has only been tested against a fake OAuth server and synthetic streaming fixtures. After signing in once, real recorded fixtures should replace the synthetic ones in `daemon/tests/providers/fixtures/chatgpt_plan/`. The `function_call` / `function_call_output` input items are unverified until then.

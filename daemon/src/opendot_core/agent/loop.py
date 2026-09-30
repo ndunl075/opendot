@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -43,6 +43,7 @@ from ..providers.errors import (
     RateLimited,
     UsageLimitExceeded,
 )
+from ..providers.features import provider_allowed
 from ..providers.registry import DEFAULT_PROVIDER, ProviderRegistry
 from ..providers.types import ChatRequest, Completed, InputItem, TextDelta, ToolSpec
 from ..router import HandOff, Job, NoModelForTier, Router, Tier
@@ -149,7 +150,10 @@ class AgentLoop:
         self.rules = rules
         self.packer = packer
         self.tools = tools
-        self.reviewer = reviewer or Reviewer(database, use_model=False, clock=clock)
+        # The mid-tier model pass is on unless a caller explicitly builds a reviewer without it.
+        self.reviewer = reviewer or Reviewer(
+            database, registry, router, meter, provider_name=provider_name, clock=clock
+        )
         self.provider_name = provider_name
         self.clock = clock
         self.persona = persona
@@ -315,12 +319,20 @@ class AgentLoop:
         return self._control("kill_switch")
 
     def resume_all(self) -> list[str]:
-        """Run every task that was running when the daemon stopped. Waiting and paused tasks stay put."""
+        """Run every task that was running when the daemon stopped, and every task waiting on an
+        approval the user already decided (or that expired). Paused tasks stay paused."""
         with self.database.connect() as connection:
             rows = connection.execute(
                 "SELECT id FROM agent_tasks WHERE state = ? ORDER BY created_at, id", (TaskState.RUNNING.value,)
             ).fetchall()
-        resumed = [str(row["id"]) for row in rows]
+            decided = connection.execute(
+                "SELECT DISTINCT t.id, t.created_at FROM agent_tasks t "
+                "JOIN agent_steps s ON s.task_id = t.id AND s.kind = 'tool' AND s.state = 'waiting' "
+                "JOIN approvals a ON a.id = s.approval_id "
+                "WHERE t.state = ? AND (a.state != 'pending' OR a.expires_at <= ?) ORDER BY t.created_at, t.id",
+                (TaskState.WAITING_APPROVAL.value, self._now()),
+            ).fetchall()
+        resumed = [str(row["id"]) for row in rows] + [str(row["id"]) for row in decided]
         for task_id in resumed:
             for _ in self.run(task_id):
                 pass
@@ -416,23 +428,8 @@ class AgentLoop:
         row = self._row(task_id)
         job = self._job(row)
 
-        # 1. Kill switch, plan-limit pause, budgets, anomaly checks: before any request.
-        kill = self.paused()
-        if kill is not None:
-            yield from self._pause(task_id, TaskState.PAUSED, f"Paused: {kill}")
-        limit = self._control("plan_limit")
-        if limit is not None:
-            yield from self._pause(task_id, TaskState.PAUSED_PLAN_LIMIT, limit)
-        try:
-            self.meter.check_before_request(task_id)
-        except DailyBudgetExceeded as error:
-            yield from self._pause(task_id, TaskState.PAUSED_DAILY_BUDGET, str(error))
-        except TaskBudgetExceeded as error:
-            yield from self._pause(task_id, TaskState.PAUSED_TASK_BUDGET, str(error))
-        spike = self.anomaly.before_model_request()
-        if spike is not None:
-            self.pause(f"anomaly: {spike}")
-            yield from self._pause(task_id, TaskState.PAUSED, f"Paused automatically: {spike}")
+        # 1. Kill switch, plan-limit pause, provider switch, budgets, anomaly checks.
+        yield from self._preflight(task_id)
         with self.database.connect() as connection:
             steps = connection.execute(
                 "SELECT COUNT(*) FROM agent_steps WHERE task_id = ? AND kind = 'model' AND state = 'done'", (task_id,)
@@ -456,7 +453,9 @@ class AgentLoop:
             )
 
         # 3. Compact on purpose when history has grown past the threshold (one planned cache miss).
-        yield from self._maybe_compact(task_id)
+        #    Compaction is a request of its own, so the checks run again right before the main one.
+        if (yield from self._maybe_compact(task_id)):
+            yield from self._preflight(task_id)
         row = self._row(task_id)
 
         # 4. Pack the prompt: stable prefix (rules, persona, tool schemas), summary, history, tail.
@@ -543,6 +542,31 @@ class AgentLoop:
                     "UPDATE agent_tasks SET escalate_from = NULL, updated_at = ? WHERE id = ?", (now, task_id)
                 )
 
+    def _preflight(self, task_id: str) -> Iterator[LoopEvent]:
+        """Every check that must pass immediately before any provider request (M1 F3, F4)."""
+        kill = self.paused()
+        if kill is not None:
+            yield from self._pause(task_id, TaskState.PAUSED, f"Paused: {kill}")
+        limit = self._control("plan_limit")
+        if limit is not None:
+            yield from self._pause(task_id, TaskState.PAUSED_PLAN_LIMIT, limit)
+        if not provider_allowed("chat", self.provider_name, self.registry.settings):
+            yield from self._end(
+                task_id,
+                TaskState.FAILED,
+                f"{self.provider_name} is a paid provider and its feature switch is off in Settings.",
+            )
+        try:
+            self.meter.check_before_request(task_id)
+        except DailyBudgetExceeded as error:
+            yield from self._pause(task_id, TaskState.PAUSED_DAILY_BUDGET, str(error))
+        except TaskBudgetExceeded as error:
+            yield from self._pause(task_id, TaskState.PAUSED_TASK_BUDGET, str(error))
+        spike = self.anomaly.before_model_request()
+        if spike is not None:
+            self.pause(f"anomaly: {spike}")
+            yield from self._pause(task_id, TaskState.PAUSED, f"Paused automatically: {spike}")
+
     def _handoff_text(self, row: Any) -> str:
         tried = json.loads(row["tried_json"])
         attempts = ", ".join(f"{item['model']} ({item['error']})" for item in tried) or "nothing"
@@ -565,16 +589,18 @@ class AgentLoop:
             with self.database.transaction(connection):
                 connection.execute(f"UPDATE agent_steps SET {names} WHERE id = ?", [*fields.values(), step_id])
 
-    def _maybe_compact(self, task_id: str) -> Iterator[LoopEvent]:
+    def _maybe_compact(self, task_id: str) -> Generator[LoopEvent, None, bool]:
+        """Compact when needed; True when a summary request was sent."""
         row = self._row(task_id)
         start = int(row["history_start"])
         history = self._history(task_id, start)
         if len(history) <= self.compaction_keep_recent or not needs_compaction(history, self.compaction_threshold):
-            return
+            return False
         try:
             route = self.router.route(Job.summarize)
         except (HandOff, NoModelForTier):
-            return
+            return False
+        yield from self._preflight(task_id)
         step_id = self._insert_step(task_id, kind="compact", state="started", tier=route.tier.value, model=route.model,
                                     effort=route.effort)
         calls: list[Completed] = []
@@ -600,16 +626,17 @@ class AgentLoop:
             self._finish_step(step_id, "failed", error=error.code)
             self._set_control("plan_limit", error.user_message)
             yield from self._pause(task_id, TaskState.PAUSED_PLAN_LIMIT, error.user_message)
-            return
+            return True
         except ProviderError as error:
             self._finish_step(step_id, "failed", error=error.code)
-            return  # compaction is an optimization; the task goes on with the full history
+            return True  # compaction is an optimization; the task goes on with the full history
         for completed in calls:
             self.meter.record(task_id=task_id, job_type=Job.summarize.value, model=completed.model or route.model,
                               effort=route.effort, usage=completed.usage)
         new_start = start + (len(history) - len(kept))
         self._update(task_id, summary=summary, history_start=new_start)
         self._finish_step(step_id, "done", output_json=json.dumps({"history_start": new_start}))
+        return True
 
     # -- tool steps ---------------------------------------------------------------------
 
@@ -646,12 +673,14 @@ class AgentLoop:
         if step["state"] == "waiting":
             yield from self._waiting_step(task_id, step)
             return
-        if step["state"] == "started" and step["behavior"] == Behavior.AUTO.value:
-            # Crashed while an auto tool ran: run it again with the same call_id (tools key
-            # their idempotency on it), after the same kill-switch check.
-            yield from self._run_auto(task_id, step, name, arguments)
+        # A step that was "started" when the daemon stopped goes through the rules again (they may
+        # have changed meanwhile) and, if still auto, runs with the same call_id, on which tools
+        # key their idempotency.
+        if name not in json.loads(row["tool_group_json"]):
+            self._tool_done(task_id, step, behavior="unknown", result=f"Tool {name!r} is not offered for this task.",
+                            ok=False)
+            yield ToolEvent(tool=name, behavior="unknown", ok=False)
             return
-
         try:
             intent = self.tools.intent(name, arguments)
         except KeyError:
@@ -677,18 +706,28 @@ class AgentLoop:
             yield from self._run_auto(task_id, step, name, arguments)
             return
 
-        # ask: reviewer pass first, then an approval the user decides on. Nothing runs yet.
-        note = self.reviewer.review(
-            Proposal(
-                tool=name,
-                arguments=arguments,
-                intent_tool=intent.tool,
-                intent_action=intent.action,
-                target=intent.target,
-                user_message=row["message"],
-                task_id=task_id,
-            )
+        # ask: reviewer pass first, then an approval the user decides on. Nothing runs yet. If the
+        # review cannot run now (a 429 or a budget), the step stays pending and no card is shown.
+        if getattr(self.reviewer, "use_model", False):
+            yield from self._preflight(task_id)
+        proposal = Proposal(
+            tool=name,
+            arguments=arguments,
+            intent_tool=intent.tool,
+            intent_action=intent.action,
+            target=intent.target,
+            user_message=row["message"],
+            task_id=task_id,
         )
+        try:
+            note = self.reviewer.review(proposal)
+        except _PAUSE_ERRORS as error:
+            self._set_control("plan_limit", error.user_message)
+            yield from self._pause(task_id, TaskState.PAUSED_PLAN_LIMIT, error.user_message)
+        except DailyBudgetExceeded as error:
+            yield from self._pause(task_id, TaskState.PAUSED_DAILY_BUDGET, str(error))
+        except TaskBudgetExceeded as error:
+            yield from self._pause(task_id, TaskState.PAUSED_TASK_BUDGET, str(error))
         if note.verdict == "block":
             message = f"The reviewer blocked this action: {note.text()}"
             self._tool_done(task_id, step, behavior="blocked", result=message, ok=False)
@@ -752,9 +791,8 @@ class AgentLoop:
             try:
                 result = self.tools.run_approved(step["approval_id"])
             except PolicyError as error:
-                # For example the one-time token was lost in a restart: ask again rather than guess.
-                self._set_state(task_id, TaskState.WAITING_APPROVAL, f"Approval could not be used: {error}")
-                raise _Stop
+                yield from self._approval_unusable(task_id, step, state, error)
+                return
             except Exception as error:
                 self._tool_done(task_id, step, behavior=Behavior.ASK.value,
                                 result=f"The approved action failed: {type(error).__name__}: {error}", ok=False)
@@ -767,6 +805,36 @@ class AgentLoop:
         self._tool_done(task_id, step, behavior=Behavior.ASK.value,
                         result=f"The user did not approve this action ({state}). Do not retry it.", ok=False)
         yield ToolEvent(tool=step["tool"], behavior=Behavior.ASK.value, ok=False)
+
+    def _approval_unusable(self, task_id: str, step: Any, state: str, error: PolicyError) -> Iterator[LoopEvent]:
+        """The approval was granted but cannot be used, typically because the one-time token lived
+        only in memory and the daemon restarted. Tokens are never persisted, so never guess:"""
+        if state == "consumed":
+            # The action may or may not have happened; only the user can check.
+            message = (
+                f"An approved {step['tool']} may or may not have completed before a restart ({error}). "
+                "Please check it yourself before asking again."
+            )
+            self._tool_done(task_id, step, behavior=Behavior.ASK.value, result=message, ok=False)
+            self._skip_remaining(task_id)
+            yield ToolEvent(tool=step["tool"], behavior=Behavior.ASK.value, ok=False)
+            yield from self._end(task_id, TaskState.HANDED_OFF, message)
+        # Approved but never used: nothing happened, so ask again with a fresh proposal.
+        try:
+            approval = self.tools.propose(step["tool"], _arguments(step["arguments"]), task_id=task_id)
+        except KeyError:
+            self._set_state(task_id, TaskState.WAITING_APPROVAL, f"Approval could not be used: {error}")
+            raise _Stop from None
+        review = json.loads(step["output_json"] or "{}").get("review", {})
+        self._finish_step(step["id"], "waiting", approval_id=approval.id)
+        self._set_state(task_id, TaskState.WAITING_APPROVAL, "Please approve again: the earlier approval was lost.")
+        yield ApprovalEvent(
+            approval_id=approval.id,
+            action_type=approval.action_type,
+            review="The earlier approval was lost in a restart; nothing was done. " + "; ".join(review.get("reasons", [])),
+            review_verdict=review.get("verdict", "ok"),
+        )
+        raise _Stop
 
     def _skip_remaining(self, task_id: str) -> None:
         with self.database.connect() as connection:

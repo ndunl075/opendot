@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -63,3 +64,16 @@ DEFAULT_RULES: tuple[DefaultRule, ...] = tuple(
 DEFAULT_BY_TOOL: dict[str, DefaultRule] = {rule.tool: rule for rule in DEFAULT_RULES}
 
 UNMATCHED_BEHAVIOR = "ask"
+
+ASK_EVERY_TIME_TOOLS = frozenset({"message_send_propose"})
+"""Tools that send or post for the user: always ``ask`` (section 10), whatever a rule says."""
+_SEND_WORDS = frozenset({"send", "post", "publish", "tweet", "broadcast", "forward"})
+_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def is_send_or_post(tool: str, action: str) -> bool:
+    """True for an intent that sends, posts or publishes to other people."""
+    if tool in ASK_EVERY_TIME_TOOLS:
+        return True
+    words = {part for part in _SPLIT.split(f"{tool} {action}".lower()) if part}
+    return bool(words & _SEND_WORDS)

@@ -101,3 +101,19 @@ def paid_retry_choices(settings: "ProviderSettings") -> list[str]:
     if not paid_retry_offered(settings):
         return []
     return [p for p in PAID_PROVIDERS if settings.is_enabled(p)]
+
+
+def provider_allowed(use: str, provider: str, settings: "ProviderSettings") -> bool:
+    """May an M2 caller send ``use`` ("chat" or "review") requests to ``provider``?
+
+    The plan and a local model need nothing more than being enabled. A paid provider also needs
+    the feature switch for that use: "Use Claude as the reviewer" for Anthropic reviews, and the
+    paid-provider switch for anything else. Saving or enabling a key alone never allows it.
+    """
+    if provider not in PAID_PROVIDERS:
+        return True
+    if use == "review" and provider == "anthropic_key":
+        return feature_available("claude_as_reviewer", settings)
+    if use == "review":
+        return False
+    return feature_available("paid_fallback_when_plan_runs_out", settings)

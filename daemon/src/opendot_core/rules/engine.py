@@ -26,9 +26,10 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from ..audit import AuditEvent, AuditLog
+from ..composio import ACTION_TYPE as COMPOSIO_ACTION_TYPE
 from ..db import Database
 from ..policy import ApprovalService
-from .defaults import DEFAULT_RULES, UNMATCHED_BEHAVIOR
+from .defaults import DEFAULT_RULES, UNMATCHED_BEHAVIOR, is_send_or_post
 from .deny_list import DENY_LIST, deny_item_for, deny_item_for_pattern
 
 SENSITIVITIES = ("public", "personal", "sensitive", "secret")
@@ -91,7 +92,7 @@ _ALWAYS_ALLOW_TYPES: dict[str, tuple[str, str, str | None]] = {
     "calendar_event_create": ("calendar_event_propose", "*", "calendar_id"),
     "gmail_draft_create": ("message_draft", "*", "to"),
     "github_issue_create": ("github_issue_propose", "*", "repository"),
-    "composio_execute": ("composio_execute", "", None),
+    COMPOSIO_ACTION_TYPE: ("composio_execute", "", None),
 }
 
 
@@ -149,6 +150,14 @@ class RuleEngine:
             )
         # A satisfied auto_if_preapproved resolves to plain auto, so callers only see auto, ask or handoff.
         behavior = Behavior.AUTO if rule.behavior is Behavior.AUTO_IF_PREAPPROVED else rule.behavior
+        if behavior is Behavior.AUTO and is_send_or_post(intent.tool, intent.action):
+            # Section 10: sending, posting and publishing ask every time; no rule relaxes that.
+            return Decision(
+                behavior=Behavior.ASK,
+                rule_id=rule.id,
+                reason="sending, posting and publishing ask every time",
+                locked=True,
+            )
         return Decision(behavior=behavior, rule_id=rule.id, reason=rule.note or f"matched rule {rule.id}")
 
     def audit_decision(
@@ -278,7 +287,7 @@ class RuleEngine:
         if mapping is None:
             raise RuleError(f"'{approval.action_type}' proposals cannot be made always-allow")
         tool, action, target_key = mapping
-        if approval.action_type == "composio_execute":
+        if approval.action_type == COMPOSIO_ACTION_TYPE:
             action = str(approval.preview.get("slug") or "")
             if not action:
                 raise RuleError("approval has no tool slug to allow")

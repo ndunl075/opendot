@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from opendot_core.audit import AuditLog
+from opendot_core.composio import ACTION_TYPE as COMPOSIO_ACTION_TYPE
 from opendot_core.db import Database
 from opendot_core.mcp_server import MCP_TOOL_NAMES
 from opendot_core.policy import ApprovalService
@@ -289,8 +290,8 @@ def test_always_allow_refuses_pending_rejected_and_missing(database: Database, e
         ("github_pr_comment_create", {"repository": "o/r", "pull_number": 1, "body": "b"}),
         ("memory_forget", {"memory_id": "m"}),
         ("database_restore", {}),
-        ("composio_execute", {"slug": "GMAIL_DELETE_MESSAGE"}),
-        ("composio_execute", {"slug": "STRIPE_CREATE_PAYMENT"}),
+        (COMPOSIO_ACTION_TYPE, {"slug": "GMAIL_DELETE_MESSAGE"}),
+        (COMPOSIO_ACTION_TYPE, {"slug": "STRIPE_CREATE_PAYMENT"}),
         ("unknown_type", {"to": "a"}),
     ],
 )
@@ -304,7 +305,7 @@ def test_always_allow_refused_for_deny_send_and_unknown(
 
 
 def test_always_allow_composio_safe_slug(database: Database, engine: RuleEngine) -> None:
-    approval = approved(database, "composio_execute", {"slug": "GMAIL_CREATE_EMAIL_DRAFT"})
+    approval = approved(database, COMPOSIO_ACTION_TYPE, {"slug": "GMAIL_CREATE_EMAIL_DRAFT"})
     rule = engine.always_allow(approval.id, "u")
     assert rule.tool == "composio_execute" and rule.action == "GMAIL_CREATE_EMAIL_DRAFT"
     assert engine.decide(intent("composio_execute", "GMAIL_CREATE_EMAIL_DRAFT")).behavior is Behavior.AUTO
@@ -394,3 +395,16 @@ def test_add_rule_accepts_a_rule_object_and_rejects_deny_list(engine: RuleEngine
     assert stored.id == "y" and engine.list_rules(include_defaults=False)[0].id == "y"
     with pytest.raises(RuleError):
         engine.add_rule()
+
+
+@pytest.mark.parametrize(("tool", "action"), [("message_send_propose", "create"), ("gmail", "send"), ("slack", "post_message")])
+def test_send_and_post_ask_every_time_even_with_an_auto_rule(engine: RuleEngine, tool: str, action: str) -> None:
+    engine.add_rule(tool=tool, action=action, behavior="auto")
+    decision = engine.decide(intent(tool, action))
+    assert decision.behavior is Behavior.ASK and decision.locked
+
+
+def test_always_allow_uses_the_real_composio_action_type(database: Database, engine: RuleEngine) -> None:
+    approval = approved(database, COMPOSIO_ACTION_TYPE, {"slug": "GITHUB_CREATE_ISSUE", "arguments": {}})
+    rule = engine.always_allow(approval.id, "agent")
+    assert rule.tool == "composio_execute" and rule.action == "GITHUB_CREATE_ISSUE"
