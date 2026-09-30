@@ -89,14 +89,14 @@ def test_status_command_reports_runtime_health(tmp_path: Path) -> None:
     assert "opendot is running" in receipt.text
 
 
+def _fail_if_called() -> None:
+    raise AssertionError("restart must not run inside Telegram intake")
+
+
 def test_bare_restart_asks_for_confirmation_without_restarting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called = False
-
-    def _fail_if_called() -> None:
-        nonlocal called
-        called = True
 
     monkeypatch.setattr("opendot_core.runtime_control.restart_daemon", _fail_if_called)
     receipt = _gateway(tmp_path / "opendot.db").handle(_update(51, "/restart"))
@@ -105,30 +105,26 @@ def test_bare_restart_asks_for_confirmation_without_restarting(
     assert called is False
 
 
-def test_restart_command_queues_recovery_when_restart_task_missing(
+def test_confirmed_restart_only_queues_the_request_and_never_runs_it_in_intake(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The restart itself happens in the runner, after this transaction commits."""
     database_path = tmp_path / "opendot.db"
-    monkeypatch.setattr(
-        "opendot_core.runtime_control.restart_daemon",
-        lambda: type("RestartResult", (), {"ok": False, "method": "none", "detail": "missing"})(),
-    )
+    monkeypatch.setattr("opendot_core.runtime_control.restart_daemon", _fail_if_called)
     receipt = _gateway(database_path).handle(_update(51, "/restart confirm"))
 
-    assert "watchdog will pick it up" in receipt.text
+    assert "restart queued" in receipt.text
     from opendot_core.runtime_control import restart_pending
 
     assert restart_pending(Database(database_path)) is True
 
 
 def test_wake_is_an_alias_for_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "opendot_core.runtime_control.restart_daemon",
-        lambda: type("RestartResult", (), {"ok": True, "method": "scheduled_task", "detail": "OpenDotRestart"})(),
-    )
-    receipt = _gateway(tmp_path / "opendot.db").handle(_update(52, "/wake confirm"))
+    monkeypatch.setattr("opendot_core.runtime_control.restart_daemon", _fail_if_called)
+    database_path = tmp_path / "opendot.db"
+    receipt = _gateway(database_path).handle(_update(52, "/wake confirm"))
 
-    assert "restarting via scheduled_task" in receipt.text
+    assert "restart queued" in receipt.text
 
 
 def test_bad_command_gets_a_help_receipt_without_a_task(tmp_path: Path) -> None:

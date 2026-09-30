@@ -47,6 +47,7 @@ UPDATE memories SET supersedes_memory_id = NULL
 WHERE supersedes_memory_id IN (SELECT id FROM doomed_memories);
 
 DELETE FROM memory_fts WHERE memory_id IN (SELECT id FROM doomed_memories);
+DELETE FROM embeddings WHERE subject_kind = 'entity' AND subject_id IN (SELECT id FROM doomed_entities);
 DELETE FROM embeddings WHERE subject_kind = 'memory' AND subject_id IN (SELECT id FROM doomed_memories);
 DELETE FROM memory_history WHERE memory_id IN (SELECT id FROM doomed_memories);
 DELETE FROM memory_learning_candidates WHERE memory_id IN (SELECT id FROM doomed_memories);

@@ -57,14 +57,14 @@ def main(argv: list[str]) -> int:
         FROM outbox WHERE idempotency_key LIKE ?
         ORDER BY rowid
         """,
-        (f"hermes-reply:{latest['external_id']}:%",),
+        (f"agent-reply:{latest['external_id']}:%",),
     ).fetchall()
 
     if not replies:
         print(
             "\nVERDICT: no reply was ever queued for it. The message was received "
             "and stored, so intake is fine and the agent never produced an answer. "
-            "Check that `opendot run` is up and was started with --hermes-profile."
+            "Check that `opendot run` is up and that an agent bridge is configured."
         )
         return 0
 

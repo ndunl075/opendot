@@ -32,7 +32,7 @@ _CREATE_TABLE = re.compile(
 
 
 def _packaged_migrations() -> dict[str, Path]:
-    root = Path(__file__).resolve().parent.parent / "src" / "opendot" / "migrations"
+    root = Path(__file__).resolve().parent.parent / "daemon" / "src" / "opendot_core" / "migrations"
     return {path.name: path for path in sorted(root.glob("*.sql"))}
 
 

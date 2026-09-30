@@ -1,3 +1,5 @@
+> **Historical reference.** This is Alfred's README from before the OpenDot fork. It still describes removed features (Hermes, Canvas, Google Health, the Windows service). Use `opendot --help` for current commands.
+
 # Alfred
 
 A self improving agentic personal secretary with persistent memory, a

@@ -641,6 +641,19 @@ def test_a_billable_agent_call_is_recorded_against_the_cap(tmp_path: Path) -> No
     assert caps.month_to_date_calls() == 1
 
 
+def test_the_measured_cost_of_a_turn_counts_against_the_dollar_budget(tmp_path: Path) -> None:
+    database_path = tmp_path / "opendot.db"
+    database = Database(database_path)
+    caps = UsageCaps(database, monthly_budget_usd=0.05)
+    _defer(database_path, _update(92, "summarize my day"))
+    agent = FakeAgent(AgentRunResult(text="done.", ok=True, cost_usd=0.06))
+
+    AgentBridge(database, agent, caps=caps).run_once()
+
+    assert caps.month_to_date_spend_usd() == 0.06
+    assert caps.refusal() is not None
+
+
 def test_stored_contact_details_are_redacted_but_the_current_request_is_not(tmp_path: Path) -> None:
     database_path = tmp_path / "opendot.db"
     database = Database(database_path)

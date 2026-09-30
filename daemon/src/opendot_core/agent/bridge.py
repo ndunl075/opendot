@@ -55,6 +55,7 @@ class AgentRunResult(BaseModel):
     duration_ms: int | None = None
     runtime: str = "unknown"
     tool_count: int | None = None
+    cost_usd: float | None = None
 
 
 class AgentRunner(Protocol):
@@ -262,6 +263,7 @@ class AgentBridge:
             # turn may still have cost money at the provider.
             self.caps.record_call(
                 ok=result.ok,
+                cost_usd=result.cost_usd,
                 detail=result.detail,
                 duration_ms=(
                     result.duration_ms
