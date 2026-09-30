@@ -1,0 +1,4 @@
+data: {"type":"message_start","message":{"model":"claude-sonnet-5","usage":{"input_tokens":40}}}
+
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"cut off"}}
+

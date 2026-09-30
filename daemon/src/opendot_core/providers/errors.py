@@ -87,6 +87,13 @@ class IncompleteResponse(ProviderError):
     user_message = "The response ended before it was complete."
 
 
+class SpendCapReached(ProviderError):
+    """The provider's own monthly spend cap is reached (or was never set). Raised before any network call."""
+
+    code = "spend_cap_reached"
+    user_message = "This provider's monthly spend cap is reached. Raise the cap in Settings to continue."
+
+
 class ProviderSwitchForbidden(ProviderError):
     """Code tried to fall back to a different provider after an error."""
 
