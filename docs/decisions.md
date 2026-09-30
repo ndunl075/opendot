@@ -43,3 +43,4 @@ section 1. Newest last.
   `gpt-5.6-terra`, plus `gpt-6-luna`, `gpt-5.6-luna` and `gpt-5.5`. Efforts:
   low, medium, high, xhigh, max, and ultra on the larger models; never use max
   or ultra for unattended tasks.
+- 2026-09-30: `opendot run` does not build an agent bridge until M2 (accepted review finding F1); M2 wires it and tests the CLI path.

@@ -9,7 +9,7 @@ canonical source of the project's decisions (section 1), build order (section
 10), and safety invariants (section 8). If a change contradicts something it
 says, the architecture doc changes too, in the same PR, with a one-line
 reason; it should never silently drift out of date. [README.md](README.md) says what OpenDot is, and
-[docs/alfred-readme.md](docs/alfred-readme.md) documents the inherited CLI day to day.
+[docs/alfred-readme.md](docs/alfred-readme.md) is Alfred's archived README, kept as historical reference only: it still names removed commands (Hermes, Canvas, the Windows service). Use `opendot --help` for current commands.
 
 ## Local setup
 

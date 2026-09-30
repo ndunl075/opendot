@@ -1,9 +1,10 @@
 # OpenDot status
 
-Milestone: **M0 (fork Alfred and clean it)** — in progress
+Milestone: **M0 (fork Alfred and clean it) — DONE** (2026-09-30). Next: M1.
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
+- Collected after M0: 722 (minimum stays 650)
 - Collected tests at baseline: **777**
 - Tests inside the deletable files listed in ARCHITECTURE.md §5: **127**
 - Minimum collected count from now on (baseline − deletable): **650**
@@ -19,7 +20,7 @@ Milestone: **M0 (fork Alfred and clean it)** — in progress
 - [x] 0.7 docs (README, NOTICE, CLAUDE.md, AGENTS.md, decisions.md, CHANGELOG)
 - [x] 0.8 fixture scan for real personal data
 - [x] 0.9 Codex CLI flags and model IDs (docs/decisions.md)
-- [ ] 0.10 cross-vendor review into `docs/reviews/m0.md`
+- [x] 0.10 cross-vendor review into `docs/reviews/m0.md` (all findings fixed or accepted)
 
 ## Needs you
 

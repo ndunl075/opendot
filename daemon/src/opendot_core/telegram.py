@@ -585,18 +585,17 @@ class TelegramGateway:
             return TelegramReceipt(text=format_runtime_status(runtime_status(self.database)))
 
         if parsed.command == "runtime_restart":
-            from .runtime_control import _write_restart_request, restart_daemon
+            from .runtime_control import _write_restart_request
 
             if parsed.title.strip() != "confirm":
                 return TelegramReceipt(
                     text="this restarts the whole OpenDot process. reply /restart confirm (or /wake confirm) to do it."
                 )
 
-            restart = restart_daemon()
-            if restart.ok:
-                return TelegramReceipt(text=f"restarting via {restart.method}.")
+            # Only queue the request. The runner (or an external watchdog)
+            # performs the restart after this transaction and the reply commit.
             _write_restart_request(connection, requested_at=datetime.now(UTC))
-            return TelegramReceipt(text="restart queued. watchdog will pick it up shortly.")
+            return TelegramReceipt(text="restart queued. opendot will restart shortly.")
 
         task = TaskStore.create(connection, title=parsed.title, source_event_id=event_id, due_at=parsed.due_at)
         if parsed.command == "task":
