@@ -9,8 +9,8 @@ from opendot_core.db import Database, MigrationConflict
 def test_migrate_is_idempotent_and_enables_wal(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
 
-    assert database.migrate() == 17
-    assert database.migrate() == 17
+    assert database.migrate() == 18
+    assert database.migrate() == 18
 
     with database.connect() as connection:
         mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
@@ -94,7 +94,7 @@ def test_status_is_non_sensitive(tmp_path: Path) -> None:
 
     assert database.status() == {
         "database_path": str(tmp_path / "opendot.db"),
-        "schema_version": 17,
+        "schema_version": 18,
         "audit_event_count": 0,
         "outbox_pending": 0,
         "outbox_sending": 0,
@@ -176,7 +176,7 @@ def test_rebuilding_a_table_keeps_the_rows_it_already_had(tmp_path: Path) -> Non
         )
         connection.commit()
 
-    assert database.migrate() == 17
+    assert database.migrate() == 18
 
     with database.connect() as connection:
         row = connection.execute(

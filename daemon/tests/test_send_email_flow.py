@@ -20,8 +20,8 @@ address names no verb, so nothing guarded it.
 
 from __future__ import annotations
 
+from opendot_core.agent.redaction import redact_except_current_request as _redact_except_current_request
 from opendot_core.db import Database
-from opendot_core.hermes_bridge import _redact_except_current_request
 from opendot_core.models import Redactor
 from opendot_core.telegram import TelegramGateway
 

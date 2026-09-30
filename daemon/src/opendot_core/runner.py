@@ -23,6 +23,7 @@ from .db import Database
 from .jobs import JobRunner
 from .quiet_hours import QuietHours
 from .runtime_control import clear_restart_request, record_heartbeat, restart_daemon, restart_pending
+from .slack import SlackOutboxWorker, SlackPair, SlackTransport
 from .telegram import TelegramPair
 from .telegram_actions import TelegramActionWorker
 from .telegram_runtime import (
@@ -31,8 +32,6 @@ from .telegram_runtime import (
     TelegramTransport,
     TelegramTypingHeartbeat,
 )
-from .slack import SlackOutboxWorker, SlackPair, SlackTransport
-
 
 T = TypeVar("T")
 

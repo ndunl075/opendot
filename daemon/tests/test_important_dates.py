@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from opendot_core.agent.tool_groups import is_casual_conversation, select_tool_group
 from opendot_core.briefing import BriefingService
 from opendot_core.db import Database
-from opendot_core.hermes_tools import is_casual_conversation, select_hermes_tools
 from opendot_core.important_dates import (
     ImportantDateStore,
     clamp_month_day,
@@ -175,6 +175,6 @@ def test_morning_brief_surfaces_birthdays_in_the_weekly_window(tmp_path: Path) -
 
 def test_birthday_phrases_select_important_date_tools() -> None:
     phrase = "remember mom's birthday is august 20 1970"
-    tools = select_hermes_tools(phrase)
+    tools = select_tool_group(phrase)
     assert "important_date_set" in tools
     assert not is_casual_conversation(phrase)

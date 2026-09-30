@@ -227,24 +227,42 @@ def test_github_consumed_issue_without_provider_evidence_fails_closed(tmp_path: 
 
 def test_pr_comment_is_approval_gated(tmp_path: Path) -> None:
     class Fake:
-        def __init__(self): self.calls = []
-        def create_pr_comment(self, **kwargs): self.calls.append(kwargs); return {"id": 9, "html_url": "https://github.com/example/opendot/pull/2#issuecomment-9"}
-        def find_pr_comment_by_marker(self, **kwargs): return None
-    database = Database(tmp_path / "opendot.db"); approvals = ApprovalService(database); fake = Fake()
+        def __init__(self):
+            self.calls = []
+
+        def create_pr_comment(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"id": 9, "html_url": "https://github.com/example/opendot/pull/2#issuecomment-9"}
+
+        def find_pr_comment_by_marker(self, **kwargs):
+            return None
+
+    database = Database(tmp_path / "opendot.db")
+    approvals = ApprovalService(database)
+    fake = Fake()
     actions = GitHubActions(database, approvals, fake)
     proposal = actions.propose_pr_comment(actor="sam", repository="example/opendot", pull_number=2, body="Looks good.")
     assert fake.calls == []
     issued = approvals.approve(proposal.id, actor="sam")
     assert actions.execute_pr_comment(proposal.id, actor="sam", token=issued.token).issue_number == 9
-    assert fake.calls == [{"repository": "example/opendot", "pull_number": 2, "body": f"Looks good.\n\n<!-- opendot-pr-comment:{proposal.id} -->"}]
+    assert fake.calls == [
+        {
+            "repository": "example/opendot",
+            "pull_number": 2,
+            "body": f"Looks good.\n\n<!-- opendot-pr-comment:{proposal.id} -->",
+        }
+    ]
 
 
 def test_github_pr_comment_recovers_after_provider_success_before_local_receipt(tmp_path: Path) -> None:
     class CrashAfterProviderSuccess:
-        def __init__(self) -> None: self.marker: str | None = None
+        def __init__(self) -> None:
+            self.marker: str | None = None
+
         def create_pr_comment(self, **kwargs):
             self.marker = kwargs["body"].split("\n\n")[-1]
             raise ConnectionError("OpenDot crashed before it received GitHub's response")
+
         def find_pr_comment_by_marker(self, **kwargs):
             assert kwargs["marker"] == self.marker
             return {"id": 9, "html_url": "https://github.com/example/opendot/pull/2#issuecomment-9"}
@@ -258,6 +276,8 @@ def test_github_pr_comment_recovers_after_provider_success_before_local_receipt(
     issued = approvals.approve(proposal.id, actor="sam")
     with pytest.raises(ConnectionError):
         GitHubActions(database, approvals, transport).execute_pr_comment(proposal.id, actor="sam", token=issued.token)
-    recovered = GitHubActions(database, approvals, transport).execute_pr_comment(proposal.id, actor="sam", token=issued.token)
+    recovered = GitHubActions(database, approvals, transport).execute_pr_comment(
+        proposal.id, actor="sam", token=issued.token
+    )
     assert recovered.issue_number == 9
     assert recovered.replayed is False

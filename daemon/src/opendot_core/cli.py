@@ -6,34 +6,40 @@ import argparse
 import getpass
 import json
 from contextlib import contextmanager
-from uuid import uuid4
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Iterator, Sequence
+from uuid import uuid4
 
-from .availability import AvailabilityService
+from .admin_ui import run_admin_ui
 from .audit import AuditEvent, AuditLog
-from .calendar_history import CalendarMemoryService, CalendarRollupService
-from .embeddings import EmbeddingBackfill, OllamaEmbeddingProvider
+from .availability import AvailabilityService
 from .backup import EncryptedBackupService, latest_backup
+from .brief_schedule import create_daily
+from .briefing import BriefingService
+from .calendar_history import CalendarMemoryService, CalendarRollupService
+from .composio import (
+    SECRET_NAME as COMPOSIO_SECRET_NAME,
+)
+from .composio import (
+    ComposioActions,
+    ComposioClient,
+    ComposioError,
+    ComposioStatus,
+    calls_this_month,
+    monthly_call_limit,
+)
 from .config import Settings
 from .connector_capabilities import CONNECTOR_CAPABILITIES
 from .connector_health import connector_health
 from .db import Database
-from .briefing import BriefingService
+from .embeddings import EmbeddingBackfill, OllamaEmbeddingProvider
+from .evaluation import EvaluationService
 from .events import EventStore
-from .jobs import JobRunner
-from .memory_graph import MemoryActions, MemoryGraph
-from .memory_learning import MemoryLearningService
-from .nags import NagStore
-from .reminders import ReminderStore
-from .important_dates import ImportantDateStore
-from .tasks import UNSET, TaskStore
-from .vault import VaultImporter, VaultProjector
-from .people import PeopleService
-from .policy import ApprovalService, PolicyStore
-from .policy_coverage import PolicyCoverageService
-from .secret_store import SecretStoreError, SystemKeyringSecretStore
+from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
+from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
+from .gmail_backfill import GmailClientMetadataAdapter, GmailThreadBackfill
+from .gmail_inbound import GmailInboundGateway
 from .google_calendar import (
     CalendarCatalogSync,
     GoogleCalendarActions,
@@ -43,36 +49,32 @@ from .google_calendar import (
     default_sync_window,
 )
 from .google_oauth import DEFAULT_SCOPES, authorize_interactively, current_access_token
-from .github import GitHubActions, GitHubClient, GitHubNotificationsSync
-from .composio import (
-    SECRET_NAME as COMPOSIO_SECRET_NAME,
-    ComposioActions,
-    ComposioClient,
-    ComposioError,
-    ComposioStatus,
-    calls_this_month,
-    monthly_call_limit,
-)
+from .important_dates import ImportantDateStore
+from .jobs import JobRunner
+from .mcp_server import generate_http_token, run_streamable_http
+from .memory_graph import MemoryActions, MemoryGraph
+from .memory_learning import MemoryLearningService
+from .nags import NagStore
+from .people import PeopleService
+from .policy import ApprovalService, PolicyStore
+from .policy_coverage import PolicyCoverageService
 from .pull_requests import PullRequestService
-from .gmail import DEFAULT_UNREAD_LIMIT, GmailActions, GmailClient, GmailSendActions, GmailSync
-from .gmail_backfill import GmailClientMetadataAdapter, GmailThreadBackfill
-from .threads import ThreadService
-from .gmail_inbound import GmailInboundGateway
-from .evaluation import EvaluationService
-from .brief_schedule import create_daily
-from .telegram_bot import TelegramBotClient
-from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
-from .runner import OpenDotRunner, ConnectorSync
+from .reminders import ReminderStore
+from .runner import ConnectorSync, OpenDotRunner
 from .runtime_control import (
     note_watchdog_result,
     runtime_status,
     watchdog_check,
 )
-from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
+from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .slack import SlackGateway, SlackPair
 from .slack_socket import SlackBotClient, SlackSocketReceiver
-from .mcp_server import generate_http_token, run_streamable_http
-from .admin_ui import run_admin_ui
+from .tasks import UNSET, TaskStore
+from .telegram import TelegramGateway, TelegramPair, TelegramUpdate
+from .telegram_bot import TelegramBotClient
+from .telegram_runtime import TelegramLongPoller, TelegramOutboxWorker
+from .threads import ThreadService
+from .vault import VaultImporter, VaultProjector
 from .vault_sync import check_couchdb
 from .workflow_learning import WorkflowLearningService
 
@@ -247,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
         "policy-coverage",
         help="MCP tools no registered client can call; catches a grant that drifted behind the tool list",
     )
+    subcommands.add_parser(
+        "calendar-history-rebuild",
+        help="rebuild local Calendar rollups and their provenance-linked semantic memories",
+    )
+    subcommands.add_parser("connector-status", help="show each connector's health without exposing credentials")
     subcommands.add_parser(
         "connector-capabilities",
         help="show what each connector may do: reads/writes, scopes, sensitivity, transport",
@@ -619,9 +626,15 @@ def build_parser() -> argparse.ArgumentParser:
     github_issue_execute.add_argument("--token", required=True)
     github_issue_execute.add_argument("--secret-name", default="github-issue-token")
     pr_propose = subcommands.add_parser("github-pr-comment-propose", help="preview a GitHub PR conversation comment")
-    pr_propose.add_argument("--actor", required=True); pr_propose.add_argument("--repository", required=True); pr_propose.add_argument("--pull-number", required=True, type=int); pr_propose.add_argument("body")
+    pr_propose.add_argument("--actor", required=True)
+    pr_propose.add_argument("--repository", required=True)
+    pr_propose.add_argument("--pull-number", required=True, type=int)
+    pr_propose.add_argument("body")
     pr_execute = subcommands.add_parser("github-pr-comment-execute", help="post an approved GitHub PR comment")
-    pr_execute.add_argument("--approval-id", required=True); pr_execute.add_argument("--actor", required=True); pr_execute.add_argument("--token", required=True); pr_execute.add_argument("--secret-name", default="github-pr-token")
+    pr_execute.add_argument("--approval-id", required=True)
+    pr_execute.add_argument("--actor", required=True)
+    pr_execute.add_argument("--token", required=True)
+    pr_execute.add_argument("--secret-name", default="github-pr-token")
     gmail_sync = subcommands.add_parser("gmail-sync", help="read-sync unread Gmail inbox headers and snippets")
     gmail_sync.add_argument(
         "--limit",
@@ -639,7 +652,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="optional max rows to examine this run",
     )
-    threads_report = subcommands.add_parser(
+    subcommands.add_parser(
         "threads-awaiting-reply",
         help="list unread Gmail threads that look like they need a reply",
     )
@@ -1412,8 +1425,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "github-pr-comment-execute":
         client = GitHubClient(SystemKeyringSecretStore().get_required(args.secret_name))
-        try: receipt = GitHubActions(database, approvals, client).execute_pr_comment(args.approval_id, actor=args.actor, token=args.token)
-        finally: client.close()
+        try:
+            receipt = GitHubActions(database, approvals, client).execute_pr_comment(
+                args.approval_id, actor=args.actor, token=args.token
+            )
+        finally:
+            client.close()
         print(receipt.model_dump_json())
         return 0
     if args.command == "gmail-sync":

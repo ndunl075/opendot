@@ -365,10 +365,12 @@ class GitHubActions:
             existing = connection.execute("SELECT actor, payload_json FROM action_receipts WHERE idempotency_key = ?", (key,)).fetchone()
         if existing:
             self.approvals.verify(approval_id, actor=actor, token=token)
-            if existing["actor"] != actor: raise PolicyError("approval actor does not match the requested action")
+            if existing["actor"] != actor:
+                raise PolicyError("approval actor does not match the requested action")
             data = json.loads(existing["payload_json"])
             return GitHubIssueReceipt(issue_number=data["comment_id"], html_url=data.get("html_url"), idempotency_key=key, replayed=True)
-        if self.transport is None: raise ValueError("execute_pr_comment() requires a transport")
+        if self.transport is None:
+            raise ValueError("execute_pr_comment() requires a transport")
         preview = approval.preview
         marker = _pr_comment_marker(approval_id)
         if approval.state == "consumed":
@@ -385,7 +387,8 @@ class GitHubActions:
                 repository=preview["repository"], pull_number=preview["pull_number"], body=_append_marker(preview["body"], marker)
             )
         comment_id = created.get("id")
-        if not isinstance(comment_id, int) or comment_id <= 0: raise ValueError("GitHub did not return a valid comment id")
+        if not isinstance(comment_id, int) or comment_id <= 0:
+            raise ValueError("GitHub did not return a valid comment id")
         data = {"comment_id": comment_id, "html_url": created.get("html_url")}
         with self.database.connect() as connection:
             with self.database.transaction(connection):

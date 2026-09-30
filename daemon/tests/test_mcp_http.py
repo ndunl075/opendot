@@ -11,8 +11,8 @@ from mcp.client.streamable_http import streamable_http_client
 
 from opendot_core.db import Database
 from opendot_core.mcp_server import (
-    _BearerAuthMiddleware,
     _bearer_token,
+    _BearerAuthMiddleware,
     create_server,
     generate_http_token,
 )

@@ -17,7 +17,6 @@ from .db import Database
 from .events import EventStore
 from .policy import Approval, ApprovalService, PolicyError
 
-
 DEFAULT_UNREAD_LIMIT = 500
 
 

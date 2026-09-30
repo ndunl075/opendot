@@ -17,8 +17,8 @@ from .db import Database
 from .events import EventStore
 from .implicit_feedback import SIGNAL_BUTTON
 from .outbox import Outbox
-from .response_feedback import ResponseFeedbackService
 from .reminders import ReminderStore
+from .response_feedback import ResponseFeedbackService
 from .tasks import TaskStore
 
 

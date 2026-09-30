@@ -18,39 +18,36 @@ import os
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from typing import Any, Sequence, cast
+from typing import Sequence, cast
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from .action_executor import ActionExecutor
+from .availability import AvailabilityService
 from .briefing import BriefingService
+from .composio import SECRET_NAME as COMPOSIO_SECRET_NAME
+from .composio import ComposioActions, ComposioClient, ComposioError
 from .config import Settings
 from .connector_capabilities import sensitive_connectors
 from .connector_health import connector_health
 from .db import Database
 from .events import EventStore
-from .action_executor import ActionExecutor
-from .composio import SECRET_NAME as COMPOSIO_SECRET_NAME
-from .composio import ComposioActions, ComposioClient, ComposioError
-from .availability import AvailabilityService
+from .github import GitHubActions, GitHubClient
 from .gmail import GmailActions, GmailSendActions
-from .github import GitHubActions
 from .google_calendar import GoogleCalendarActions
 from .http_auth import BearerAuthMiddleware as _BearerAuthMiddleware
-from .http_auth import bearer_token as _bearer_token
-from .http_auth import generate_token as generate_http_token
 from .important_dates import ImportantDateStore
 from .journal import JournalStore
 from .memory_graph import GraphError, MemoryActions, MemoryGraph, Sensitivity
 from .memory_learning import MemoryFeedbackStore
 from .models import Redactor
+from .nags import NagStore
 from .owner_identity import unfilled_placeholders
 from .policy import ApprovalService, PolicyError, PolicyStore
-from .nags import NagStore
 from .pull_requests import PullRequestService
 from .reminders import ReminderStore
-from .github import GitHubClient
 from .scheduled_tasks import ScheduledTaskStore
 from .secret_store import SecretStoreError, SystemKeyringSecretStore
 from .tasks import UNSET, TaskStore
@@ -824,3 +821,36 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     args = parse_stdio_args(argv)
     create_server(args.db, client_id=args.client_id).run(transport="stdio")
+
+
+def run_streamable_http(
+    database_path: Path | str | None = None,
+    *,
+    client_id: str,
+    port: int,
+    bearer_token: str,
+) -> None:
+    """Serve OpenDot's MCP surface over Streamable HTTP, loopback-only.
+
+    The host is deliberately not a parameter: this always binds
+    ``127.0.0.1``, matching section 7's "Local server binds 127.0.0.1 only"
+    as a hard invariant rather than a default that could be overridden away
+    from it. FastMCP auto-enables DNS-rebinding protection (Host/Origin
+    header validation) whenever the host is a loopback address, so no extra
+    ``transport_security`` wiring is needed as long as this stays that way.
+    Every request additionally needs the exact configured bearer token --
+    see the module docstring for why that, not OAuth, is enough here.
+
+    ``client_id`` must already have a scope from ``PolicyStore.grant()``
+    (the CLI's ``client-grant``) before any tool call succeeds; this
+    function itself performs no default grant.
+    """
+    import uvicorn
+
+    server = create_server(database_path, client_id=client_id)
+    protected_app = _BearerAuthMiddleware(server.streamable_http_app(), expected_token=bearer_token)
+    uvicorn.Server(uvicorn.Config(protected_app, host="127.0.0.1", port=port, log_level="warning")).run()
+
+
+if __name__ == "__main__":
+    main()

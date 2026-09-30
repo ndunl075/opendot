@@ -21,7 +21,6 @@ from .implicit_feedback import (
     find_reaction_target,
 )
 
-
 FEEDBACK_OUTCOMES = frozenset({"helpful", "missing_context", "wrong_context"})
 FEEDBACK_SIGNALS = frozenset({SIGNAL_BUTTON, SIGNAL_REPLY, SIGNAL_COVERAGE})
 

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from opendot_core.agent.tool_groups import select_tool_group
 from opendot_core.db import Database
 from opendot_core.events import EventStore
-from opendot_core.hermes_tools import select_hermes_tools
 from opendot_core.jobs import JobRunner
 from opendot_core.nags import NagStore
 from opendot_core.tasks import TaskStore
@@ -160,5 +160,5 @@ def test_nag_store_rejects_invalid_interval_or_attempts(tmp_path: Path) -> None:
     ),
 )
 def test_nag_phrases_select_nag_until_done_tool(phrase: str) -> None:
-    tools = select_hermes_tools(phrase)
+    tools = select_tool_group(phrase)
     assert "nag_until_done" in tools

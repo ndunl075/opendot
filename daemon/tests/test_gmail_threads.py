@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from opendot_core.agent.mail import low_priority_mail as _low_priority_mail
 from opendot_core.connector_records import ConnectorRecordStore
 from opendot_core.db import Database
 from opendot_core.gmail import GmailSync
 from opendot_core.gmail_backfill import GmailThreadBackfill
-from opendot_core.hermes_bridge import _low_priority_mail
 from opendot_core.threads import ThreadService
 
 

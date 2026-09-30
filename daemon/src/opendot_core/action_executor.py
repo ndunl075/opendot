@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .composio import SECRET_NAME as COMPOSIO_SECRET_NAME
+from .composio import ComposioActions, ComposioClient
 from .db import Database
-from .gmail import GmailActions, GmailClient, GmailSendActions
 from .github import GitHubActions, GitHubClient
-from .composio import ComposioActions, ComposioClient, SECRET_NAME as COMPOSIO_SECRET_NAME
+from .gmail import GmailActions, GmailClient, GmailSendActions
 from .google_calendar import GoogleCalendarActions, GoogleCalendarClient
 from .google_oauth import current_access_token
 from .memory_graph import MemoryActions

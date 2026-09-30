@@ -5,8 +5,6 @@ from __future__ import annotations
 import base64
 import gc
 import hashlib
-import json
-import os
 import secrets
 import shutil
 import sqlite3
@@ -19,7 +17,6 @@ from pydantic import BaseModel
 
 from .db import Database
 from .policy import Approval, ApprovalService, PolicyError
-
 
 MAGIC = b"OPENDOT-BACKUP-1\n"
 NONCE_BYTES = 12

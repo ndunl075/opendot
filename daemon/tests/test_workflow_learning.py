@@ -14,7 +14,6 @@ from opendot_core.workflow_learning import (
     WorkflowObservationStore,
 )
 
-
 NOW = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
 ACTOR = "owner:workflow-learning"
 

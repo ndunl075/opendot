@@ -14,7 +14,6 @@ from .outbox import Outbox
 from .policy import ApprovalService
 from .secret_store import SystemKeyringSecretStore
 
-
 ACTION_LABELS = {
     "calendar_event_create": "calendar event",
     "gmail_draft_create": "email draft",

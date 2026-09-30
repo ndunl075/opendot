@@ -11,8 +11,7 @@ from opendot_core.connector_records import ConnectorRecordStore
 from opendot_core.db import Database
 from opendot_core.gmail import _draft_message_id
 from opendot_core.google_calendar import _calendar_event_id
-from opendot_core.mcp_server import TELEGRAM_CHAT_ID_ENV
-from opendot_core.mcp_server import MCP_TOOL_NAMES, create_server, main, parse_stdio_args
+from opendot_core.mcp_server import MCP_TOOL_NAMES, TELEGRAM_CHAT_ID_ENV, create_server, main, parse_stdio_args
 from opendot_core.policy import ApprovalService, PolicyStore
 
 

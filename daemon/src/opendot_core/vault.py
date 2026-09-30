@@ -19,7 +19,6 @@ from .documents import DocumentStore
 from .events import EventStore
 from .memory_graph import Entity, GraphError, Memory, MemoryGraph, Sensitivity
 
-
 #: Windows rejects any path at or over MAX_PATH unless the process opts into
 #: long paths (off by default) or the path carries the ``\\?\`` extended-length
 #: prefix. 260 is the documented limit including the terminating null, so a

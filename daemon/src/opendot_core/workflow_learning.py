@@ -27,7 +27,6 @@ from .audit import AuditEvent, AuditLog
 from .db import Database
 from .policy import PolicyError
 
-
 WORKFLOW_TURN_ID_ENV = "OPENDOT_WORKFLOW_TURN_ID"
 WORKFLOW_REVIEW_ACTION = "workflow_skill_review"
 

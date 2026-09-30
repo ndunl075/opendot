@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from opendot_core.db import Database
-from opendot_core.events import EventStore
-from opendot_core.hermes_tools import (
+from opendot_core.agent.tool_groups import (
     is_casual_conversation,
-    select_hermes_tools,
+    select_tool_group,
     wants_scheduling,
 )
+from opendot_core.db import Database
+from opendot_core.events import EventStore
 from opendot_core.jobs import JobRunner
 from opendot_core.reminders import ReminderStore
 from opendot_core.tasks import TaskStore
@@ -97,7 +97,7 @@ def test_late_daily_reminder_skips_missed_days_without_replaying_them(tmp_path: 
     assert job["state"] == "active"
     assert outbox_count == 1
     assert "Late reminder" in message["text"]
-    # After a late run at 18:00 UTC Aug 17, next local 23:00 EDT is still Aug 17 03:00 UTC next day... 
+    # After a late run at 18:00 UTC Aug 17, next local 23:00 EDT is still Aug 17 03:00 UTC next day...
     # Aug 17 18:00 UTC = Aug 17 14:00 EDT. Next 23:00 EDT is Aug 17 23:00 EDT = Aug 18 03:00 UTC.
     assert datetime.fromisoformat(job["next_run_at"]) == datetime(2026, 8, 18, 3, 0, tzinfo=UTC)
 
@@ -167,7 +167,7 @@ def test_wake_bedtime_and_lock_in_phrases_select_reminder_tools() -> None:
         "set a daily reminder to lock in",
     ):
         assert wants_scheduling(phrase)
-        tools = select_hermes_tools(phrase)
+        tools = select_tool_group(phrase)
         assert "reminder_set" in tools
         assert not is_casual_conversation(phrase)
 
@@ -175,27 +175,27 @@ def test_wake_bedtime_and_lock_in_phrases_select_reminder_tools() -> None:
 def test_reminding_is_not_trapped_by_a_word_boundary() -> None:
     # ``\bremind\b`` never matches "reminding"; keep that class of bug closed.
     assert wants_scheduling("keep reminding me to stretch every morning")
-    assert "reminder_set" in select_hermes_tools("keep reminding me to stretch every morning")
+    assert "reminder_set" in select_tool_group("keep reminding me to stretch every morning")
 
 
 def test_ordinary_future_phrasing_selects_scheduling_tools() -> None:
-    reminder = select_hermes_tools("remind me tomorrow night that im watching the odyssey")
+    reminder = select_tool_group("remind me tomorrow night that im watching the odyssey")
     assert wants_scheduling("remind me tomorrow night that im watching the odyssey")
     assert "reminder_set" in reminder
 
-    check = select_hermes_tools("check at 3pm who's playing")
+    check = select_tool_group("check at 3pm who's playing")
     assert wants_scheduling("check at 3pm who's playing")
     assert "task_schedule" in check
 
     for phrase in ("do this at 8", "send that tomorrow night"):
         assert wants_scheduling(phrase), phrase
-        tools = select_hermes_tools(phrase)
+        tools = select_tool_group(phrase)
         assert "task_schedule" in tools or "reminder_set" in tools, phrase
 
 
 def test_a_time_question_or_calendar_booking_is_not_a_scheduled_job() -> None:
     assert not wants_scheduling("what's at 3pm?")
-    assert "task_schedule" not in select_hermes_tools("what's at 3pm?")
+    assert "task_schedule" not in select_tool_group("what's at 3pm?")
     assert not wants_scheduling("book a meeting at 3")
-    assert "task_schedule" not in select_hermes_tools("book a meeting at 3")
-    assert "calendar_event_propose" in select_hermes_tools("book a meeting at 3")
+    assert "task_schedule" not in select_tool_group("book a meeting at 3")
+    assert "calendar_event_propose" in select_tool_group("book a meeting at 3")

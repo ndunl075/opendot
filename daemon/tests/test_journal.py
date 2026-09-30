@@ -7,15 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from opendot_core.db import Database
-from opendot_core.hermes_tools import (
-    MAX_HERMES_TOOLS_PER_TURN,
+from opendot_core.agent.tool_groups import (
+    MAX_TOOLS_PER_GROUP,
     is_casual_conversation,
-    select_hermes_tools,
+    select_tool_group,
 )
-from opendot_core.journal import JournalStore, MIN_MOOD_DAYS_FOR_TREND, MIN_MOOD_SPREAD
+from opendot_core.db import Database
+from opendot_core.journal import MIN_MOOD_DAYS_FOR_TREND, MIN_MOOD_SPREAD, JournalStore
 from opendot_core.mcp_server import MCP_TOOL_NAMES, create_server
-from opendot_core.policy import PolicyStore
 from tests.test_mcp_server import _call, _grant
 
 
@@ -122,14 +121,14 @@ def test_mood_and_gratitude_round_trip_through_mcp(tmp_path: Path) -> None:
 
 
 def test_mood_phrases_select_journal_tools() -> None:
-    tools = select_hermes_tools("log my mood as a 4 today")
+    tools = select_tool_group("log my mood as a 4 today")
     assert "mood_record" in tools
     assert "journal_get" in tools
     assert not is_casual_conversation("how am i feeling today?")
 
 
 def test_gratitude_phrases_select_journal_tools() -> None:
-    tools = select_hermes_tools("gratitude journal: my family")
+    tools = select_tool_group("gratitude journal: my family")
     assert "gratitude_record" in tools
     assert "journal_get" in tools
 
@@ -169,9 +168,9 @@ _SELECTABLE_TOOL_PHRASES: dict[str, str] = {
 
 def test_every_selectable_tool_survives_the_priority_trim() -> None:
     for tool_name, phrase in _SELECTABLE_TOOL_PHRASES.items():
-        selected = select_hermes_tools(phrase)
+        selected = select_tool_group(phrase)
         assert tool_name in selected, f"{tool_name} missing for phrase: {phrase!r}"
-        assert len(selected) <= MAX_HERMES_TOOLS_PER_TURN
+        assert len(selected) <= MAX_TOOLS_PER_GROUP
 
     # action_commit is never selected at all -- not selected-then-trimmed.
     # It used to be added by the GitHub write router and kept away from the
@@ -179,17 +178,17 @@ def test_every_selectable_tool_survives_the_priority_trim() -> None:
     # section 7 guarantee depend on an ordering table that one reasonable
     # edit could undo. Asserted at the selector, so removing it from
     # _TOOL_PRIORITY alone can no longer expose it.
-    github_tools = select_hermes_tools("file a github issue about the bug")
+    github_tools = select_tool_group("file a github issue about the bug")
     assert "github_issue_propose" in github_tools
     assert "action_commit" not in github_tools
-    from opendot_core import hermes_tools as _hermes_tools
+    from opendot_core.agent import tool_groups as _tool_groups
 
-    selector_body = Path(_hermes_tools.__file__).read_text(encoding="utf-8")
-    selector_body = selector_body.split("def select_hermes_tools", 1)[1].split("\ndef ", 1)[0]
+    selector_body = Path(_tool_groups.__file__).read_text(encoding="utf-8")
+    selector_body = selector_body.split("def select_tool_group", 1)[1].split("\ndef ", 1)[0]
     assert '"action_commit"' not in selector_body, (
         "action_commit must not be selectable; the trim is not a safety boundary"
     )
-    broad = select_hermes_tools(
+    broad = select_tool_group(
         "create a calendar event, remind me, send email, file a github issue, "
         "correct memory, and show connector status"
     )

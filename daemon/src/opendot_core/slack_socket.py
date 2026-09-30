@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 from slack_sdk import WebClient
 from slack_sdk.socket_mode import SocketModeClient

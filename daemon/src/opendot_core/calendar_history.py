@@ -576,7 +576,6 @@ class CalendarMemoryService:
         title = str(item["title"])
         day = str(item["day"])
         at = str(item.get("at") or day)
-        status = str(item.get("status") or "scheduled")
         item_type = str(item.get("item_type") or "event")
         details = [f'{day}: "{title}" was a {item_type} on the {group_label} calendar at {at}']
         if item.get("added_by"):

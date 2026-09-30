@@ -25,20 +25,20 @@ jobs:
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade pip build
-          python -m build
+          python -m build daemon --outdir dist
 
       - name: Run the test suite against the built package
         run: |
           # Unquoted so bash actually glob-expands it -- quoting this passes
           # pip the literal string "dist/*.whl", which isn't a real filename.
-          python -m pip install dist/*.whl
-          python -m pip install ".[dev]"
-          python -m pytest -q
+          python -m pip install dist/*.whl pytest
+          # The source-only tests read the repo checkout; they skip against a wheel.
+          python -m pytest daemon/tests -q
 
       # Keyless, Sigstore-backed provenance for exactly these artifacts --
       # no GPG key or long-lived secret for a maintainer to generate or protect.
       # Verify a downloaded artifact with:
-      #   gh attestation verify dist/<file> --repo ndunl075/alfred
+      #   gh attestation verify dist/<file> --repo ndunl075/opendot
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1
         with:
