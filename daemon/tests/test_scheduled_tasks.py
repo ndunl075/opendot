@@ -9,8 +9,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from opendot_core.agent.bridge import AgentBridge, AgentRunResult
 from opendot_core.db import Database
-from opendot_core.hermes_bridge import AgentRunResult, HermesBridge
 from opendot_core.jobs import JobRunner
 from opendot_core.scheduled_tasks import ScheduledTaskStore
 
@@ -62,7 +62,7 @@ def test_a_due_task_is_answered_and_delivered(tmp_path: Path) -> None:
 
     JobRunner(database).run_due()
     agent = _Agent()
-    HermesBridge(database, agent).run_once()
+    AgentBridge(database, agent).run_once()
 
     assert agent.prompts, "the scheduled instruction never reached the agent"
     assert "check the grandstand order" in agent.prompts[0]
@@ -75,7 +75,7 @@ def test_the_delivered_message_says_nothing_about_a_job(tmp_path: Path) -> None:
     task = _schedule(database, prompt="check the order", when=datetime.now(UTC) - timedelta(minutes=1))
 
     JobRunner(database).run_due()
-    HermesBridge(database, _Agent()).run_once()
+    AgentBridge(database, _Agent()).run_once()
 
     delivered = " ".join(_outbox_texts(database)).lower()
     for leak in ("job", task.id, "cron", "schedule", "fired"):

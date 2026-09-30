@@ -208,8 +208,8 @@ def test_stale_context_is_flagged_by_opendot_rather_than_by_the_owner() -> None:
 
 
 def test_the_bridge_flags_its_own_stale_pack_while_answering(tmp_path: Path) -> None:
+    from opendot_core.agent.bridge import AgentBridge, AgentRunResult
     from opendot_core.connector_records import ConnectorRecordStore
-    from opendot_core.hermes_bridge import AgentRunResult, HermesBridge
 
     database = Database(tmp_path / "opendot.db")
     database.migrate()
@@ -232,7 +232,7 @@ def test_the_bridge_flags_its_own_stale_pack_while_answering(tmp_path: Path) -> 
             )
     _gateway(database).handle(_message(90, "anything important in my inbox?"))
 
-    HermesBridge(database, lambda prompt: AgentRunResult(text="one email matters.", ok=True)).run_once()
+    AgentBridge(database, lambda prompt: AgentRunResult(text="one email matters.", ok=True)).run_once()
 
     assert _verdicts(database) == [("90", "coverage", "missing_context", "stale:gmail")]
 

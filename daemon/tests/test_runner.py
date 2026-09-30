@@ -1,11 +1,11 @@
+import time
 from pathlib import Path
 from threading import Event, Thread
-import time
 
 from opendot_core.audit import AuditLog
 from opendot_core.db import Database
 from opendot_core.outbox import Outbox
-from opendot_core.runner import OpenDotRunner, ConnectorSync
+from opendot_core.runner import ConnectorSync, OpenDotRunner
 from opendot_core.telegram import TelegramPair
 
 
@@ -83,7 +83,7 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
     (measured at 26s of pure latency against a real Telegram round trip)."""
     from datetime import UTC, datetime
 
-    from opendot_core.hermes_bridge import AgentRunResult, HermesBridge
+    from opendot_core.agent.bridge import AgentBridge, AgentRunResult
 
     database = Database(tmp_path / "opendot.db")
     free_form = {
@@ -97,7 +97,7 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
         },
     }
     fake = FakeTelegram([free_form])
-    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="should not be called", ok=True))
+    bridge = AgentBridge(database, lambda prompt: AgentRunResult(text="should not be called", ok=True))
     runner = OpenDotRunner(
         database,
         telegram_transport=fake,
@@ -128,7 +128,7 @@ def test_one_cycle_polls_answers_and_delivers_an_agent_reply(tmp_path: Path) -> 
 def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
-    from opendot_core.hermes_bridge import AgentRunResult, HermesBridge
+    from opendot_core.agent.bridge import AgentBridge, AgentRunResult
 
     database = Database(tmp_path / "opendot.db")
     fake = FakeTelegram(
@@ -145,7 +145,7 @@ def test_casual_message_goes_straight_to_the_agent_without_a_queue_ack(tmp_path:
             }
         ]
     )
-    bridge = HermesBridge(database, lambda prompt: AgentRunResult(text="yo. what's good?", ok=True))
+    bridge = AgentBridge(database, lambda prompt: AgentRunResult(text="yo. what's good?", ok=True))
     report = OpenDotRunner(
         database,
         telegram_transport=fake,
