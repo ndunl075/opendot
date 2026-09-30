@@ -82,11 +82,12 @@ _READ_VERBS = frozenset(
     {"list", "get", "fetch", "search", "read", "find", "retrieve", "view", "lookup", "count", "check",
      "download", "export", "history", "watch", "subscribe"}
 )
-#: Changes that stay in the user's own mailbox or workspace view (nobody else sees them).
+#: Changes that stay in the user's own mailbox (nobody else sees them); only trusted for mail apps.
 _MAILBOX_ONLY = frozenset(
     {"label", "labels", "archive", "unarchive", "star", "unstar", "mark", "unread", "mute", "unmute", "snooze",
      "move", "flag", "unflag"}
 )
+_MAIL_APPS = frozenset({"gmail", "outlook", "mail", "email", "imap"})
 _READ_DEFAULTS = frozenset(
     rule.tool for rule in DEFAULT_RULES if rule.note == "reading and syncing connected apps"
 )
@@ -113,10 +114,13 @@ def is_send_or_post(tool: str, action: str) -> bool:
         return bool(words & {"send", "post", "publish"})
     if words & _SEND_VERBS:
         return True
-    if words & _READ_VERBS or words & _MAILBOX_ONLY:
+    if words & _READ_VERBS:
         return False
-    if "gmail" in words and "modify" in words:
-        return False  # Gmail's messages.modify only changes labels; sent mail cannot be edited
+    if words & _MAIL_APPS and (words & _MAILBOX_ONLY or "modify" in words):
+        # In a mail app, labels, stars, read state and moves change only the user's own mailbox,
+        # and sent mail cannot be edited (Gmail's messages.modify only changes labels). In any
+        # other app the same words can change what others see, so they fall through to asking.
+        return False
     # Any other action on something other people see (create, schedule, update, edit, pin ...) is
     # outgoing: when unsure, ask.
     return bool(words & _MESSAGE_NOUNS)

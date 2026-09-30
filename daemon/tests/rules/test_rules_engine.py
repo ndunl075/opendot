@@ -415,6 +415,9 @@ def test_add_rule_accepts_a_rule_object_and_rejects_deny_list(engine: RuleEngine
         ("composio_execute", "SLACK_CHAT_SCHEDULE_MESSAGE"),
         ("composio_execute", "SLACK_CHAT_UPDATE"),
         ("composio_execute", "GITHUB_UPDATE_ISSUE_COMMENT"),
+        ("composio_execute", "GITHUB_MARK_DISCUSSION_COMMENT_AS_ANSWER"),
+        ("composio_execute", "SLACK_PIN_MESSAGE"),
+        ("composio_execute", "GMAIL_MODIFY_MESSAGE_AND_SEND"),
     ],
 )
 def test_send_and_post_ask_every_time_even_with_an_auto_rule(engine: RuleEngine, tool: str, action: str) -> None:
@@ -439,7 +442,7 @@ def test_drafts_events_and_local_tools_can_still_be_auto(engine: RuleEngine, too
     "slug",
     ["GITHUB_LIST_ISSUE_COMMENTS", "SLACK_FETCH_CONVERSATION_HISTORY", "GMAIL_FETCH_EMAILS", "SLACK_SEARCH_MESSAGES",
      "GMAIL_GET_EMAIL", "GMAIL_CREATE_EMAIL_DRAFT", "GOOGLECALENDAR_CREATE_EVENT", "GMAIL_MODIFY_MESSAGE",
-     "GMAIL_ADD_LABEL_TO_EMAIL", "GMAIL_MARK_MESSAGE_AS_READ", "OUTLOOK_MOVE_MESSAGE", "SLACK_STAR_MESSAGE"],
+     "GMAIL_ADD_LABEL_TO_EMAIL", "GMAIL_MARK_MESSAGE_AS_READ", "OUTLOOK_MOVE_MESSAGE"],
 )
 def test_reads_drafts_and_events_are_not_sends(engine: RuleEngine, slug: str) -> None:
     engine.add_rule(tool="composio_execute", action=slug, behavior="auto")
