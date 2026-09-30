@@ -1,0 +1,76 @@
+{
+  "$defs": {
+    "MemoryItem": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "enum": [
+            "confirmed",
+            "inferred"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "learned_at": {
+          "format": "date-time",
+          "title": "Learned At",
+          "type": "string"
+        },
+        "people": {
+          "items": {
+            "type": "string"
+          },
+          "title": "People",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "source_label": {
+          "title": "Source Label",
+          "type": "string"
+        },
+        "statement": {
+          "title": "Statement",
+          "type": "string"
+        },
+        "superseded": {
+          "default": false,
+          "title": "Superseded",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "source",
+        "source_label",
+        "learned_at",
+        "confidence"
+      ],
+      "title": "MemoryItem",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "corrected": {
+      "$ref": "#/$defs/MemoryItem"
+    },
+    "superseded_id": {
+      "title": "Superseded Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "corrected",
+    "superseded_id"
+  ],
+  "title": "MemoryCorrectResult",
+  "type": "object"
+}

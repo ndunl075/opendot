@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "confirm": {
+      "const": "reset",
+      "title": "Confirm",
+      "type": "string"
+    },
+    "forget_memory": {
+      "default": false,
+      "title": "Forget Memory",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "confirm"
+  ],
+  "title": "CompanionResetRequest",
+  "type": "object"
+}

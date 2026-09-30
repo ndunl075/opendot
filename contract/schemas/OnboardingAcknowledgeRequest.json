@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "credits_off": {
+      "title": "Credits Off",
+      "type": "boolean"
+    },
+    "weekly_limit_set": {
+      "title": "Weekly Limit Set",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "weekly_limit_set",
+    "credits_off"
+  ],
+  "title": "OnboardingAcknowledgeRequest",
+  "type": "object"
+}

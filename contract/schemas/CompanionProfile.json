@@ -1,0 +1,53 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "avatar_seed": {
+      "title": "Avatar Seed",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "paused": {
+      "title": "Paused",
+      "type": "boolean"
+    },
+    "paused_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Paused Reason"
+    },
+    "style_preset": {
+      "enum": [
+        "concise",
+        "warm",
+        "formal",
+        "playful"
+      ],
+      "title": "Style Preset",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "avatar_seed",
+    "paused",
+    "created_at",
+    "style_preset"
+  ],
+  "title": "CompanionProfile",
+  "type": "object"
+}

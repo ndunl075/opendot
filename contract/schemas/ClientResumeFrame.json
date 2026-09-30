@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "after_seq": {
+      "minimum": 0,
+      "title": "After Seq",
+      "type": "integer"
+    },
+    "conversation_id": {
+      "title": "Conversation Id",
+      "type": "string"
+    },
+    "type": {
+      "const": "resume",
+      "default": "resume",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "conversation_id",
+    "after_seq"
+  ],
+  "title": "ClientResumeFrame",
+  "type": "object"
+}

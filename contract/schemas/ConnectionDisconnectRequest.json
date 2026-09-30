@@ -1,0 +1,12 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "forget_learned": {
+      "default": false,
+      "title": "Forget Learned",
+      "type": "boolean"
+    }
+  },
+  "title": "ConnectionDisconnectRequest",
+  "type": "object"
+}

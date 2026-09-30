@@ -1,0 +1,118 @@
+{
+  "$defs": {
+    "CompanionTask": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "credits_used": {
+          "default": 0.0,
+          "title": "Credits Used",
+          "type": "number"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "job_type": {
+          "title": "Job Type",
+          "type": "string"
+        },
+        "scheduled_for": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scheduled For"
+        },
+        "status": {
+          "enum": [
+            "in_progress",
+            "scheduled",
+            "completed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status",
+        "job_type",
+        "created_at"
+      ],
+      "title": "CompanionTask",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "completed": {
+      "items": {
+        "$ref": "#/$defs/CompanionTask"
+      },
+      "title": "Completed",
+      "type": "array"
+    },
+    "in_progress": {
+      "items": {
+        "$ref": "#/$defs/CompanionTask"
+      },
+      "title": "In Progress",
+      "type": "array"
+    },
+    "scheduled": {
+      "items": {
+        "$ref": "#/$defs/CompanionTask"
+      },
+      "title": "Scheduled",
+      "type": "array"
+    }
+  },
+  "required": [
+    "in_progress",
+    "scheduled",
+    "completed"
+  ],
+  "title": "CompanionTaskList",
+  "type": "object"
+}

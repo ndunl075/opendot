@@ -1,0 +1,538 @@
+{
+  "api_version": "v1",
+  "endpoints": [
+    {
+      "method": "GET",
+      "name": "health",
+      "path": "/v1/health",
+      "request": null,
+      "request_in": null,
+      "response": "HealthResponse",
+      "summary": "Daemon health"
+    },
+    {
+      "method": "GET",
+      "name": "version",
+      "path": "/v1/version",
+      "request": null,
+      "request_in": null,
+      "response": "VersionResponse",
+      "summary": "Daemon and API version"
+    },
+    {
+      "method": "GET",
+      "name": "onboarding_get",
+      "path": "/v1/onboarding",
+      "request": null,
+      "request_in": null,
+      "response": "OnboardingState",
+      "summary": "Current onboarding state"
+    },
+    {
+      "method": "POST",
+      "name": "onboarding_companion",
+      "path": "/v1/onboarding/companion",
+      "request": "CompanionSetupRequest",
+      "request_in": "body",
+      "response": "OnboardingState",
+      "summary": "Name the companion and pick an avatar seed"
+    },
+    {
+      "method": "POST",
+      "name": "onboarding_acknowledge",
+      "path": "/v1/onboarding/acknowledge",
+      "request": "OnboardingAcknowledgeRequest",
+      "request_in": "body",
+      "response": "OnboardingState",
+      "summary": "Confirm the weekly limit is set and credit use is off"
+    },
+    {
+      "method": "POST",
+      "name": "onboarding_complete",
+      "path": "/v1/onboarding/complete",
+      "request": null,
+      "request_in": null,
+      "response": "OnboardingState",
+      "summary": "Finish onboarding; the companion introduces itself"
+    },
+    {
+      "method": "POST",
+      "name": "chatgpt_start",
+      "path": "/v1/auth/chatgpt/start",
+      "request": "ChatGPTSignInStartRequest",
+      "request_in": "body",
+      "response": "ChatGPTSignInStart",
+      "summary": "Start Sign in with ChatGPT"
+    },
+    {
+      "method": "GET",
+      "name": "chatgpt_status",
+      "path": "/v1/auth/chatgpt/status",
+      "request": null,
+      "request_in": null,
+      "response": "ChatGPTStatus",
+      "summary": "Sign-in state and plan eligibility (Plus or Pro)"
+    },
+    {
+      "method": "POST",
+      "name": "chatgpt_disconnect",
+      "path": "/v1/auth/chatgpt/disconnect",
+      "request": null,
+      "request_in": null,
+      "response": "OkResponse",
+      "summary": "Sign out of ChatGPT"
+    },
+    {
+      "method": "POST",
+      "name": "chat_send",
+      "path": "/v1/chat/messages",
+      "request": "ChatSendRequest",
+      "request_in": "body",
+      "response": "ChatSendAccepted",
+      "summary": "Send a message; replies stream on the chat WebSocket"
+    },
+    {
+      "method": "GET",
+      "name": "chat_conversations",
+      "path": "/v1/chat/conversations",
+      "request": null,
+      "request_in": null,
+      "response": "ConversationList",
+      "summary": "List conversations"
+    },
+    {
+      "method": "GET",
+      "name": "chat_conversation",
+      "path": "/v1/chat/conversations/{conversation_id}",
+      "request": null,
+      "request_in": null,
+      "response": "Conversation",
+      "summary": "One conversation with its messages"
+    },
+    {
+      "method": "GET",
+      "name": "approvals_list",
+      "path": "/v1/approvals",
+      "request": null,
+      "request_in": null,
+      "response": "ApprovalList",
+      "summary": "Pending and recent approvals"
+    },
+    {
+      "method": "GET",
+      "name": "approval_get",
+      "path": "/v1/approvals/{approval_id}",
+      "request": null,
+      "request_in": null,
+      "response": "ApprovalItem",
+      "summary": "One approval"
+    },
+    {
+      "method": "POST",
+      "name": "approval_approve",
+      "path": "/v1/approvals/{approval_id}/approve",
+      "request": "ApprovalApproveRequest",
+      "request_in": "body",
+      "response": "ApprovalDecisionResult",
+      "summary": "Approve as previewed"
+    },
+    {
+      "method": "POST",
+      "name": "approval_edit",
+      "path": "/v1/approvals/{approval_id}/edit",
+      "request": "ApprovalEditRequest",
+      "request_in": "body",
+      "response": "ApprovalDecisionResult",
+      "summary": "Edit the payload, then approve"
+    },
+    {
+      "method": "POST",
+      "name": "approval_deny",
+      "path": "/v1/approvals/{approval_id}/deny",
+      "request": "ApprovalDenyRequest",
+      "request_in": "body",
+      "response": "ApprovalDecisionResult",
+      "summary": "Deny"
+    },
+    {
+      "method": "POST",
+      "name": "approval_always_allow",
+      "path": "/v1/approvals/{approval_id}/always-allow",
+      "request": "ApprovalAlwaysAllowRequest",
+      "request_in": "body",
+      "response": "ApprovalDecisionResult",
+      "summary": "Approve and create a rule for this action"
+    },
+    {
+      "method": "GET",
+      "name": "companion_get",
+      "path": "/v1/companion",
+      "request": null,
+      "request_in": null,
+      "response": "CompanionProfile",
+      "summary": "Companion profile"
+    },
+    {
+      "method": "GET",
+      "name": "companion_tasks",
+      "path": "/v1/companion/tasks",
+      "request": null,
+      "request_in": null,
+      "response": "CompanionTaskList",
+      "summary": "In progress, scheduled and completed tasks"
+    },
+    {
+      "method": "POST",
+      "name": "companion_pause",
+      "path": "/v1/companion/pause",
+      "request": "CompanionPauseRequest",
+      "request_in": "body",
+      "response": "CompanionProfile",
+      "summary": "Pause the companion"
+    },
+    {
+      "method": "POST",
+      "name": "companion_resume",
+      "path": "/v1/companion/resume",
+      "request": null,
+      "request_in": null,
+      "response": "CompanionProfile",
+      "summary": "Resume the companion"
+    },
+    {
+      "method": "POST",
+      "name": "companion_reset",
+      "path": "/v1/companion/reset",
+      "request": "CompanionResetRequest",
+      "request_in": "body",
+      "response": "CompanionProfile",
+      "summary": "Reset the companion"
+    },
+    {
+      "method": "POST",
+      "name": "companion_rename",
+      "path": "/v1/companion/rename",
+      "request": "CompanionRenameRequest",
+      "request_in": "body",
+      "response": "CompanionProfile",
+      "summary": "Rename the companion"
+    },
+    {
+      "method": "POST",
+      "name": "companion_avatar",
+      "path": "/v1/companion/avatar",
+      "request": "CompanionAvatarRequest",
+      "request_in": "body",
+      "response": "CompanionProfile",
+      "summary": "Set or re-roll the avatar seed"
+    },
+    {
+      "method": "GET",
+      "name": "activity_list",
+      "path": "/v1/activity",
+      "request": "ActivityQuery",
+      "request_in": "query",
+      "response": "ActivityList",
+      "summary": "Activity timeline"
+    },
+    {
+      "method": "GET",
+      "name": "rules_list",
+      "path": "/v1/rules",
+      "request": null,
+      "request_in": null,
+      "response": "RuleList",
+      "summary": "Rules, including locked core deny-list items"
+    },
+    {
+      "method": "POST",
+      "name": "rule_create",
+      "path": "/v1/rules",
+      "request": "RuleCreateRequest",
+      "request_in": "body",
+      "response": "Rule",
+      "summary": "Create a rule"
+    },
+    {
+      "method": "PUT",
+      "name": "rule_update",
+      "path": "/v1/rules/{rule_id}",
+      "request": "RuleUpdateRequest",
+      "request_in": "body",
+      "response": "Rule",
+      "summary": "Update a rule"
+    },
+    {
+      "method": "DELETE",
+      "name": "rule_delete",
+      "path": "/v1/rules/{rule_id}",
+      "request": null,
+      "request_in": null,
+      "response": "OkResponse",
+      "summary": "Delete a rule"
+    },
+    {
+      "method": "GET",
+      "name": "memory_search",
+      "path": "/v1/memory",
+      "request": "MemorySearchQuery",
+      "request_in": "query",
+      "response": "MemorySearchResult",
+      "summary": "Search memory"
+    },
+    {
+      "method": "POST",
+      "name": "memory_correct",
+      "path": "/v1/memory/{memory_id}/correct",
+      "request": "MemoryCorrectRequest",
+      "request_in": "body",
+      "response": "MemoryCorrectResult",
+      "summary": "Correct a memory"
+    },
+    {
+      "method": "POST",
+      "name": "memory_forget",
+      "path": "/v1/memory/forget",
+      "request": "MemoryForgetRequest",
+      "request_in": "body",
+      "response": "MemoryForgetResult",
+      "summary": "Forget by item, source, time or person"
+    },
+    {
+      "method": "GET",
+      "name": "connections_list",
+      "path": "/v1/connections",
+      "request": null,
+      "request_in": null,
+      "response": "ConnectionList",
+      "summary": "App accounts and their health"
+    },
+    {
+      "method": "POST",
+      "name": "connection_start",
+      "path": "/v1/connections/start",
+      "request": "ConnectionStartRequest",
+      "request_in": "body",
+      "response": "ConnectionStart",
+      "summary": "Begin connecting an app"
+    },
+    {
+      "method": "PUT",
+      "name": "connection_write_opt_in",
+      "path": "/v1/connections/{connection_id}/write-opt-in",
+      "request": "ConnectionWriteOptInRequest",
+      "request_in": "body",
+      "response": "Connection",
+      "summary": "Switch Gmail drafts or Calendar events on or off"
+    },
+    {
+      "method": "POST",
+      "name": "connection_sync",
+      "path": "/v1/connections/{connection_id}/sync",
+      "request": null,
+      "request_in": null,
+      "response": "Connection",
+      "summary": "Sync now"
+    },
+    {
+      "method": "POST",
+      "name": "connection_disconnect",
+      "path": "/v1/connections/{connection_id}/disconnect",
+      "request": "ConnectionDisconnectRequest",
+      "request_in": "body",
+      "response": "ConnectionDisconnectResult",
+      "summary": "Disconnect, optionally forgetting what was learned"
+    },
+    {
+      "method": "GET",
+      "name": "usage_get",
+      "path": "/v1/usage",
+      "request": "UsageQuery",
+      "request_in": "query",
+      "response": "UsageSummary",
+      "summary": "Credits by task, day and job type"
+    },
+    {
+      "method": "GET",
+      "name": "usage_budgets_get",
+      "path": "/v1/usage/budgets",
+      "request": null,
+      "request_in": null,
+      "response": "UsageBudgets",
+      "summary": "Budgets"
+    },
+    {
+      "method": "PUT",
+      "name": "usage_budgets_set",
+      "path": "/v1/usage/budgets",
+      "request": "UsageBudgets",
+      "request_in": "body",
+      "response": "UsageBudgets",
+      "summary": "Set budgets"
+    },
+    {
+      "method": "GET",
+      "name": "settings_get",
+      "path": "/v1/settings",
+      "request": null,
+      "request_in": null,
+      "response": "Settings",
+      "summary": "All settings"
+    },
+    {
+      "method": "PUT",
+      "name": "settings_update",
+      "path": "/v1/settings",
+      "request": "SettingsUpdateRequest",
+      "request_in": "body",
+      "response": "Settings",
+      "summary": "Update settings"
+    },
+    {
+      "method": "GET",
+      "name": "backup_status",
+      "path": "/v1/backup",
+      "request": null,
+      "request_in": null,
+      "response": "BackupStatus",
+      "summary": "Backups"
+    },
+    {
+      "method": "POST",
+      "name": "backup_create",
+      "path": "/v1/backup",
+      "request": "BackupCreateRequest",
+      "request_in": "body",
+      "response": "BackupInfo",
+      "summary": "Create a backup now"
+    },
+    {
+      "method": "POST",
+      "name": "backup_restore",
+      "path": "/v1/backup/restore",
+      "request": "BackupRestoreRequest",
+      "request_in": "body",
+      "response": "BackupRestoreResult",
+      "summary": "Restore a backup"
+    }
+  ],
+  "schemas": [
+    "schemas/ActivityList.json",
+    "schemas/ActivityQuery.json",
+    "schemas/ApprovalAlwaysAllowRequest.json",
+    "schemas/ApprovalApproveRequest.json",
+    "schemas/ApprovalDecisionResult.json",
+    "schemas/ApprovalDenyRequest.json",
+    "schemas/ApprovalEditRequest.json",
+    "schemas/ApprovalItem.json",
+    "schemas/ApprovalList.json",
+    "schemas/ApprovalRequiredEvent.json",
+    "schemas/BackupCreateRequest.json",
+    "schemas/BackupInfo.json",
+    "schemas/BackupRestoreRequest.json",
+    "schemas/BackupRestoreResult.json",
+    "schemas/BackupStatus.json",
+    "schemas/ChatGPTSignInStart.json",
+    "schemas/ChatGPTSignInStartRequest.json",
+    "schemas/ChatGPTStatus.json",
+    "schemas/ChatSendAccepted.json",
+    "schemas/ChatSendRequest.json",
+    "schemas/ClientFrame.json",
+    "schemas/ClientPingFrame.json",
+    "schemas/ClientResumeFrame.json",
+    "schemas/ClientSendFrame.json",
+    "schemas/CompanionAvatarRequest.json",
+    "schemas/CompanionPauseRequest.json",
+    "schemas/CompanionProfile.json",
+    "schemas/CompanionRenameRequest.json",
+    "schemas/CompanionResetRequest.json",
+    "schemas/CompanionSetupRequest.json",
+    "schemas/CompanionTaskList.json",
+    "schemas/CompletedEvent.json",
+    "schemas/Connection.json",
+    "schemas/ConnectionDisconnectRequest.json",
+    "schemas/ConnectionDisconnectResult.json",
+    "schemas/ConnectionList.json",
+    "schemas/ConnectionStart.json",
+    "schemas/ConnectionStartRequest.json",
+    "schemas/ConnectionWriteOptInRequest.json",
+    "schemas/Conversation.json",
+    "schemas/ConversationList.json",
+    "schemas/ErrorEvent.json",
+    "schemas/HealthResponse.json",
+    "schemas/MemoryCorrectRequest.json",
+    "schemas/MemoryCorrectResult.json",
+    "schemas/MemoryForgetRequest.json",
+    "schemas/MemoryForgetResult.json",
+    "schemas/MemorySearchQuery.json",
+    "schemas/MemorySearchResult.json",
+    "schemas/MessageStartedEvent.json",
+    "schemas/OkResponse.json",
+    "schemas/OnboardingAcknowledgeRequest.json",
+    "schemas/OnboardingState.json",
+    "schemas/PausedEvent.json",
+    "schemas/Rule.json",
+    "schemas/RuleCreateRequest.json",
+    "schemas/RuleList.json",
+    "schemas/RuleUpdateRequest.json",
+    "schemas/Settings.json",
+    "schemas/SettingsUpdateRequest.json",
+    "schemas/StreamEvent.json",
+    "schemas/TextDeltaEvent.json",
+    "schemas/ToolCallEvent.json",
+    "schemas/UsageBudgets.json",
+    "schemas/UsageQuery.json",
+    "schemas/UsageSummary.json",
+    "schemas/VersionResponse.json"
+  ],
+  "stream": {
+    "client_frame_union": "ClientFrame",
+    "client_frames": [
+      {
+        "model": "ClientSendFrame",
+        "type": "send"
+      },
+      {
+        "model": "ClientResumeFrame",
+        "type": "resume"
+      },
+      {
+        "model": "ClientPingFrame",
+        "type": "ping"
+      }
+    ],
+    "path": "/v1/chat/stream",
+    "protocol": "websocket",
+    "server_event_union": "StreamEvent",
+    "server_events": [
+      {
+        "model": "MessageStartedEvent",
+        "type": "message_started"
+      },
+      {
+        "model": "TextDeltaEvent",
+        "type": "text_delta"
+      },
+      {
+        "model": "ToolCallEvent",
+        "type": "tool_call"
+      },
+      {
+        "model": "ApprovalRequiredEvent",
+        "type": "approval_required"
+      },
+      {
+        "model": "CompletedEvent",
+        "type": "completed"
+      },
+      {
+        "model": "ErrorEvent",
+        "type": "error"
+      },
+      {
+        "model": "PausedEvent",
+        "type": "paused"
+      }
+    ]
+  }
+}

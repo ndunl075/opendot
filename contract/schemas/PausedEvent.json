@@ -1,0 +1,61 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "conversation_id": {
+      "title": "Conversation Id",
+      "type": "string"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    },
+    "message_id": {
+      "title": "Message Id",
+      "type": "string"
+    },
+    "reason": {
+      "enum": [
+        "user",
+        "task_budget",
+        "daily_budget",
+        "rate_limited",
+        "anomaly",
+        "top_tier_approval"
+      ],
+      "title": "Reason",
+      "type": "string"
+    },
+    "resume_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resume At"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "type": {
+      "const": "paused",
+      "default": "paused",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "seq",
+    "conversation_id",
+    "message_id",
+    "reason",
+    "message"
+  ],
+  "title": "PausedEvent",
+  "type": "object"
+}

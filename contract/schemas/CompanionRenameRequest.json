@@ -1,0 +1,16 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "CompanionRenameRequest",
+  "type": "object"
+}

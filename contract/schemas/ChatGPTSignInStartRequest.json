@@ -1,0 +1,12 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "open_browser": {
+      "default": true,
+      "title": "Open Browser",
+      "type": "boolean"
+    }
+  },
+  "title": "ChatGPTSignInStartRequest",
+  "type": "object"
+}

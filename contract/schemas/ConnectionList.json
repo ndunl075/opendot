@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "Connection": {
+      "additionalProperties": false,
+      "properties": {
+        "account_label": {
+          "title": "Account Label",
+          "type": "string"
+        },
+        "app": {
+          "enum": [
+            "gmail",
+            "google_calendar",
+            "github"
+          ],
+          "title": "App",
+          "type": "string"
+        },
+        "health": {
+          "enum": [
+            "ok",
+            "stale",
+            "error",
+            "never_synced"
+          ],
+          "title": "Health",
+          "type": "string"
+        },
+        "health_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Health Detail"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "last_synced_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Synced At"
+        },
+        "memory_item_count": {
+          "default": 0,
+          "title": "Memory Item Count",
+          "type": "integer"
+        },
+        "read_only": {
+          "default": true,
+          "title": "Read Only",
+          "type": "boolean"
+        },
+        "write_opt_in": {
+          "default": false,
+          "title": "Write Opt In",
+          "type": "boolean"
+        },
+        "write_opt_in_available": {
+          "default": false,
+          "title": "Write Opt In Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "app",
+        "account_label",
+        "health"
+      ],
+      "title": "Connection",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "connections": {
+      "items": {
+        "$ref": "#/$defs/Connection"
+      },
+      "title": "Connections",
+      "type": "array"
+    }
+  },
+  "required": [
+    "connections"
+  ],
+  "title": "ConnectionList",
+  "type": "object"
+}

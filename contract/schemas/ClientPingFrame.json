@@ -1,0 +1,13 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "ping",
+      "default": "ping",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "title": "ClientPingFrame",
+  "type": "object"
+}

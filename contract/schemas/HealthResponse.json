@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "checked_at": {
+      "format": "date-time",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "database_ok": {
+      "title": "Database Ok",
+      "type": "boolean"
+    },
+    "paused": {
+      "title": "Paused",
+      "type": "boolean"
+    },
+    "provider_ok": {
+      "title": "Provider Ok",
+      "type": "boolean"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "degraded",
+        "starting"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "uptime_seconds": {
+      "title": "Uptime Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "status",
+    "uptime_seconds",
+    "database_ok",
+    "provider_ok",
+    "paused",
+    "checked_at"
+  ],
+  "title": "HealthResponse",
+  "type": "object"
+}

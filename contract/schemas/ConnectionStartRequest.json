@@ -1,0 +1,19 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "app": {
+      "enum": [
+        "gmail",
+        "google_calendar",
+        "github"
+      ],
+      "title": "App",
+      "type": "string"
+    }
+  },
+  "required": [
+    "app"
+  ],
+  "title": "ConnectionStartRequest",
+  "type": "object"
+}
