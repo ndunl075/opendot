@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from opendot_core.agent.bridge import AgentBridge, AgentRunResult
 from opendot_core.db import Database
-from opendot_core.hermes_bridge import AgentRunResult, HermesBridge
 from opendot_core.policy import ApprovalService
 from opendot_core.response_feedback import ResponseFeedbackService
 from opendot_core.telegram import TelegramGateway, TelegramPair, TelegramUpdate
@@ -96,7 +96,7 @@ def test_bridge_attaches_a_new_proposal_to_the_answer_keyboard(tmp_path: Path) -
         )
         return AgentRunResult(text="draft ready for approval.", ok=True)
 
-    HermesBridge(database, proposing_agent).run_once()
+    AgentBridge(database, proposing_agent).run_once()
 
     with database.connect() as connection:
         rows = connection.execute(
