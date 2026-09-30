@@ -1,10 +1,10 @@
 # OpenDot status
 
-Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — DONE** (2026-09-30; M0 done the same day). Next: M2.
+Milestone: **M2 (agent loop, router, usage meter, rules) — DONE** (2026-09-30; M0 and M1 done the same day). Next: M3 (UI, led by Astra through Codex).
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
-- Collected after M0: 722; after M1: 921 (minimum stays 650)
+- Collected after M0: 722; after M1: 921; after M2: 1189 (minimum stays 650)
 - Collected tests at baseline: **777**
 - Tests inside the deletable files listed in ARCHITECTURE.md §5: **127**
 - Minimum collected count from now on (baseline − deletable): **650**
@@ -38,7 +38,13 @@ Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — DONE** (2026-09-
 - [x] 2.6 rules engine (`rules/`, migration 0020): four behaviors, core deny list, always-allow
 - [x] 2.7 reviewer pass and anomaly auto-pause (`agent/reviewer.py`), kill switch
 - [x] 2.8 API server (`api/server.py`, `api/escrow.py`): chat WebSocket and approval endpoints
-- [ ] 2.9 cross-vendor review into `docs/reviews/m2.md` (in progress)
+- [x] 2.9 cross-vendor review into `docs/reviews/m2.md` (F1 to F16 all fixed, Sol verdict "ready"; one residual risk accepted and carried to M4 tasks 4.4 and 4.8)
+
+## Notes for M3 and M4
+
+- `agent/runtime.py` `build_agent_runtime` is the production assembly of the agent loop and the API. M3 task 3.5 serves `runtime.app` on 127.0.0.1. The browser WebSocket authenticates with the subprotocols `["opendot", "opendot.bearer.<token>"]` from a local origin.
+- `opendot run` still builds no agent (M0 review F1). It gets real connector tools in M4 task 4.4. That task should also declare, for each tool, whether it reaches other people (the M2 review's residual risk).
+- Codex's Windows sandbox stopped launching commands during the M2 review, so Sol reviews now receive the diff inside the prompt. If Sol needs to run commands again, restart the Codex CLI or the machine first.
 
 ## Needs you
 

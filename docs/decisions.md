@@ -94,3 +94,16 @@ section 1. Newest last.
 - 2026-09-30 (M2): The first user message is frozen into history after the first model step; later
   steps end with a short fixed continuation line in the changing tail. Reason: history stays
   append-only and the stable prefix stays byte-identical (S10).
+- 2026-09-30 (M2 review): "Ask every time" for sending and posting is enforced in `RuleEngine.decide`
+  by `rules.defaults.is_send_or_post`. It asks for explicit send tools, send verbs, and any non-read
+  action on a message, comment or chat. It does not ask for local tools, built-in read tools, read
+  verbs, drafts, or mailbox-only changes in mail apps. Reason: section 10 says no rule may relax
+  sending; word matching errs toward asking; M4 connectors declare for each tool whether it reaches
+  other people.
+- 2026-09-30 (M2 review): Approval tokens stay in memory only (`TokenEscrow`). After a restart, an
+  approved but unused action is proposed again, and a consumed one whose outcome is unknown is handed
+  to the user. The loop never guesses.
+- 2026-09-30 (M2 review): The browser chat WebSocket authenticates with the subprotocol
+  `opendot.bearer.<token>`: the server selects `opendot` and never echoes the token. It also requires a
+  local Origin. Reason: browsers cannot set an Authorization header on a WebSocket, and CORS does not
+  protect WebSockets.
