@@ -3,6 +3,7 @@ from pathlib import Path
 
 from opendot_core.cli import build_parser, main
 from opendot_core.db import Database
+from tests.schema_version import LATEST_SCHEMA_VERSION
 
 
 def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
@@ -10,7 +11,7 @@ def test_cli_initializes_audits_and_verifies(tmp_path: Path, capsys) -> None:
 
     assert main(["--db", str(database_path), "init"]) == 0
     initialized = json.loads(capsys.readouterr().out)
-    assert initialized["schema_version"] == 18
+    assert initialized["schema_version"] == LATEST_SCHEMA_VERSION
 
     assert (
         main(

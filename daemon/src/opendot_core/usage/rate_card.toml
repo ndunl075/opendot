@@ -1,0 +1,22 @@
+# Credits per million tokens (ARCHITECTURE.md section 8.1).
+# Edit this file to update prices; no code change is needed.
+# A model id is matched to a family by the family word appearing in it
+# (for example "gpt-5.6-sol" matches "sol"). Unknown models are marked
+# "rate unknown" and charged at the `unknown_family` rate.
+
+unknown_family = "sol"
+
+[families.sol]
+input = 125.0
+cached_input = 12.5
+output = 750.0
+
+[families.terra]
+input = 50.0
+cached_input = 5.0
+output = 300.0
+
+[families.luna]
+input = 5.0
+cached_input = 0.5
+output = 30.0

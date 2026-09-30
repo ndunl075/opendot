@@ -2,6 +2,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from opendot_core.db import Database
+from tests.schema_version import LATEST_SCHEMA_VERSION
 
 NOW = "2026-08-01T00:00:00+00:00"
 
@@ -96,7 +97,7 @@ def test_migration_renames_rollups_and_purges_removed_connector_data(tmp_path: P
         )
         connection.commit()
 
-    assert database.migrate() == 18
+    assert database.migrate() == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -116,5 +117,5 @@ def test_migration_renames_rollups_and_purges_removed_connector_data(tmp_path: P
 def test_migration_is_a_noop_for_a_database_with_no_removed_connector_data(tmp_path: Path) -> None:
     database = Database(tmp_path / "opendot.db")
 
-    assert database.migrate() == 18
-    assert database.migrate() == 18
+    assert database.migrate() == LATEST_SCHEMA_VERSION
+    assert database.migrate() == LATEST_SCHEMA_VERSION
