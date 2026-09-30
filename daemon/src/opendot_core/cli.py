@@ -820,6 +820,9 @@ def build_parser() -> argparse.ArgumentParser:
     from .measure import cli as measure_cli
 
     measure_cli.register(subcommands)
+    from .usage import cli as usage_cli
+
+    usage_cli.register(subcommands)
     return parser
 
 
@@ -836,6 +839,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "init":
         print(json.dumps({"schema_version": database.migrate(), "database_path": str(database.path)}))
         return 0
+    if args.command == "usage":
+        from .usage import cli as usage_cli
+
+        return usage_cli.run(args, database)
     if args.command == "status":
         print(json.dumps(database.status()))
         return 0
