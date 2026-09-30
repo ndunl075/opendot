@@ -1,10 +1,10 @@
 # OpenDot status
 
-Milestone: **M0 (fork Alfred and clean it) — DONE** (2026-09-30). Next: M1.
+Milestone: **M1 (contract, providers, ChatGPT plan sign-in) — in progress** (M0 done 2026-09-30).
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
-- Collected after M0: 722 (minimum stays 650)
+- Collected after M0: 722; after M1 work: 905 (minimum stays 650)
 - Collected tests at baseline: **777**
 - Tests inside the deletable files listed in ARCHITECTURE.md §5: **127**
 - Minimum collected count from now on (baseline − deletable): **650**
@@ -22,6 +22,15 @@ Milestone: **M0 (fork Alfred and clean it) — DONE** (2026-09-30). Next: M1.
 - [x] 0.9 Codex CLI flags and model IDs (docs/decisions.md)
 - [x] 0.10 cross-vendor review into `docs/reviews/m0.md` (all findings fixed or accepted)
 
+- [x] 1.1 API contract (`api/`, `contract/`, `opendot contract export`)
+- [x] 1.2 `opendot mock-server [--check]`
+- [x] 1.3 provider interface, errors, registry (never switch on error)
+- [x] 1.4 `chatgpt_plan` provider (synthetic fixtures until the first real sign-in)
+- [x] 1.5 opt-in providers `openai_key`, `anthropic_key`, `openrouter`, `local` (all off by default)
+- [x] 1.6 `opendot measure` (`--dry-run` works without an account)
+- [ ] 1.7 cross-vendor review into `docs/reviews/m1.md`
+
 ## Needs you
 
-(nothing yet)
+1. **Live ChatGPT sign-in** (needs your Plus or Pro account and a browser): the `chatgpt_plan` provider has only been tested against a fake OAuth server and synthetic streaming fixtures. After signing in once, real recorded fixtures should replace the synthetic ones in `daemon/tests/providers/fixtures/chatgpt_plan/`. The `function_call` / `function_call_output` input items are unverified until then.
+2. **Run `opendot measure`** after signing in (a few minutes). It writes `docs/measurements.md` (caching, reasoning effort, structured output, model catalog incl. Astra, WebSocket cost, credit-spend check). Set a weekly OpenDot limit in ChatGPT Settings, Usage, and keep credit use off first.
