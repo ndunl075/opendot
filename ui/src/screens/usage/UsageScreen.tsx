@@ -35,7 +35,7 @@ export default function UsageScreen() {
   const resource = useResource(loadUsage);
   return <div className="screen-stack"><ScreenHeading title="Usage" description="See where your plan goes, and decide where it stops." />
     <Resource resource={resource}>{usage => <>
-      <Card className="section-card"><div className="section-heading"><div><h2>{usage.total_credits.toLocaleString()} estimated credits</h2><p className="muted">Last {usage.days} days · {usage.today_credits.toLocaleString()} today</p></div><a className="button button--secondary" href={safeExternalUrl(usage.manage_usage_url)} target="_blank" rel="noreferrer">Manage usage</a></div>
+      <Card className="section-card"><div className="section-heading"><div><h2>{usage.total_credits.toLocaleString()} estimated credits</h2><p className="muted">Last {usage.days} days · {usage.today_credits.toLocaleString()} today</p></div>{safeExternalUrl(usage.manage_usage_url) ? <a className="button button--secondary" href={safeExternalUrl(usage.manage_usage_url)} target="_blank" rel="noreferrer">Manage usage</a> : <p>The usage link is unavailable. Open ChatGPT Settings, Usage to manage your limit.</p>}</div>
         {/* Official OpenAI DevKit assets may be placed here when supplied under their license. */}
         <Badge>Using ChatGPT plan</Badge><p>{usage.plan_label}</p><p className="muted">Daily budget remaining: {usage.daily_budget_remaining == null ? "Not reported" : `${usage.daily_budget_remaining.toLocaleString()} credits`}. Keep credit use off in ChatGPT Settings, Usage.</p>
         {usage.paused_for_budget && <p role="status" className="notice">Plan requests are paused for the daily budget. Wait until the next day, or raise your daily budget below.</p>}

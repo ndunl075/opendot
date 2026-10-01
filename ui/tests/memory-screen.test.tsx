@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "../src/api/client";
@@ -8,7 +9,7 @@ const results: MemorySearchResult = { total: 1, items: [{ id: "memory-1", statem
 describe("Memory screen", () => {
   it("searches and corrects using contract requests", async () => {
     const call = vi.spyOn(api, "call").mockResolvedValue(results);
-    render(<MemoryScreen />);
+    render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.change(screen.getByLabelText("Search memories"), { target: { value: "meetings" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
@@ -23,7 +24,7 @@ describe("Memory screen", () => {
   });
   it("requires confirmation before forgetting a source", async () => {
     const call = vi.spyOn(api, "call").mockResolvedValue(results);
-    render(<MemoryScreen />);
+    render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.click(screen.getByRole("button", { name: "Forget memories" }));
     fireEvent.change(screen.getByLabelText("Forget by"), { target: { value: "source" } });
@@ -37,7 +38,7 @@ describe("Memory screen", () => {
   });
   it("confirms forgetting an individual memory and focuses Cancel", async () => {
     const call = vi.spyOn(api, "call").mockResolvedValue(results);
-    render(<MemoryScreen />);
+    render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: "Forget memory" }));
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     call.mockResolvedValueOnce({ forgotten_count: 1, scope: "item" });
@@ -47,7 +48,7 @@ describe("Memory screen", () => {
   });
   it("forgets by person only after review", async () => {
     const call = vi.spyOn(api, "call").mockResolvedValue(results);
-    render(<MemoryScreen />);
+    render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.click(screen.getByRole("button", { name: "Forget memories" }));
     fireEvent.change(screen.getByLabelText("Forget by"), { target: { value: "person" } });
@@ -61,7 +62,7 @@ describe("Memory screen", () => {
   });
   it("sends a reviewed time range as ISO timestamps", async () => {
     const call = vi.spyOn(api, "call").mockResolvedValue(results);
-    render(<MemoryScreen />);
+    render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.click(screen.getByRole("button", { name: "Forget memories" }));
     fireEvent.change(screen.getByLabelText("Forget by"), { target: { value: "time" } });
@@ -75,7 +76,7 @@ describe("Memory screen", () => {
   });
   it("explains unsupported memory", async () => {
     vi.spyOn(api, "call").mockRejectedValue(new ApiError(501, "not_implemented", "Unavailable"));
-    render(<MemoryScreen />);
+    render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     expect(await screen.findByText("Not available in this version yet")).toBeInTheDocument();
   });
 });

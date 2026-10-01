@@ -1,17 +1,24 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { api, createApi } from "../src/api/client";
+import { api, createApi, ApiError } from "../src/api/client";
 import type { PausedEvent } from "../src/api/types.gen";
 import { PausedBanner } from "../src/screens/chat/PausedBanner";
 
 const base = { type: "paused", conversation_id: "conversation", message_id: "message", seq: 2, message: "Paused by daemon", task_id: "task/a" } as const;
+const replay = vi.hoisted(() => ({ event: undefined as PausedEvent | undefined, confirm: true }));
+vi.mock("../src/api/stream", () => ({ ChatStream: class {
+  constructor(_id: string, private receive: (event: PausedEvent) => void) {}
+  connect() { if (replay.confirm && replay.event?.task_id) this.receive(replay.event); }
+  close() {}
+} }));
 const cases = [
   { reason: "task_budget", label: "Continue anyway", path: "/v1/tasks/task%2Fa/continue", warning: /may use more credits than the task budget/i, result: { task_id: "task/a", state: "queued", message: "Budget override accepted." }, shown: "Budget override accepted." },
   { reason: "top_tier_approval", label: "Allow top-tier model", path: "/v1/tasks/task%2Fa/approve-top-tier", warning: /uses more of your ChatGPT plan/i, result: { task_id: "task/a", state: "queued", message: "Top-tier permission saved." }, shown: "Top-tier permission saved." },
   { reason: "rate_limited", label: "I've raised my limit, resume", path: "/v1/companion/resume-plan-limit", warning: /limit has reset/i, result: { resumed_task_ids: ["task/a", "task/b"] }, shown: "Plan-limit pause cleared. 2 tasks resumed." },
 ] as const;
 function banner(reason: PausedEvent["reason"], task_id: string | null = base.task_id) {
+  replay.event = { ...base, reason, task_id };
   return <MemoryRouter><PausedBanner event={{ ...base, reason, task_id }} manageUsageUrl="https://chatgpt.com/settings/usage" /></MemoryRouter>;
 }
 
@@ -49,7 +56,7 @@ describe("explicit pause actions", () => {
   it.each(cases.slice(0, 2))("$reason cannot act without a task ID", ({ reason, label }) => {
     const call = vi.spyOn(api, "call");
     render(banner(reason, null));
-    expect(screen.getByRole("button", { name: label })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
     expect(screen.getByText(/task ID was not supplied/i)).toBeInTheDocument();
     expect(call).not.toHaveBeenCalled();
   });
@@ -83,4 +90,25 @@ describe("explicit pause actions", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("New result");
     expect(call).toHaveBeenLastCalledWith("task_approve_top_tier", { params: { task_id: "task/b" } });
   });
+});
+
+it("hides actions when a fresh replay cannot confirm that the task is paused", () => {
+  replay.confirm = false;
+  render(banner("task_budget"));
+  expect(screen.queryByRole("button", { name: "Continue anyway" })).not.toBeInTheDocument();
+  expect(screen.getByText(/could not confirm/i)).toBeInTheDocument();
+  replay.confirm = true;
+});
+
+it("makes Manage usage primary and resume secondary", () => {
+  render(banner("rate_limited"));
+  expect(screen.getByRole("link", { name: "Manage usage" })).toHaveClass("button--primary");
+  expect(screen.getByRole("button", { name: "I've raised my limit, resume" })).toHaveClass("button--secondary");
+});
+
+it("hides a stale task action after a conflict without replaying the mutation", async () => {
+  const call = vi.spyOn(api, "call").mockRejectedValue(new ApiError(409, "not_paused", "Task is no longer paused."));
+  render(banner("task_budget")); fireEvent.click(screen.getByRole("button", { name: "Continue anyway" }));
+  expect(await screen.findByText("Task is no longer paused.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Continue anyway" })).not.toBeInTheDocument(); expect(call).toHaveBeenCalledOnce();
 });

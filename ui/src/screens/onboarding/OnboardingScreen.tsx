@@ -21,7 +21,7 @@ function CompanionSetup({ state, onSave, pending }: { state: OnboardingState; on
   </form>;
 }
 
-function UsageAcknowledgement({ state, onAcknowledge, pending }: { state: OnboardingState; onAcknowledge: () => void; pending: boolean }) {
+function UsageAcknowledgement({ state, onAcknowledge, onCheck, pending }: { state: OnboardingState; onAcknowledge: () => void; onCheck: () => void; pending: boolean }) {
   const [weekly, setWeekly] = useState(false);
   const [creditsOff, setCreditsOff] = useState(false);
   return <div className="form-stack"><h2>Keep usage in your hands</h2>
@@ -30,8 +30,9 @@ function UsageAcknowledgement({ state, onAcknowledge, pending }: { state: Onboar
     {state.chatgpt.credits_enabled && <p className="notice" role="alert">Your account reports credit use is on. Turn it off in ChatGPT Settings before continuing.</p>}
     {safeExternalUrl(state.chatgpt.manage_usage_url) && <a href={safeExternalUrl(state.chatgpt.manage_usage_url)} target="_blank" rel="noreferrer">Manage usage</a>}
     <Checkbox label="I set a weekly OpenDot limit" checked={weekly} onChange={event => setWeekly(event.target.checked)} />
-    <Checkbox label="I kept ChatGPT credit use off" checked={creditsOff} onChange={event => setCreditsOff(event.target.checked)} />
-    <Button loading={pending} disabled={!weekly || !creditsOff} onClick={onAcknowledge}>Acknowledge usage settings</Button>
+    <Checkbox label="I kept ChatGPT credit use off" disabled={state.chatgpt.credits_enabled || pending} checked={!state.chatgpt.credits_enabled && creditsOff} onChange={event => setCreditsOff(event.target.checked)} />
+    <Button variant="secondary" loading={pending} onClick={() => { setCreditsOff(false); onCheck(); }}>Check again</Button>
+    <Button loading={pending} disabled={!weekly || !creditsOff || state.chatgpt.credits_enabled} onClick={onAcknowledge}>Acknowledge usage settings</Button>
   </div>;
 }
 
@@ -74,8 +75,13 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
     if (result) setData(result);
   }
   async function acknowledge() {
+    if (data?.chatgpt.credits_enabled) return;
     const result = await mutation.run(() => api.call("onboarding_acknowledge", { body: { weekly_limit_set: true, credits_off: true } }));
     if (result) setData(result);
+  }
+  async function checkCredits() {
+    const status = await mutation.run(() => api.call("chatgpt_status"));
+    if (status) setData(previous => previous ? { ...previous, chatgpt: status } : previous);
   }
   async function finish(openChat = false) {
     const result = await mutation.run(() => api.call("onboarding_complete"));
@@ -100,7 +106,7 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
           {expired && <p role="alert">This sign-in expired. Select Continue with ChatGPT to try again.</p>}
           {data.chatgpt.error && <p role="alert">{data.chatgpt.error}</p>}
         </div>}
-        {step === "weekly_limit" && <UsageAcknowledgement state={data} onAcknowledge={() => void acknowledge()} pending={mutation.pending} />}
+        {step === "weekly_limit" && <UsageAcknowledgement state={data} onAcknowledge={() => void acknowledge()} onCheck={() => void checkCredits()} pending={mutation.pending} />}
         {step === "connections" && <div className="form-stack"><h2>Connect your apps</h2><ConnectionPicker onRefresh={() => void resource.reload()} /><p className="muted">You can add or manage read-only accounts in Connections at any time.</p><Button onClick={() => void finish()} loading={mutation.pending}>Continue to introduction</Button></div>}
         {(step === "intro" || step === "done") && <div className="form-stack"><Avatar seed={data.avatar_seed ?? "open-fold-1"} /><h2>Hello, I’m {data.companion_name ?? "your companion"}</h2><p>{data.intro_message ?? "I can help you keep track of work, remember what matters, and ask before taking action. You can pause me at any time."}</p><Button loading={mutation.pending} onClick={() => { if (step === "done" || data.completed_steps.includes("done")) onComplete?.(); else void finish(true); }}>Open chat</Button></div>}
       </>}

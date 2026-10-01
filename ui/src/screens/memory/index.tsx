@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { api } from "../../api/client";
 import type { MemoryForgetRequest, MemorySearchQuery, MemorySearchResult } from "../../api/types.gen";
 import { Badge, Button, Card, Dialog, EmptyState, ErrorState, Input, Textarea } from "../../design/components";
 import { Resource, ScreenHeading, useMutation, useResource } from "../shared";
 import { ForgetMemories } from "./ForgetMemories";
+import { useHashTarget } from "../useHashTarget";
 
 type MemoryItem = MemorySearchResult["items"][number];
-function linkedMemoryId() {
-  try { return decodeURIComponent(window.location.hash.slice(1)); }
-  catch { return ""; }
-}
 function CorrectMemory({ item, onClose, onSaved }: { item: MemoryItem; onClose: () => void; onSaved: () => Promise<void> }) {
   const [statement, setStatement] = useState(item.statement);
   const mutation = useMutation();
@@ -36,10 +33,7 @@ export default function MemoryScreen() {
   const [correcting, setCorrecting] = useState<MemoryItem | null>(null);
   const [forgetting, setForgetting] = useState<MemoryForgetRequest | null>(null);
   const [notice, setNotice] = useState("");
-  const target = linkedMemoryId();
-  useEffect(() => {
-    if (target && !resource.loading) document.getElementById(target)?.scrollIntoView?.({ block: "center" });
-  }, [resource.loading, target]);
+  const target = useHashTarget(resource.data);
   function search(event: FormEvent) {
     event.preventDefault();
     setQuery({ q: q.trim(), limit: 100, ...(source.trim() ? { source: source.trim() } : {}), ...(person.trim() ? { person: person.trim() } : {}) });
@@ -53,7 +47,7 @@ export default function MemoryScreen() {
     <Resource resource={resource}>{data => <>
       {target && !data.items.some(item => item.id === target) && <p className="notice" role="status">The linked memory is not in these results. It may have been forgotten or replaced. Search by its words, source, or person to narrow the results.</p>}
       {data.total > data.items.length && <p className="notice">Showing {data.items.length} of {data.total} memories. Narrow your search to find more specific results.</p>}
-      {data.items.length ? <div className="screen-stack">{data.items.map(item => <Card key={item.id} id={item.id} role="article" aria-label={`Memory: ${item.statement}`} className="section-card">
+      {data.items.length ? <div className="screen-stack">{data.items.map(item => <Card key={item.id} id={item.id} tabIndex={-1} role="article" aria-label={`Memory: ${item.statement}`} className="section-card">
         <div className="section-heading"><Badge tone={item.confidence === "confirmed" ? "success" : "warning"}>{item.confidence === "confirmed" ? "Confirmed" : "Inferred · not confirmed"}</Badge><span className="muted">{item.source_label} · Source: {item.source}</span></div>
         <h2>{item.statement}</h2><p className="muted">Learned <time dateTime={item.learned_at}>{new Date(item.learned_at).toLocaleDateString()}</time>{item.people?.length ? ` · ${item.people.join(", ")}` : ""}</p>
         {item.superseded && <p className="muted">This memory has been replaced by a correction.</p>}

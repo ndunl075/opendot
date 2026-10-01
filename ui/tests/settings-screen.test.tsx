@@ -107,11 +107,15 @@ it("refreshes feature availability after an API key is saved", async () => {
   });
   render(<SettingsScreen />);
   expect(await screen.findByRole("switch", { name: "Use Claude as the reviewer" })).toBeDisabled();
+  const timezone = screen.getByLabelText("Quiet hours timezone");
+  fireEvent.change(timezone, { target: { value: "America/New_York" } });
   fireEvent.change(screen.getByLabelText("Anthropic API API key"), { target: { value: "test-user-entered-key" } });
   fireEvent.click(screen.getByRole("button", { name: "Save Anthropic API key" }));
   await waitFor(() => expect(screen.getByRole("switch", { name: "Use Claude as the reviewer" })).toBeEnabled());
   expect(screen.getByLabelText("Anthropic API API key")).toHaveValue("");
   expect(screen.getByText(/^Key saved\./)).toBeInTheDocument();
+  expect(screen.getByLabelText("Quiet hours timezone")).toBe(timezone);
+  expect(timezone).toHaveValue("America/New_York");
   expect(api.call).not.toHaveBeenCalledWith("feature_set", expect.anything());
 });
 

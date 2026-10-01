@@ -3,7 +3,7 @@ import { getApiToken } from "./client";
 import { socketUrl } from "./connection";
 
 type SocketFactory = (url: string, protocols: string[]) => WebSocket;
-export type StreamState = "connecting" | "connected" | "reconnecting" | "closed";
+export type StreamState = "connecting" | "connected" | "reconnecting" | "closed" | "unauthorized" | "failed";
 
 export class ChatStream {
   private socket?: WebSocket;
@@ -12,7 +12,8 @@ export class ChatStream {
   private disposed = false;
   private retry?: ReturnType<typeof setTimeout>;
   private attempts = 0;
-  private awaitingConversation = false;
+  private connectedAt = 0;
+  private watchdog?: ReturnType<typeof setTimeout>;
 
   constructor(
     private conversationId: string,
@@ -24,6 +25,7 @@ export class ChatStream {
 
   connect(): void {
     clearTimeout(this.retry);
+    clearTimeout(this.watchdog);
     this.disposed = false;
     this.ready = false;
     const previous = this.socket;
@@ -36,7 +38,8 @@ export class ChatStream {
     this.socket = socket;
     socket.addEventListener("open", () => {
       if (this.socket !== socket || this.disposed) return;
-      this.ready = true; this.attempts = 0; this.onState("connected");
+      clearTimeout(this.watchdog);
+      this.ready = true; this.connectedAt = Date.now(); this.onState("connected");
       if (this.conversationId) this.send({ type: "resume", conversation_id: this.conversationId, after_seq: this.lastSeq });
     });
     socket.addEventListener("message", (message) => {
@@ -44,27 +47,46 @@ export class ChatStream {
       let event: StreamEvent;
       try { event = JSON.parse(String(message.data)) as StreamEvent; } catch { return; }
       if (!event || typeof event !== "object" || typeof event.seq !== "number" || typeof event.conversation_id !== "string") return;
-      if (!this.conversationId && this.awaitingConversation && event.conversation_id) this.conversationId = event.conversation_id;
-      if (event.conversation_id !== this.conversationId) return;
+      if (!this.conversationId || event.conversation_id !== this.conversationId) return;
       if (event.seq > 0 && event.seq <= this.lastSeq) return;
       this.lastSeq = Math.max(this.lastSeq, event.seq);
       this.onEvent(event);
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (this.socket !== socket || this.disposed) return;
-      this.ready = false; this.onState("reconnecting");
-      this.retry = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.attempts++, 10000));
+      clearTimeout(this.watchdog);
+      if (this.ready && Date.now() - this.connectedAt >= 30000) this.attempts = 0;
+      this.ready = false;
+      if (event.code === 1008) { this.onState("unauthorized"); return; }
+      this.reconnect();
     });
+    this.watchdog = setTimeout(() => {
+      if (this.socket !== socket || this.disposed || this.ready) return;
+      this.socket = undefined; socket.close(); this.reconnect();
+    }, 15000);
     // A failed WebSocket emits close after error. Reconnect only there, once.
+  }
+
+  private reconnect(): void {
+    if (this.attempts >= 5) { this.onState("failed"); return; }
+    this.onState("reconnecting");
+    this.retry = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.attempts++, 10000));
+  }
+
+  /** Only bind IDs supplied by REST, never IDs from broadcast events. */
+  subscribe(conversationId: string): void {
+    if (this.conversationId !== conversationId) this.lastSeq = 0;
+    this.conversationId = conversationId;
+    if (conversationId) this.send({ type: "resume", conversation_id: conversationId, after_seq: this.lastSeq });
   }
 
   send(frame: ClientFrame): boolean {
     if (!this.ready || !this.socket) return false;
-    if (frame.type === "send") this.awaitingConversation = true;
+    if (frame.type === "send") return false; // Messages use REST to obtain their authoritative IDs.
     this.socket.send(JSON.stringify(frame));
     return true;
   }
 
-  close(): void { this.disposed = true; this.ready = false; clearTimeout(this.retry); this.socket?.close(); this.onState("closed"); }
+  close(): void { this.disposed = true; this.ready = false; clearTimeout(this.retry); clearTimeout(this.watchdog); this.socket?.close(); this.onState("closed"); }
   get sequence(): number { return this.lastSeq; }
 }

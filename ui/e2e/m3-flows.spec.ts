@@ -19,12 +19,14 @@ async function mockCompletedOnboarding(page: Page) {
 }
 
 async function mockApprovalStream(page: Page) {
+  const base = { conversation_id: "conv_e2e", message_id: "message_e2e" };
+  const approval = { id: "approval_e2e", ...base, title: "Draft a venue reply", action: "gmail.create_draft", status: "pending", created_at: "2026-09-30T12:00:00Z", payload: { body: "Hello" }, preview: "A draft will be saved, not sent.", review_note: "The reviewer confirmed this is a draft only.", review_verdict: "ok", rule_suggestion: "Always allow venue drafts" };
+  await page.route("**/v1/chat/messages", route => route.fulfill({ json: { ...base, message_id: "user_e2e", stream_path: "/v1/chat/stream" } }));
+  await page.route("**/v1/approvals/approval_e2e", route => route.fulfill({ json: approval }));
   await page.routeWebSocket("**/v1/chat/stream", socket => {
     socket.onMessage(message => {
       const frame = JSON.parse(String(message));
-      if (frame.type !== "send") return;
-      const base = { conversation_id: "conv_e2e", message_id: "message_e2e" };
-      const approval = { id: "approval_e2e", ...base, title: "Draft a venue reply", action: "gmail.create_draft", status: "pending", created_at: "2026-09-30T12:00:00Z", payload: { body: "Hello" }, preview: "A draft will be saved, not sent.", review_note: "The reviewer confirmed this is a draft only.", review_verdict: "ok", rule_suggestion: "Always allow venue drafts" };
+      if (frame.type !== "resume" || frame.conversation_id !== base.conversation_id) return;
       const events = [
         { type: "message_started", seq: 1, ...base },
         { type: "text_delta", seq: 2, text: "I can draft that ", ...base },
@@ -124,7 +126,7 @@ test("chat streams an approval and sends approve, deny, and always-allow decisio
   await expect(fresh).toBeVisible();
   await fresh.getByRole("button", { name: "Always allow this" }).click();
   const always = page.waitForRequest(request => request.url().includes("/always-allow") && request.method() === "POST");
-  await page.getByRole("button", { name: "Create rule" }).click();
+  await page.getByRole("button", { name: "Approve and create rule" }).click();
   await always;
   await expect(fresh).toContainText("Rule created for future drafts.");
   expect(errors).toEqual([]);

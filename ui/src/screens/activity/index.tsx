@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../../api/client";
 import { Badge, Button, Card, EmptyState, ErrorState } from "../../design/components";
 import { Resource, ScreenHeading, useMutation, useResource } from "../shared";
@@ -30,8 +31,8 @@ export default function ActivityScreen() {
         <div className="section-heading"><time dateTime={item.at}>{new Date(item.at).toLocaleString()}</time><Badge>{item.kind.replaceAll("_", " ")}</Badge></div>
         <h2>{item.title}</h2><p>{item.why}</p>
         {item.credits !== undefined && <p className="muted">{item.credits.toLocaleString()} estimated credits</p>}
-        <div className="actions">{item.rule_id ? <a href={`/rules#${encodeURIComponent(item.rule_id)}`}>Rule: {item.rule_name ?? item.rule_id}</a> : <span className="muted">No rule recorded</span>}
-          {item.memory_ids?.map(id => <a key={id} href={`/memory#${encodeURIComponent(id)}`}>Memory {id}</a>)}
+        <div className="actions">{item.rule_id ? <Link to={`/rules#${encodeURIComponent(item.rule_id)}`}>Rule: {item.rule_name ?? item.rule_id}</Link> : <span className="muted">No rule recorded</span>}
+          {item.memory_ids?.map(id => <Link key={id} to={`/memory#${encodeURIComponent(id)}`}>Memory {id}</Link>)}
         </div>
         {item.approval_id ? <ApprovalReview key={item.approval_id} id={item.approval_id} /> : item.reviewer_note ? <details><summary>Reviewer note</summary><p>{item.reviewer_note}</p></details> : <p className="muted">No reviewer note recorded</p>}
         {!item.memory_ids?.length && <p className="muted">No memories recorded</p>}

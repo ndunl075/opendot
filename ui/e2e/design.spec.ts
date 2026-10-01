@@ -81,7 +81,9 @@ test("screens fit 720px in both themes without runtime errors", async ({ page },
 
 test("mobile navigation is keyboard usable and fits a narrow screen", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 740 });
-  await page.goto("/");
+  // Exercise tab order on a settled route; the setup redirect is tested above.
+  await page.goto("/onboarding");
+  await expect(page.getByRole("button", { name: "Continue to introduction" })).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
   await page.keyboard.press("Enter");

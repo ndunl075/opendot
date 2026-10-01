@@ -4,6 +4,7 @@ import type { Rule } from "../../api/types.gen";
 import { Badge, Button, Card, Dialog, EmptyState, ErrorState } from "../../design/components";
 import { Resource, ScreenHeading, useMutation, useResource } from "../shared";
 import { RuleEditor, behaviors } from "./RuleEditor";
+import { useHashTarget } from "../useHashTarget";
 
 const loadRules = () => api.call("rules_list");
 function DeleteRule({ rule, onClose, onDeleted }: { rule: Rule; onClose: () => void; onDeleted: () => Promise<void> }) {
@@ -21,6 +22,7 @@ function DeleteRule({ rule, onClose, onDeleted }: { rule: Rule; onClose: () => v
 }
 export default function RulesScreen() {
   const resource = useResource(loadRules);
+  useHashTarget(resource.data);
   const mutation = useMutation();
   const [editor, setEditor] = useState<Rule | "new" | null>(null);
   const [deleting, setDeleting] = useState<Rule | null>(null);
@@ -28,7 +30,7 @@ export default function RulesScreen() {
     <ScreenHeading title="Rules" description="Decide when your companion can act and when it should ask." action={<Button onClick={() => setEditor("new")}>Create rule</Button>} />
     <p className="notice">Core safety rules always apply. Spending money, deleting data in other apps, and security or credential changes stay with you.</p>
     {mutation.notice && <p role="status">{mutation.notice}</p>}
-    <Resource resource={resource}>{data => data.rules.length ? <div className="screen-stack">{data.rules.map(rule => <Card key={rule.id} id={rule.id} role="article" aria-label={rule.name} className="section-card">
+    <Resource resource={resource}>{data => data.rules.length ? <div className="screen-stack">{data.rules.map(rule => <Card key={rule.id} id={rule.id} tabIndex={-1} role="article" aria-label={rule.name} className="section-card">
       <div className="section-heading"><h2>{rule.name}</h2><Badge tone={rule.core_deny ? "warning" : "neutral"}>{rule.locked || rule.core_deny ? "Locked · core safety" : rule.enabled === false ? "Disabled" : "Active"}</Badge></div>
       {rule.core_deny
         ? <p><strong>Hand off to me</strong> — This action is prohibited for the companion. No rule or approval can permit it.</p>

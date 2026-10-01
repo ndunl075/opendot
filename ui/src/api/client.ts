@@ -20,6 +20,14 @@ export class ApiError extends Error {
   }
 }
 
+export function isStaleItemError(error: unknown): error is ApiError {
+  return error instanceof ApiError && [404, 409, 410].includes(error.status);
+}
+
+export function isSessionError(error: unknown): error is ApiError {
+  return error instanceof ApiError && (error.status === 401 || error.status === 1008 || error.code === "unauthorized");
+}
+
 function endpointPath(path: string, params: PathParams = {}): string {
   return path.replace(/\{([^}]+)\}/g, (_match, name: string) => {
     const value = params[name];

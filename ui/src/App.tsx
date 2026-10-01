@@ -51,9 +51,16 @@ function ConnectionStatus() {
   const [status, setStatus] = useState("Checking daemon");
   useEffect(() => {
     let active = true;
-    api.call("health").then(health => { if (active) setStatus(health.status === "ok" ? "Daemon connected" : "Daemon needs attention"); })
-      .catch(() => { if (active) setStatus("Daemon unavailable"); });
-    return () => { active = false; };
+    let generation = 0;
+    const check = () => {
+      const request = ++generation;
+      api.call("health").then(health => { if (active && request === generation) setStatus(health.status === "ok" ? "Daemon connected" : "Daemon needs attention"); })
+        .catch(error => { if (active && request === generation) setStatus(error instanceof ApiError && error.status === 401 ? "Daemon unauthorized — your session expired" : "Daemon unreachable"); });
+    };
+    check();
+    const timer = window.setInterval(check, 30000);
+    window.addEventListener("focus", check);
+    return () => { active = false; clearInterval(timer); window.removeEventListener("focus", check); };
   }, []);
   return <p className="connection-status" role="status"><Cable size={14} aria-hidden="true" />{status}</p>;
 }
@@ -95,7 +102,7 @@ export function App() {
     </div>
       <main id="main" ref={main} tabIndex={-1} className="main-content">{location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !["/about", "/onboarding"].includes(location.pathname) ? <Navigate to="/onboarding" replace /> : <Routes>
         <Route path="/" element={<Navigate to="/chat" replace />} />
-        <Route path="/onboarding" element={<OnboardingScreen onComplete={() => { void onboarding.reload(); navigate("/chat"); }} />} />
+        <Route path="/onboarding" element={<OnboardingScreen onComplete={async () => { await onboarding.reload(); navigate("/chat"); }} />} />
         <Route path="/chat" element={<ChatScreen />} />
         <Route path="/companion" element={<CompanionScreen />} />
         <Route path="/activity" element={<ActivityScreen />} />

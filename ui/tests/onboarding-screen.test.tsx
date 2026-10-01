@@ -7,6 +7,20 @@ import OnboardingScreen from "../src/screens/onboarding/OnboardingScreen";
 const initial: OnboardingState = { current_step: "chatgpt", completed_steps: ["companion"], companion_name: "Moss", avatar_seed: "moss", chatgpt: { state: "signed_out", eligible: false, plan: "unknown", manage_usage_url: "https://chatgpt.com/#settings/Usage" } };
 
 describe("Onboarding screen", () => {
+  it("blocks credit acknowledgement while credits are on and rechecks status", async () => {
+    const ready: OnboardingState = { ...initial, current_step: "weekly_limit", chatgpt: { ...initial.chatgpt, state: "signed_in", eligible: true, plan: "eligible_plus", credits_enabled: true } };
+    const call = vi.spyOn(api, "call").mockImplementation(async name => (name === "chatgpt_status" ? { ...ready.chatgpt, credits_enabled: false } : ready) as never);
+    render(<OnboardingScreen />);
+    const credits = await screen.findByRole("checkbox", { name: "I kept ChatGPT credit use off" });
+    expect(credits).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "I set a weekly OpenDot limit" }));
+    expect(screen.getByRole("button", { name: "Acknowledge usage settings" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(credits).toBeEnabled()); expect(credits).not.toBeChecked();
+    expect(call).toHaveBeenCalledWith("chatgpt_status");
+    fireEvent.click(credits); expect(screen.getByRole("button", { name: "Acknowledge usage settings" })).toBeEnabled();
+    expect(call).not.toHaveBeenCalledWith("onboarding_acknowledge", expect.anything());
+  });
   it("saves the chosen name and avatar through the onboarding contract", async () => {
     const call = vi.spyOn(api, "call").mockResolvedValue({ ...initial, current_step: "companion" });
     render(<OnboardingScreen />);

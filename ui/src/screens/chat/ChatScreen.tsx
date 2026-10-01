@@ -47,18 +47,39 @@ function ConversationPanel({ conversationId, manageUsageUrl, onChanged }: { conv
   const [state, setState] = useState<StreamState>("connecting");
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [streamingId, setStreamingId] = useState<string>();
+  const [announcement, setAnnouncement] = useState("");
+  const [interrupted, setInterrupted] = useState(false);
+  const sending = useRef(false);
+  const alive = useRef(false);
+  const approvalRequests = useRef(new Map<string, number>());
   const stream = useRef<ChatStream | null>(null);
   const actualId = useRef(conversationId);
   const transcript = useRef<HTMLDivElement>(null);
   const following = useRef(true);
 
+  const refreshApproval = useCallback(async (id: string) => {
+    const revision = (approvalRequests.current.get(id) ?? 0) + 1;
+    approvalRequests.current.set(id, revision);
+    try {
+      const item = await api.call("approval_get", { params: { approval_id: id } });
+      if (alive.current && approvalRequests.current.get(id) === revision) setApprovals(items => ({ ...items, [id]: item }));
+    } catch (cause) {
+      if (alive.current && approvalRequests.current.get(id) === revision) {
+        setApprovalError(cause);
+        setApprovals(items => { const next = { ...items }; delete next[id]; return next; });
+      }
+    }
+  }, []);
+
   const receive = useCallback((event: StreamEvent) => {
-    actualId.current = event.conversation_id;
-    if (event.type === "error") { setError(new ApiError(400, event.code, event.message)); setBusy(false); return; }
-    if (event.type === "paused") { setPaused(event); setBusy(false); onChanged(); return; }
-    if (event.type === "approval_required") { setApprovals(items => ({ ...items, [event.approval.id]: event.approval })); setBusy(false); }
-    if (event.type === "message_started") { setBusy(true); setPaused(undefined); setError(undefined); }
-    if (event.type === "completed") { setBusy(false); onChanged(); }
+    if (!actualId.current || event.conversation_id !== actualId.current) return;
+    setInterrupted(false);
+    if (event.type === "error") { setError(new ApiError(400, event.code, event.message)); setBusy(false); setStreamingId(undefined); return; }
+    if (event.type === "paused") { setPaused(event); setBusy(false); setStreamingId(undefined); onChanged(); return; }
+    if (event.type === "approval_required") { void refreshApproval(event.approval.id); setBusy(false); setStreamingId(undefined); }
+    if (event.type === "message_started") { setBusy(true); setStreamingId(event.message_id); setAnnouncement(""); setPaused(undefined); setPreviouslyPaused(false); setError(undefined); }
+    if (event.type === "completed") { setBusy(false); setStreamingId(undefined); setAnnouncement(event.text); onChanged(); }
     setMessages(items => {
       const found = items.find(item => item.id === event.message_id);
       const message: Message = found ?? { id: event.message_id, role: "assistant", created_at: new Date().toISOString(), text: "" };
@@ -72,59 +93,87 @@ function ConversationPanel({ conversationId, manageUsageUrl, onChanged }: { conv
       }
       return found ? items.map(item => item.id === next.id ? next : item) : [...items, next];
     });
-  }, [onChanged]);
+  }, [onChanged, refreshApproval]);
 
   useEffect(() => {
     let active = true;
-    const transport = new ChatStream(conversationId ?? "", receive, undefined, undefined, value => { if (active) setState(value); });
+    alive.current = true;
+    const requests = approvalRequests.current;
+    const transport = new ChatStream(actualId.current ?? "", receive, undefined, undefined, value => {
+      if (!active) return;
+      setState(value);
+      if (value === "reconnecting" || value === "failed" || value === "unauthorized") {
+        setBusy(false); setStreamingId(undefined); setInterrupted(true);
+      }
+      if (value === "unauthorized") setError(new ApiError(1008, "unauthorized", "Your session expired"));
+      if (value === "failed") setError(new Error("The chat connection could not be restored. Try connecting again."));
+    });
     stream.current = transport;
     async function start() {
       // Let StrictMode's initial cleanup cancel before creating a real socket.
       await Promise.resolve();
       if (!active) return;
-      setError(undefined); setLoading(!!conversationId);
+      setError(undefined); setApprovalError(undefined); setLoading(!!actualId.current);
       try {
-        if (conversationId) {
-          const conversation = await api.call("chat_conversation", { params: { conversation_id: conversationId } });
+        if (actualId.current) {
+          const conversation = await api.call("chat_conversation", { params: { conversation_id: actualId.current } });
           if (!active) return;
           setMessages(conversation.messages); setPreviouslyPaused(conversation.paused ?? false);
           const ids = [...new Set(conversation.messages.flatMap(message => message.approval_id ? [message.approval_id] : []))];
-          for (const id of ids) {
-            void api.call("approval_get", { params: { approval_id: id } }).then(item => {
-              if (active) setApprovals(previous => ({ ...previous, [id]: previous[id] ?? item }));
-            }).catch(cause => { if (active) setApprovalError(cause); });
-          }
+          for (const id of ids) void refreshApproval(id);
         }
         if (active) transport.connect();
       } catch (cause) { if (active) setError(cause); }
       finally { if (active) setLoading(false); }
     }
     void start();
-    return () => { active = false; transport.close(); stream.current = null; };
-  }, [conversationId, receive, attempt]);
+    return () => {
+      active = false; alive.current = false;
+      for (const [id, revision] of requests) requests.set(id, revision + 1);
+      transport.close(); stream.current = null;
+    };
+  }, [conversationId, receive, attempt, refreshApproval]);
+
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setTimeout(() => { setBusy(false); setStreamingId(undefined); setInterrupted(true); }, 30000);
+    return () => clearTimeout(timer);
+  }, [busy, messages]);
 
   useEffect(() => { if (following.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight; }, [messages, approvals, paused]);
-  function send() {
+  async function send() {
     const value = text.trim();
-    if (!value || busy) return;
-    const sent = stream.current?.send({ type: "send", conversation_id: actualId.current, text: value });
-    if (!sent) { setError(new Error("The chat connection is not ready.")); return; }
-    setMessages(items => [...items, { id: crypto.randomUUID(), role: "user", text: value, created_at: new Date().toISOString() }]);
-    setText(""); setBusy(true); setError(undefined); following.current = true;
+    if (!value || busy || sending.current || state !== "connected" || loading) return;
+    sending.current = true; setBusy(true); setError(undefined); setInterrupted(false);
+    try {
+      const accepted = await api.call("chat_send", { body: { conversation_id: actualId.current, text: value } });
+      if (!alive.current) return;
+      actualId.current = accepted.conversation_id;
+      setMessages(items => [...items, { id: accepted.message_id, role: "user", text: value, created_at: new Date().toISOString() }]);
+      setText(current => current.trim() === value ? "" : current); following.current = true;
+      stream.current?.subscribe(accepted.conversation_id);
+      onChanged();
+    } catch (cause) { if (alive.current) { setError(cause); setBusy(false); } }
+    finally { sending.current = false; }
   }
   return <section className="conversation-panel" aria-label="Current conversation">
-    <div className="stream-status"><Badge tone={state === "connected" ? "success" : "warning"}>{state === "connected" ? "Connected" : state === "reconnecting" ? "Reconnecting — resuming replies" : state === "closed" ? "Disconnected" : "Connecting"}</Badge><span className="sr-only" role="status">{busy ? "Companion is responding" : state}</span></div>
+    <div className="stream-status"><Badge tone={state === "connected" ? "success" : "warning"}>{state === "connected" ? "Connected" : state === "reconnecting" ? "Reconnecting — resuming replies" : state === "unauthorized" ? "Session expired" : state === "closed" || state === "failed" ? "Disconnected" : "Connecting"}</Badge><span className="sr-only" role="status">{busy ? "Companion is responding" : state}</span></div>
     {state === "reconnecting" && <p className="notice">Connection lost. OpenDot is reconnecting and requesting missed replies. Messages are never automatically sent twice.</p>}
-    {error != null && <ErrorState error={error} onRetry={() => setAttempt(value => value + 1)} />}
+    {interrupted && state !== "unauthorized" && <p className="notice">The reply was interrupted or has not arrived. Check for a reply before sending again. <Button variant="secondary" onClick={() => { setBusy(false); setInterrupted(false); setAttempt(value => value + 1); }}>Retry connection</Button></p>}
+    {error != null && <ErrorState error={error} onRetry={() => { setBusy(false); setAttempt(value => value + 1); }} />}
     {approvalError != null && <ErrorState error={approvalError} onRetry={() => setAttempt(value => value + 1)} />}
     {paused ? <PausedBanner event={paused} manageUsageUrl={manageUsageUrl} /> : previouslyPaused && <p className="notice" role="alert">This conversation is paused. The saved history does not include its pause reason. <Link to="/companion">Review your companion</Link> and <Link to="/usage">budgets</Link>.</p>}
-    <div ref={transcript} className="transcript" role="log" aria-label="Conversation messages" aria-live="polite" aria-relevant="additions text" onScroll={event => { const el = event.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
+    <div className="sr-only" role="status" aria-label="Completed reply" aria-live="polite" aria-atomic="true">{announcement}</div>
+    <div ref={transcript} className="transcript" role="log" aria-label="Conversation messages" aria-live="off" onScroll={event => { const el = event.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
       {loading ? <Skeleton className="screen-skeleton" label="Loading conversation" /> : !messages.length && <EmptyState title="What’s on your mind?" description="Ask a question, think through a task, or make a little room in your day. Actions wait for your permission." icon={<MessageSquare size={28} />} />}
-      {messages.map(message => <article key={message.id} className={`chat-message chat-message--${message.role}`} aria-label={message.role === "user" ? "Your message" : "Companion reply"}>
+      {messages.map(message => <article key={message.id} className={`chat-message chat-message--${message.role}`} aria-busy={message.id === streamingId} aria-label={message.role === "user" ? "Your message" : "Companion reply"}>
         <p className="message-author">{message.role === "user" ? "You" : "Companion"}</p><p className="message-text">{message.text || (busy ? "Thinking…" : "")}</p>
         {message.tool_calls?.map(call => <p className="tool-record" key={call.call_id}><Badge>{call.status.replaceAll("_", " ")}</Badge> {call.summary}</p>)}
         {message.role === "assistant" && <UsageStamp model={message.usage?.model ?? "Model not reported"} effort={message.usage?.effort ?? "Unreported"} credits={message.usage?.credits ?? null} />}
-        {message.approval_id && approvals[message.approval_id] && <ApprovalCard approval={approvals[message.approval_id]} onDecision={result => setApprovals(items => ({ ...items, [result.approval.id]: result.approval }))} />}
+        {message.approval_id && approvals[message.approval_id] && <ApprovalCard approval={approvals[message.approval_id]} onDecision={result => {
+          const id = result.approval.id; approvalRequests.current.set(id, (approvalRequests.current.get(id) ?? 0) + 1);
+          setApprovals(items => ({ ...items, [id]: result.approval }));
+        }} />}
       </article>)}
     </div>
     <form className="chat-composer" onSubmit={event => { event.preventDefault(); send(); }}>

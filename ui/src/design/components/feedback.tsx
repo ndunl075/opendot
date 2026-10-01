@@ -1,6 +1,6 @@
 import { cloneElement, useEffect, useId, useState, type HTMLAttributes, type ReactElement, type ReactNode, type ButtonHTMLAttributes } from "react";
 import { Archive, CircleAlert, Info, X } from "lucide-react";
-import { ApiError } from "../../api/client";
+import { ApiError, isSessionError, isStaleItemError } from "../../api/client";
 import { Button, IconButton } from "./primitives";
 
 export interface EmptyStateProps { title: string; description: string; icon?: ReactNode; action?: ReactNode }
@@ -11,11 +11,13 @@ export function EmptyState({ title, description, icon = <Archive size={26} />, a
 export interface ErrorStateProps { error: unknown; onRetry?: () => void }
 export function ErrorState({ error, onRetry }: ErrorStateProps) {
   const unavailable = error instanceof ApiError && error.code === "not_implemented";
+  const expired = isSessionError(error);
+  const noRetry = expired || isStaleItemError(error) || (error instanceof ApiError && error.status === 422);
   return <div className={`error-state ${unavailable ? "error-state--unavailable" : ""}`} role={unavailable ? "status" : "alert"}>
-    <EmptyState title={unavailable ? "Not available in this version yet" : "Something went wrong"}
-      description={unavailable ? "This feature is not supported by your version of OpenDot. You can keep using the rest of the app." : "OpenDot could not complete this request. Please try again."}
+    <EmptyState title={expired ? "Your session expired" : unavailable ? "Not available in this version yet" : "Something went wrong"}
+      description={expired ? (window.__OPENDOT__ ? "Restart OpenDot" : "Sign in again to reconnect to your daemon.") : unavailable ? "This feature is not supported by your version of OpenDot. You can keep using the rest of the app." : error instanceof Error ? error.message : "OpenDot could not complete this request. Please try again."}
       icon={unavailable ? <Info size={26} /> : <CircleAlert size={26} />}
-      action={!unavailable && onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : undefined} />
+      action={expired && !window.__OPENDOT__ ? <a href="/login">Sign in</a> : !unavailable && !noRetry && onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : undefined} />
   </div>;
 }
 

@@ -40,7 +40,10 @@ describe("approval decisions", () => {
     const call = vi.spyOn(api, "call").mockResolvedValue({ approval, executed: false, created_rule_id: "r1" });
     card(); fireEvent.click(screen.getByRole("button", { name: "Always allow this" }));
     expect(call).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Approve this action now and allow it automatically next time");
+    expect(screen.getByRole("dialog")).toHaveTextContent(approval.action);
+    expect(screen.getByRole("dialog")).toHaveTextContent(approval.preview);
+    fireEvent.click(screen.getByRole("button", { name: "Approve and create rule" }));
     await waitFor(() => expect(call).toHaveBeenCalledWith("approval_always_allow", { params: { approval_id: "approval-1" }, body: { behavior: "auto_if_preapproved" } }));
     expect(await screen.findByRole("link", { name: "View created rule" })).toHaveAttribute("href", "/rules#r1");
   });
@@ -50,6 +53,29 @@ describe("approval decisions", () => {
     expect(await screen.findByText("Not available in this version yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
   });
+});
+
+it("requires confirmation quoting the block reviewer note", async () => {
+  const call = vi.spyOn(api, "call").mockResolvedValue({ approval: { ...approval, status: "approved" }, executed: true });
+  render(<MemoryRouter><ApprovalCard approval={{ ...approval, review_verdict: "block", review_note: "Recipient is outside your organization." }} onDecision={vi.fn()} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+  expect(call).not.toHaveBeenCalled();
+  const dialog = screen.getByRole("dialog"); expect(dialog).toHaveTextContent("Recipient is outside your organization.");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Approve despite review" }));
+  await waitFor(() => expect(call).toHaveBeenCalledOnce());
+});
+
+it.each(["approved", "edited", "denied", "expired"] as const)("never offers actions for %s approvals", status => {
+  render(<MemoryRouter><ApprovalCard approval={{ ...approval, status }} onDecision={vi.fn()} /></MemoryRouter>);
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
+it.each([404, 409, 410])("refreshes after a %s decision conflict and removes stale actions", async status => {
+  const call = vi.spyOn(api, "call").mockRejectedValueOnce(new ApiError(status, "approval_not_pending", "Approval already decided.")).mockResolvedValue({ ...approval, status: "approved" });
+  card(); fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+  expect(await screen.findByText("Approval already decided.")).toBeVisible();
+  await waitFor(() => expect(call).toHaveBeenCalledWith("approval_get", { params: { approval_id: approval.id } }));
+  expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
 });
 
 it.each<[PausedEvent["reason"], string]>([
