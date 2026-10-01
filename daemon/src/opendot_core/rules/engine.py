@@ -61,6 +61,8 @@ class ToolIntent(BaseModel):
     sensitivity: str
     cost_credits: float = 0.0
     user_preapproved: bool = False
+    reaches_people: bool = False
+    """Declared by the tool executor: the action sends, posts or publishes to other people."""
 
 
 class Rule(BaseModel):
@@ -150,7 +152,7 @@ class RuleEngine:
             )
         # A satisfied auto_if_preapproved resolves to plain auto, so callers only see auto, ask or handoff.
         behavior = Behavior.AUTO if rule.behavior is Behavior.AUTO_IF_PREAPPROVED else rule.behavior
-        if behavior is Behavior.AUTO and is_send_or_post(intent.tool, intent.action):
+        if behavior is Behavior.AUTO and (intent.reaches_people or is_send_or_post(intent.tool, intent.action)):
             # Section 10: sending, posting and publishing ask every time; no rule relaxes that.
             return Decision(
                 behavior=Behavior.ASK,

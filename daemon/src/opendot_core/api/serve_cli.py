@@ -81,13 +81,17 @@ def build_serve_app(database: Database, *, token: str, ui_dist: Path | None, reg
 
         registry = ProviderRegistry(ProviderSettings())
         registry.register(ChatGPTPlanProvider())
-    runtime = build_agent_runtime(database, registry, tools if tools is not None else NoTools(), api_token=token)
+    if tools is None:
+        from ..agent.mcp_tools import McpTools
+
+        tools = McpTools(database.path)
+    runtime = build_agent_runtime(database, registry, tools, api_token=token, actor=getattr(tools, "actor", "owner"))
     runtime.loop.resume_all()
     return create_web_app(runtime.app, token=token, ui_dist=ui_dist), runtime
 
 
 class NoTools:
-    """Until the connector tools are wired in (M4 task 4.4), chat runs with no tools."""
+    """A tool executor with no tools (tests, or a daemon started with tools turned off)."""
 
     actor = "owner"
 
