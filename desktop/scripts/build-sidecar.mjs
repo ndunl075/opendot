@@ -40,6 +40,7 @@ const args = [
   "--workpath", join(work, "build"),
   "--specpath", work,
   "--collect-all", "opendot_core",
+  "--collect-all", "sqlite_vec",
   "--collect-submodules", "keyring",
   "--collect-submodules", "uvicorn",
   "--add-data", `${uiDist}${delimiter === ";" ? ";" : ":"}ui`,
@@ -54,6 +55,8 @@ mkdirSync(binaries, { recursive: true });
 const target = join(binaries, `opendot-daemon-${triple}${isWindows ? ".exe" : ""}`);
 copyFileSync(built, target);
 
-// Smoke test: the frozen daemon must start and answer --help.
-execFileSync(target, ["--help"], { stdio: "ignore" });
+// Smoke test: the frozen daemon must open a database (migrations, the sqlite-vec extension) and
+// build the serving app. --help alone would miss native modules PyInstaller failed to collect.
+const smokeDb = join(work, "smoke.db");
+execFileSync(target, ["--db", smokeDb, "init"], { stdio: "inherit" });
 console.log(`sidecar ready: ${target}`);
