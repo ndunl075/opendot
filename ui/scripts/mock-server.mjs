@@ -55,7 +55,7 @@ if (!uv) {
   console.error("Unable to find uv. Set UV to its executable path or install uv so it is available on PATH.");
   process.exitCode = 1;
 } else {
-  const child = spawn(uv, ["run", "--project", "../daemon", "opendot", "mock-server"], {
+  const child = spawn(uv, ["run", "--project", "../daemon", "python", path.join(uiRoot, "scripts", "mock_app.py")], {
     cwd: uiRoot,
     stdio: "inherit"
   });

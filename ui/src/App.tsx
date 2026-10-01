@@ -1,21 +1,33 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, ArrowUpRight, BookOpen, Cable, ChevronRight, Gauge, Info, Menu, MessageSquare, PanelTop, Settings, ShieldCheck, SlidersHorizontal, Sprout, X, type LucideIcon } from "lucide-react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { api } from "./api/client";
+import { Activity, BookOpen, Cable, ChevronRight, Gauge, Info, Menu, MessageSquare, PanelTop, Settings, ShieldCheck, SlidersHorizontal, Sprout, X, type LucideIcon } from "lucide-react";
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { api, ApiError } from "./api/client";
 import { Avatar } from "./design/avatar";
-import { Badge, Card, EmptyState, IconButton, Select } from "./design/components";
+import { Card, EmptyState, ErrorState, IconButton, Select, Skeleton } from "./design/components";
 import { useTheme, type ThemePreference } from "./design/theme";
+import { useResource } from "./screens/shared";
+import OnboardingScreen from "./screens/onboarding/OnboardingScreen";
+import ChatScreen from "./screens/chat/ChatScreen";
+import CompanionScreen from "./screens/companion/CompanionScreen";
+import ActivityScreen from "./screens/activity";
+import RulesScreen from "./screens/rules";
+import MemoryScreen from "./screens/memory";
+import ConnectionsScreen from "./screens/connections/ConnectionsScreen";
+import UsageScreen from "./screens/usage/UsageScreen";
+import SettingsScreen from "./screens/settings/SettingsScreen";
 
-const screens: { path: string; label: string; icon: LucideIcon; intro: string; empty: string; detail: string }[] = [
-  { path: "/onboarding", label: "Onboarding", icon: Sprout, intro: "A thoughtful beginning.", empty: "Make yourself at home", detail: "Companion setup will be available here in an upcoming version." },
-  { path: "/chat", label: "Chat", icon: MessageSquare, intro: "A little space to think things through.", empty: "Your conversations will start here", detail: "Chat is being prepared. Soon, you’ll be able to talk things through with your companion and review actions before they happen." },
-  { path: "/companion", label: "Companion", icon: PanelTop, intro: "A companion that works on your terms.", empty: "A space for your companion", detail: "Your companion’s profile and work will appear here when this screen is ready." },
-  { path: "/activity", label: "Activity", icon: Activity, intro: "Understand what happened, and why.", empty: "The story behind each action", detail: "An activity timeline with the context behind your companion’s work is coming here." },
-  { path: "/rules", label: "Rules", icon: ShieldCheck, intro: "You decide where the boundaries are.", empty: "Your rules, clearly written", detail: "You’ll be able to review and manage your companion’s rules here in an upcoming version." },
-  { path: "/memory", label: "Memory", icon: BookOpen, intro: "Remember what matters. Let go of what doesn’t.", empty: "A place for what you share", detail: "Memory search, corrections, and controls to forget information are coming here." },
-  { path: "/connections", label: "Connections", icon: Cable, intro: "Bring your tools together, with your permission.", empty: "Your connections belong here", detail: "Optional account connections and their health will be available here when this screen is ready." },
-  { path: "/usage", label: "Usage", icon: Gauge, intro: "A clear view of what your companion uses.", empty: "Usage you can understand", detail: "Usage details and budget controls are coming here. No usage data is available on this screen yet." },
-  { path: "/settings", label: "Settings", icon: SlidersHorizontal, intro: "Make OpenDot fit your day.", empty: "The details, on your terms", detail: "Your companion’s preferences and controls will be available here in an upcoming version." },
+const loadOnboarding = () => api.call("onboarding_get");
+
+const screens: { path: string; label: string; icon: LucideIcon }[] = [
+  { path: "/onboarding", label: "Onboarding", icon: Sprout },
+  { path: "/chat", label: "Chat", icon: MessageSquare },
+  { path: "/companion", label: "Companion", icon: PanelTop },
+  { path: "/activity", label: "Activity", icon: Activity },
+  { path: "/rules", label: "Rules", icon: ShieldCheck },
+  { path: "/memory", label: "Memory", icon: BookOpen },
+  { path: "/connections", label: "Connections", icon: Cable },
+  { path: "/usage", label: "Usage", icon: Gauge },
+  { path: "/settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
 export const NON_AFFILIATION = "OpenDot is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. ChatGPT is a trademark of OpenAI.";
@@ -35,17 +47,6 @@ function PageHeading({ title, description }: { title: string; description: strin
   return <header className="page-heading"><p className="eyebrow">Your personal companion</p><h1>{title}</h1><p>{description}</p></header>;
 }
 
-function Placeholder({ screen }: { screen: typeof screens[number] }) {
-  const Icon = screen.icon;
-  return <><PageHeading title={screen.label} description={screen.intro} />
-    <Card className="placeholder-card"><div className="placeholder-label"><span>{screen.label}</span><Badge>Coming soon</Badge></div>
-      <EmptyState title={screen.empty} description={screen.detail} icon={<Icon size={28} strokeWidth={1.5} />} />
-      <div className="placeholder-foot"><ShieldCheck size={16} aria-hidden="true" /><span>A little help, with you in control.</span></div>
-    </Card>
-    <Link to="/about" className="about-link">Get to know OpenDot <ArrowUpRight size={15} aria-hidden="true" /></Link>
-  </>;
-}
-
 function ConnectionStatus() {
   const [status, setStatus] = useState("Checking daemon");
   useEffect(() => {
@@ -59,11 +60,15 @@ function ConnectionStatus() {
 
 export function App() {
   const { preference, setTheme } = useTheme();
+  const onboarding = useResource(loadOnboarding);
+  const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const main = useRef<HTMLElement>(null);
   const previousPath = useRef(location.pathname);
+  const mustOnboard = !!onboarding.data && onboarding.data.current_step !== "done" && !onboarding.data.completed_steps?.includes("done");
+  const gateUnavailable = onboarding.error instanceof ApiError && onboarding.error.code === "not_implemented";
   const current = screens.find(screen => screen.path === location.pathname)?.label ?? (location.pathname === "/" ? "Chat" : location.pathname === "/about" ? "About" : "Page not found");
   useEffect(() => {
     document.title = `${current} · OpenDot`;
@@ -88,12 +93,20 @@ export function App() {
     <div className="workspace"><div className="topbar"><div className="breadcrumb"><span>Your space</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
       <Select label="Appearance" value={preference} onChange={event => setTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></Select>
     </div>
-      <main id="main" ref={main} tabIndex={-1} className="main-content"><Routes>
-        <Route path="/" element={<Placeholder screen={screens[1]} />} />
-        {screens.map(screen => <Route key={screen.path} path={screen.path} element={<Placeholder screen={screen} />} />)}
+      <main id="main" ref={main} tabIndex={-1} className="main-content">{location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !["/about", "/onboarding"].includes(location.pathname) ? <Navigate to="/onboarding" replace /> : <Routes>
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/onboarding" element={<OnboardingScreen onComplete={() => { void onboarding.reload(); navigate("/chat"); }} />} />
+        <Route path="/chat" element={<ChatScreen />} />
+        <Route path="/companion" element={<CompanionScreen />} />
+        <Route path="/activity" element={<ActivityScreen />} />
+        <Route path="/rules" element={<RulesScreen />} />
+        <Route path="/memory" element={<MemoryScreen />} />
+        <Route path="/connections" element={<ConnectionsScreen />} />
+        <Route path="/usage" element={<UsageScreen />} />
+        <Route path="/settings" element={<SettingsScreen />} />
         <Route path="/about" element={<About />} />
         <Route path="*" element={<EmptyState title="This page isn’t here" description="Head back to your space to find what you need." icon={<Settings size={26} />} action={<Link to="/chat">Back to Chat</Link>} />} />
-      </Routes></main>
+      </Routes>}</main>
       <footer className="workspace-footer"><span>OpenDot <span className="footer-divider">/</span> A space of your own</span><ConnectionStatus /></footer>
     </div>
   </div>;
