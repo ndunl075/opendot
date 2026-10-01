@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findUv } from "./run.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = resolve(here, "..");
@@ -47,7 +48,7 @@ const args = [
   join(daemon, "packaging", "opendot_daemon.py"),
 ];
 console.log(`building sidecar for ${triple} ...`);
-execFileSync("uv", args, { stdio: "inherit", cwd: repo, shell: isWindows });
+execFileSync(findUv(), args, { stdio: "inherit", cwd: repo });
 
 const built = join(work, "dist", isWindows ? "opendot-daemon.exe" : "opendot-daemon");
 const binaries = join(desktop, "src-tauri", "binaries");

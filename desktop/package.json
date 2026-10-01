@@ -5,11 +5,12 @@
   "type": "module",
   "packageManager": "pnpm@10.34.6",
   "scripts": {
-    "build:ui": "pnpm -C ../ui install --frozen-lockfile && pnpm -C ../ui build",
+    "build:ui": "node scripts/build-ui.mjs",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "build:icons": "node scripts/build-icons.mjs",
-    "build": "pnpm build:ui && pnpm build:sidecar && pnpm build:icons && tauri build",
-    "dev": "tauri dev"
+    "build:app": "node scripts/build-app.mjs",
+    "build": "node scripts/build-ui.mjs && node scripts/build-sidecar.mjs && node scripts/build-icons.mjs && node scripts/build-app.mjs",
+    "dev": "node scripts/build-app.mjs dev"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.1"
