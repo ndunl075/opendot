@@ -37,8 +37,19 @@ class ApiContext:
 
 RouteModule = Callable[[ApiContext], list[BaseRoute]]
 
+from . import activity, chatgpt, companion, connections, conversations, memory, onboarding, version  # noqa: E402
+
 #: Every route module, in mount order. Add yours here (one line per module).
-ROUTE_MODULES: list[RouteModule] = []
+ROUTE_MODULES: list[RouteModule] = [
+    version.routes,
+    onboarding.routes,
+    chatgpt.routes,
+    companion.routes,
+    conversations.routes,
+    activity.routes,
+    memory.routes,
+    connections.routes,
+]
 
 
 def build_routes(ctx: ApiContext, modules: list[RouteModule] | None = None) -> list[BaseRoute]:

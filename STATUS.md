@@ -48,6 +48,8 @@ Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the 
 - [x] 3.6 Tauri shell: PyInstaller sidecar, start or attach, tray (Open, Pause, Resume, Quit), NSIS installer
 - [x] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md` (U1 to U15 fixed, verdict "ready"; contract gaps for M4 accepted)
 
+- [x] M4 endpoints (branch m4/endpoints-companion): version, onboarding, ChatGPT sign-in, companion (tasks, reset, rename, avatar), conversations (migration 0023), activity, memory (search, correct, forget) and connections (list, sync, disconnect) are served by route modules in `api/routes/`
+
 ## Notes for M3 and M4
 
 - `agent/runtime.py` `build_agent_runtime` is the production assembly of the agent loop and the API. M3 task 3.5 serves `runtime.app` on 127.0.0.1. The browser WebSocket authenticates with the subprotocols `["opendot", "opendot.bearer.<token>"]` from a local origin.

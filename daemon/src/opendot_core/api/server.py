@@ -187,6 +187,14 @@ class ChatHub:
         self._subs: set[_Subscriber] = set()
         self._running: set[str] = set()
         self._ids: dict[str, tuple[str, str]] = {}
+        self.recorder: Any = None
+        """Optional ``ConversationRecorder`` (api/routes/conversations.py): persists messages as tasks run."""
+
+    def reset(self) -> None:
+        """Forget the in-memory replay history (the user reset the companion)."""
+        with self._lock:
+            self._history.clear()
+            self._ids.clear()
 
     # -- subscribers -------------------------------------------------------------
 
@@ -229,11 +237,21 @@ class ChatHub:
             validated = _STREAM_EVENT.validate_python(event).model_dump(mode="json")
             self._history.append(validated)
             subs = list(self._subs)
+        self._record(conversation_id, message_id, validated)
         for sub in subs:
             try:
                 sub.loop.call_soon_threadsafe(sub.queue.put_nowait, validated)
             except RuntimeError:  # the client's event loop already closed
                 self.unsubscribe(sub)
+
+    def _record(self, conversation_id: str, message_id: str, event: dict[str, Any]) -> None:
+        recorder = self.recorder
+        if recorder is None:
+            return
+        try:
+            recorder.on_event(conversation_id, message_id, event)
+        except Exception:  # persistence must never break the live stream
+            pass
 
     # -- tasks -------------------------------------------------------------------
 
@@ -244,6 +262,11 @@ class ChatHub:
         task_id = self.loop.start_task(text)
         with self._lock:
             self._ids[task_id] = (conversation_id, message_id)
+        if self.recorder is not None:
+            try:
+                self.recorder.add_user_message(conversation_id, message_id, text, task_id)
+            except Exception:  # persistence must never stop the task
+                pass
         self.run_in_background(task_id, announce=True)
         return conversation_id, message_id
 
@@ -388,10 +411,15 @@ def create_app(
     created_at = datetime.now(UTC)
 
     def profile() -> CompanionProfile:
+        from .routes._common import settings_for
+        from .routes.companion import companion_identity
+
         reason = loop.paused()
+        settings = settings_for(context)
+        name, seed, created, style = companion_identity(settings, companion_name, created_at)
         return CompanionProfile(
-            name=companion_name, avatar_seed="default", paused=reason is not None, paused_reason=reason,
-            created_at=created_at, style_preset="concise",
+            name=name, avatar_seed=seed, paused=reason is not None, paused_reason=reason, created_at=created,
+            style_preset=style,
         )
 
     def bad_request(error: ValidationError) -> JSONResponse:
@@ -607,6 +635,7 @@ def create_app(
         loop=loop, approvals=approvals, rules=rules, escrow=token_escrow, hub=hub, actor=actor, meter=meter,
         database=database, registry=registry, extras=dict(extras or {}),
     )
+    context.extras["companion_profile"] = profile
     taken = {(getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", None) or ()))) for route in routes}
     for extra in build_routes(context, route_modules):
         key = (getattr(extra, "path", ""), tuple(sorted(getattr(extra, "methods", None) or ())))
