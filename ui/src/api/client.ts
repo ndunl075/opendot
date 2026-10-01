@@ -1,4 +1,6 @@
 import type { EndpointName, EndpointTable } from "./endpoints.gen";
+import { apiUrl, getApiToken } from "./connection";
+export { getApiToken } from "./connection";
 
 type PathParams = Record<string, string | number>;
 type RequestFor<Name extends EndpointName> = EndpointTable[Name]["request"];
@@ -18,11 +20,6 @@ export class ApiError extends Error {
   }
 }
 
-export function getApiToken(): string | undefined {
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="opendot-api-token"]');
-  return meta?.content || import.meta.env.VITE_OPENDOT_TOKEN || undefined;
-}
-
 function endpointPath(path: string, params: PathParams = {}): string {
   return path.replace(/\{([^}]+)\}/g, (_match, name: string) => {
     const value = params[name];
@@ -34,7 +31,7 @@ function endpointPath(path: string, params: PathParams = {}): string {
 export function createApi(getToken = getApiToken, fetchImpl: typeof fetch = fetch) {
   async function call<Name extends EndpointName>(name: Name, options: CallOptions<Name> = {}): Promise<EndpointTable[Name]["response"]> {
     const endpoint = endpointTable[name];
-    let url = endpointPath(endpoint.path, options.params);
+    let url = apiUrl(endpointPath(endpoint.path, options.params));
     const headers = new Headers({ Accept: "application/json" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
