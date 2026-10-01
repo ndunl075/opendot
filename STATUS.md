@@ -1,10 +1,10 @@
 # OpenDot status
 
-Milestone: **M2 (agent loop, router, usage meter, rules) — DONE** (2026-09-30; M0 and M1 done the same day). Next: M3 (UI, led by Astra through Codex).
+Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the same day). Next: M4 (always-on, connectors, v0.1 release candidate).
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
-- Collected after M0: 722; after M1: 921; after M2: 1189 (minimum stays 650)
+- Collected after M0: 722; after M1: 921; after M2: 1189; after M3: 1210 daemon tests plus 177 UI unit and 12 end-to-end tests (minimum stays 650)
 - Collected tests at baseline: **777**
 - Tests inside the deletable files listed in ARCHITECTURE.md §5: **127**
 - Minimum collected count from now on (baseline − deletable): **650**
@@ -42,11 +42,11 @@ Milestone: **M2 (agent loop, router, usage meter, rules) — DONE** (2026-09-30;
 
 - [x] 3.1 TypeScript types from `contract/` with a drift check in the build (Terra)
 - [x] 3.2 design system: tokens, light/dark, IBM Plex Sans, Lucide, code-drawn avatar, app mark (Astra)
-- [ ] 3.3 all v0.1 screens against the mock server (Astra, in progress)
-- [ ] 3.4 Vitest component tests and Playwright end-to-end tests (Terra)
+- [x] 3.3 all v0.1 screens against the mock server (Astra), including continue anyway, allow top tier and resume after the plan limit
+- [x] 3.4 Vitest component tests and Playwright end-to-end tests (Terra)
 - [x] 3.5 `opendot serve`: UI and API on 127.0.0.1, token in the OS keychain (`opendot api-token show`)
 - [x] 3.6 Tauri shell: PyInstaller sidecar, start or attach, tray (Open, Pause, Resume, Quit), NSIS installer
-- [ ] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md`
+- [x] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md` (U1 to U15 fixed, verdict "ready"; contract gaps for M4 accepted)
 
 ## Notes for M3 and M4
 
@@ -55,6 +55,8 @@ Milestone: **M2 (agent loop, router, usage meter, rules) — DONE** (2026-09-30;
 - Codex's Windows sandbox stopped launching commands during the M2 review, so Sol reviews now receive the diff inside the prompt. If Sol needs to run commands again, restart the Codex CLI or the machine first.
 
 ## Needs you
+
+0. **Code signing (before any public release):** the Windows installer (`desktop/src-tauri/target/release/bundle/nsis/OpenDot_0.1.0_x64-setup.exe`) is unsigned, and macOS needs signing and notarization. Both need paid certificates and your accounts.
 
 1. **Live ChatGPT sign-in** (needs your Plus or Pro account and a browser): the `chatgpt_plan` provider has only been tested against a fake OAuth server and synthetic streaming fixtures. After signing in once, real recorded fixtures should replace the synthetic ones in `daemon/tests/providers/fixtures/chatgpt_plan/`. The `function_call` / `function_call_output` input items are unverified until then.
 2. **Run `opendot measure`** after signing in (a few minutes). It writes `docs/measurements.md` (caching, reasoning effort, structured output, model catalog incl. Astra, WebSocket cost, credit-spend check). Set a weekly OpenDot limit in ChatGPT Settings, Usage, and keep credit use off first.
