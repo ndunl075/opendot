@@ -63,6 +63,35 @@ fn daemon_running() -> bool {
     }
 }
 
+/// Ask whatever answers on the port to prove it knows our token (HMAC of a fresh nonce), so the
+/// token is never handed to another program that grabbed the port first (security review S1).
+fn verify_identity(token: &str) -> bool {
+    use hmac::{Hmac, Mac};
+    let mut raw = [0u8; 32];
+    if token.is_empty() || getrandom::getrandom(&mut raw).is_err() {
+        return false;
+    }
+    let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(3)).build();
+    let Ok(response) = agent.get(&format!("{}/v1/identity?nonce={nonce}", base_url())).call() else {
+        return false;
+    };
+    let Ok(body) = response.into_json::<serde_json::Value>() else {
+        return false;
+    };
+    let Some(proof) = body.get("proof").and_then(|value| value.as_str()) else {
+        return false;
+    };
+    let Ok(mut mac) = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()) else {
+        return false;
+    };
+    mac.update(b"opendot-identity:");
+    mac.update(nonce.as_bytes());
+    let expected: String = mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect();
+    // Constant-time enough for a one-shot local check; both are fixed-length hex strings.
+    expected.len() == proof.len() && expected.bytes().zip(proof.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
+
 fn sidecar_command(app: &AppHandle) -> Result<tauri_plugin_shell::process::Command, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
@@ -163,6 +192,12 @@ pub fn run() {
                 eprintln!("{error}");
                 String::new()
             });
+            let token = if verify_identity(&token) {
+                token
+            } else {
+                eprintln!("the program on port {PORT} could not prove it is OpenDot; not sending it the token");
+                String::new()
+            };
             // The token goes only to the app's own origin: initialization scripts run on every
             // top-level navigation, so the script checks where it is before writing anything.
             let init = format!(

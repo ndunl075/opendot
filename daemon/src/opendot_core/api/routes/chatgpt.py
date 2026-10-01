@@ -109,7 +109,8 @@ class SignInManager:
             return ChatGPTStatus(state="error", plan="unknown", eligible=False, error=problem.user_message, **base)
         if self.pending():
             return ChatGPTStatus(state="pending", plan="unknown", eligible=False, **base)
-        credits = bool(getattr(provider, "credits_enabled", False))
+        reported = getattr(provider, "credits_enabled", None)
+        credits = reported if isinstance(reported, bool) else None  # unknown is not "off" (review S6)
         status_fn = getattr(provider, "status", None)
         info = status_fn() if callable(status_fn) else None
         failure = self._failure

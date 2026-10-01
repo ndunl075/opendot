@@ -14,9 +14,16 @@
       "title": "Account Label"
     },
     "credits_enabled": {
-      "default": false,
-      "title": "Credits Enabled",
-      "type": "boolean"
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Credits Enabled"
     },
     "eligible": {
       "title": "Eligible",

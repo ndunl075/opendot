@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 from contextlib import contextmanager
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -857,6 +858,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if os.name == "posix":
+        # Everything OpenDot writes (database, WAL, logs, backups, token files) is owner-only.
+        os.umask(0o077)
     args = build_parser().parse_args(argv)
     api_contract_exit = api_contract_dispatch(args)
     if api_contract_exit is not None:

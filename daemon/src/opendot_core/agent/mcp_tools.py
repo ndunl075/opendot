@@ -134,6 +134,10 @@ class McpTools:
             return list(self._offered)
         return [name for name in self._offered if name not in GOOGLE_WRITE_TOOLS]
 
+    def read_only_tools(self) -> frozenset[str]:
+        """Tools that only read; the only ones used to fill a task's tool group (security review S4)."""
+        return frozenset(name for name in self.offered() if not TOOL_FACTS[name].writes)
+
     def specs(self) -> list[ToolSpec]:
         offered = set(self.offered())
         tools = _run_sync(self._server.list_tools())

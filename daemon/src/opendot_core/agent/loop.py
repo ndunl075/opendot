@@ -246,7 +246,8 @@ class AgentLoop:
         task_id = str(uuid4())
         available = [spec.name for spec in self.tools.specs()]
         if tool_group is None:
-            group = choose_task_tool_group(message, available)
+            read_only = getattr(self.tools, "read_only_tools", None)
+            group = choose_task_tool_group(message, available, read_only() if callable(read_only) else None)
         else:
             group = sorted(name for name in set(tool_group) if name in available)
         assert len(group) <= MAX_TOOLS_PER_GROUP
@@ -545,6 +546,7 @@ class AgentLoop:
             task_id=task_id, job_type=job.value, model=completed.model or route.model, effort=route.effort,
             usage=completed.usage,
         )
+        self._stop_on_credit_spend(completed)
         items: list[InputItem] = []
         if first_step:
             items.append(packed.input[-1])
@@ -612,6 +614,25 @@ class AgentLoop:
         if spike is not None:
             self.pause(f"anomaly: {spike}")
             yield from self._pause(task_id, TaskState.PAUSED, f"Paused automatically: {spike}")
+
+    def _stop_on_credit_spend(self, completed: Completed) -> None:
+        """If the provider's usage data shows paid credits being spent (past the plan allowance), pause
+        every plan request: OpenDot never runs on paid credits (section 8.2 rule 8; review S6). The
+        reply that reported it is still stored, so nothing already paid for is lost."""
+        try:
+            provider = self.registry.get(self.provider_name)
+        except ProviderError:
+            return
+        detect = getattr(provider, "credit_spend_detected", None)
+        if not callable(detect):
+            return
+        fields = detect(completed.usage)
+        if fields:
+            self._set_control(
+                "plan_limit",
+                "ChatGPT reported paid credit use, so OpenDot paused. Turn credit use off in ChatGPT Settings, "
+                "Usage, then resume.",
+            )
 
     def _handoff_text(self, row: Any) -> str:
         tried = json.loads(row["tried_json"])

@@ -351,7 +351,7 @@ export type ChatGPTSignInStartRequest = ChatGPTSignInStartRequestSchema.ChatGPTS
 
 export namespace ChatGPTStatusSchema {
   export type AccountLabel = string | null;
-  export type CreditsEnabled = boolean;
+  export type CreditsEnabled = boolean | null;
   export type Eligible = boolean;
   export type Error = string | null;
   export type IneligibleReason = string | null;
@@ -1071,7 +1071,7 @@ export type OnboardingAcknowledgeRequest = OnboardingAcknowledgeRequestSchema.On
 export namespace OnboardingStateSchema {
   export type AvatarSeed = string | null;
   export type AccountLabel = string | null;
-  export type CreditsEnabled = boolean;
+  export type CreditsEnabled = boolean | null;
   export type Eligible = boolean;
   export type Error = string | null;
   export type IneligibleReason = string | null;

@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from opendot_core.api.serve_cli import NoTools, build_serve_app, load_or_create_token, run_token
-from opendot_core.api.web import SESSION_COOKIE
+from opendot_core.api.web import TOKEN_STORAGE_KEY
 from opendot_core.db import Database
 from opendot_core.eval.fake_provider import ScriptedProvider, text_turn
 from opendot_core.providers.registry import ProviderRegistry, ProviderSettings
@@ -57,24 +57,40 @@ def _client(tmp_path: Path, dist: Path | None, script: list | None = None) -> tu
     return TestClient(app, base_url=BASE), provider
 
 
-def test_index_needs_a_session_and_then_carries_the_token(tmp_path: Path, dist: Path) -> None:
+def test_no_cookie_ever_and_no_page_carries_the_token(tmp_path: Path, dist: Path) -> None:
+    """Security review S2: cookies are shared by every port on 127.0.0.1, so the token never goes in
+    one; the login page keeps it in this origin's localStorage, and no served page contains it."""
     client, _ = _client(tmp_path, dist)
-    first = client.get("/", follow_redirects=False)
-    assert first.status_code == 303 and first.headers["location"] == "/login"
-    assert TOKEN not in client.get("/login").text
+    index = client.get("/")
+    assert index.status_code == 200 and TOKEN not in index.text and "set-cookie" not in index.headers
+    assert index.headers["cache-control"] == "no-store"
+    assert client.get("/rules/123").text == index.text  # SPA fallback, public
+    login = client.get("/login")
+    assert login.status_code == 200 and TOKEN not in login.text and "set-cookie" not in login.headers
+    assert f'localStorage.setItem("{TOKEN_STORAGE_KEY}"' in login.text and "frame-ancestors 'none'" in login.headers[
+        "content-security-policy"
+    ]
+    assert client.post("/login", data={"token": TOKEN}).status_code == 405  # nothing to post a token to
+    logout = client.get("/logout")
+    assert f'localStorage.removeItem("{TOKEN_STORAGE_KEY}")' in logout.text
+    for response in (index, login, logout):
+        assert TOKEN not in response.text
 
-    wrong = client.post("/login", data={"token": "nope"}, follow_redirects=False)
-    assert wrong.status_code == 401 and SESSION_COOKIE not in wrong.cookies
 
-    signed = client.post("/login", data={"token": TOKEN}, follow_redirects=False)
-    assert signed.status_code == 303
-    cookie = signed.headers["set-cookie"].lower()
-    assert "httponly" in cookie and "samesite=strict" in cookie
+def test_identity_proves_the_daemon_knows_the_token_without_revealing_it(tmp_path: Path, dist: Path) -> None:
+    """Security review S1: the desktop app checks this before handing the token to whatever answers."""
+    import hashlib
+    import hmac
 
-    page = client.get("/")
-    assert page.status_code == 200 and f'content="{TOKEN}"' in page.text
-    assert page.headers["cache-control"] == "no-store"
-    assert client.get("/rules/123").text == page.text  # SPA fallback
+    client, _ = _client(tmp_path, dist)
+    nonce = "ab" * 16
+    response = client.get(f"/v1/identity?nonce={nonce}")  # no bearer token needed
+    assert response.status_code == 200
+    expected = hmac.new(TOKEN.encode(), b"opendot-identity:" + nonce.encode(), hashlib.sha256).hexdigest()
+    assert response.json() == {"daemon": "opendot", "proof": expected}
+    assert TOKEN not in response.text
+    assert client.get("/v1/identity?nonce=short").status_code == 400
+    assert client.get("/v1/identity?nonce=" + "zz" * 16).status_code == 400
 
 
 def test_assets_are_public_and_confined_to_the_build(tmp_path: Path, dist: Path) -> None:
@@ -89,8 +105,8 @@ def test_assets_are_public_and_confined_to_the_build(tmp_path: Path, dist: Path)
 
 def test_api_needs_the_bearer_token_not_the_cookie(tmp_path: Path, dist: Path) -> None:
     client, _ = _client(tmp_path, dist)
-    client.post("/login", data={"token": TOKEN})
-    assert client.get("/v1/health").status_code == 401  # a session cookie alone never authorizes the API
+    client.cookies.set("opendot_session", TOKEN)
+    assert client.get("/v1/health").status_code == 401  # a cookie never authorizes the API
     ok = client.get("/v1/health", headers={"Authorization": f"Bearer {TOKEN}"})
     assert ok.status_code == 200 and ok.json()["status"] == "ok"
 
@@ -161,7 +177,6 @@ def test_websocket_refuses_a_foreign_host(tmp_path: Path, dist: Path) -> None:
 
 def test_missing_ui_build_says_how_to_build_it(tmp_path: Path) -> None:
     client, _ = _client(tmp_path, None)
-    client.post("/login", data={"token": TOKEN})
     page = client.get("/")
     assert page.status_code == 503 and "pnpm -C ui build" in page.text
 
@@ -190,3 +205,24 @@ def test_serve_and_api_token_are_cli_commands() -> None:
     parser = build_parser()
     assert parser.parse_args(["serve", "--port", "9000"]).port == 9000
     assert parser.parse_args(["api-token", "show"]).action == "show"
+
+
+def test_token_file_must_be_private_and_complete(tmp_path: Path) -> None:
+    import os
+
+    from opendot_core.api.serve_cli import InsecureTokenFile, read_token_file
+
+    good = tmp_path / "token"
+    good.write_text("t" * 40, encoding="utf-8")
+    if os.name == "posix":
+        good.chmod(0o644)
+        with pytest.raises(InsecureTokenFile, match="chmod 600"):
+            read_token_file(good)
+        good.chmod(0o600)
+    assert read_token_file(good) == "t" * 40
+    short = tmp_path / "short"
+    short.write_text("abc", encoding="utf-8")
+    if os.name == "posix":
+        short.chmod(0o600)
+    with pytest.raises(InsecureTokenFile):
+        read_token_file(short)

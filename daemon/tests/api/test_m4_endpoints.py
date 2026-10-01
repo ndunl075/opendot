@@ -170,7 +170,7 @@ def test_signed_out_then_pending_then_signed_in(signin: SignInEnv) -> None:
     assert again["authorize_url"] == started["authorize_url"]  # one sign-in at a time
     signin.browser_leg(started)
     status = signin.wait(until="signed_in")
-    assert status["eligible"] and status["plan_label"] == "Using ChatGPT plan" and status["credits_enabled"] is False
+    assert status["eligible"] and status["plan_label"] == "Using ChatGPT plan" and status["credits_enabled"] is None  # unknown is not "off" (security review S6)
     assert status["account_label"] == "sam@example.test" and status["manage_usage_url"].startswith("https://")
     blob = json.dumps(status) + json.dumps(started)
     assert "at-1" not in blob and "rt-1" not in blob and "urn:uuid" not in blob

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import hashlib
+import hmac
 import json
 import secrets
 import threading
@@ -131,6 +133,16 @@ def _ws_protocol_token(value: bytes) -> bytes:
     return b""
 
 
+IDENTITY_PATH = "/v1/identity"
+IDENTITY_LABEL = b"opendot-identity:"
+
+
+def identity_proof(token: str, nonce: str) -> str:
+    """HMAC-SHA256 of the client's nonce, keyed with the access token. Only the real daemon (which
+    knows the token) can produce it; the proof reveals nothing about the token (review S1)."""
+    return hmac.new(token.encode(), IDENTITY_LABEL + nonce.encode(), hashlib.sha256).hexdigest()
+
+
 class BearerAuth:
     """Pure ASGI middleware: reject HTTP and WebSocket requests without the right bearer token.
 
@@ -145,6 +157,9 @@ class BearerAuth:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
+            return
+        if scope["type"] == "http" and scope.get("path") == IDENTITY_PATH:
+            await self.app(scope, receive, send)  # proves who we are without revealing anything
             return
         supplied = b""
         origin: str | None = None
@@ -454,6 +469,12 @@ def create_app(
         if task_id is not None:
             hub.run_in_background(task_id)
 
+    async def identity(request: Request) -> Response:
+        nonce = request.query_params.get("nonce", "")
+        if not (32 <= len(nonce) <= 128) or not all(ch in "0123456789abcdef" for ch in nonce):
+            return _error(400, "invalid_nonce", "Send a fresh random hex nonce (32 to 128 hex digits).")
+        return JSONResponse({"daemon": "opendot", "proof": identity_proof(token, nonce)})
+
     async def health(_: Request) -> Response:
         body = HealthResponse(
             status="ok", uptime_seconds=int(time.monotonic() - started), database_ok=True,
@@ -614,6 +635,7 @@ def create_app(
     v = f"/{API_VERSION}"
     routes: list[Route | WebSocketRoute] = [
         Route(f"{v}/health", health, methods=["GET"]),
+        Route(IDENTITY_PATH, identity, methods=["GET"]),
         Route(f"{v}/chat/messages", chat_send, methods=["POST"]),
         Route(f"{v}/approvals", approvals_list, methods=["GET"]),
         Route(f"{v}/approvals/{{approval_id}}", approval_get, methods=["GET"]),

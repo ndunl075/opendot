@@ -39,6 +39,26 @@ def register(subparsers: Any) -> None:
     token.add_argument("action", choices=["show", "rotate"])
 
 
+class InsecureTokenFile(SystemExit):
+    """The token file could be read by someone other than its owner."""
+
+
+def read_token_file(path: Path) -> str:
+    """Read a headless token file, refusing one other local users could read (POSIX).
+
+    On Windows the file inherits the user profile's ACLs; doctor warns about headless secrets files."""
+    if os.name == "posix":
+        info = path.stat()
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise InsecureTokenFile(
+                f"{path} must be owned by you and readable only by you (chmod 600 {path}); refusing to use it."
+            )
+    token = path.read_text(encoding="utf-8").strip()
+    if len(token) < 32:
+        raise InsecureTokenFile(f"{path} does not hold a full access token (run `opendot api-token rotate`).")
+    return token
+
+
 def load_or_create_token(store: SecretStore) -> str:
     try:
         return store.get_required(TOKEN_SECRET)
@@ -166,7 +186,7 @@ def run_serve(args: argparse.Namespace, database: Database, *, worker: Any = Non
         redirect_output(args.log_file)
 
     if args.token_file:
-        token = Path(args.token_file).read_text(encoding="utf-8").strip()
+        token = read_token_file(Path(args.token_file))
     else:
         token = load_or_create_token(SystemKeyringSecretStore())
     ui_dist = Path(args.ui_dist) if args.ui_dist else default_ui_dist()

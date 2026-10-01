@@ -115,3 +115,17 @@ def test_the_runtime_runs_a_real_tool_end_to_end(tmp_path: Path, db_path: Path) 
     assert "mornings" in tools.run("memory_search", {"query": "mornings"}, task_id="x", call_id="y")
     sent = provider.requests[0]
     assert len(sent.tools) <= 8 and all(tool.name != "action_commit" for tool in sent.tools)
+
+
+def test_s4_unrequested_write_tools_are_never_offered(db_path: Path) -> None:
+    from opendot_core.agent.tool_groups import choose_task_tool_group
+
+    tools = McpTools(db_path)
+    available = [spec.name for spec in tools.specs()]
+    read_only = tools.read_only_tools()
+    assert "task_schedule" not in read_only and "agenda_get" in read_only
+    group = choose_task_tool_group("what's on my calendar today?", available, read_only)
+    writes = {name for name in group if TOOL_FACTS[name].writes}
+    assert writes == set(), f"unrequested write tools offered: {writes}"
+    asked = choose_task_tool_group("remind me to stretch at 5", available, read_only)
+    assert "reminder_set" in asked  # a write the user asked for is still offered
