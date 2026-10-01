@@ -77,6 +77,12 @@ gitleaks git --no-banner
 
 Useful commands:
 
+- `opendot serve`: runs OpenDot (UI, API and the always-on loop) on
+  127.0.0.1:8765. `opendot service install` keeps it running at login.
+- `opendot open`: opens OpenDot in your browser and prints a one-time
+  sign-in code to type there.
+- `opendot doctor`: checks the service, sign-in, keychain, connectors, disk
+  and backups.
 - `opendot eval --suite core`: runs the agent scenario suite against a
   scripted fake model. No account needed.
 - `opendot mock-server`: serves fake data for every API endpoint, for UI work.
