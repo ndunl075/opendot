@@ -28,3 +28,4 @@ desktop/.sidecar-build/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/src-tauri/gen/
+desktop/src-tauri/icons/
