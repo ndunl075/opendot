@@ -55,6 +55,7 @@ Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the 
 - [x] 4.3 catch-up after sleep or downtime (`catch_up.py`): late reminders via `JobRunner`, one run per recurring check, each connector syncs once, one outbox note ("While your computer was asleep: ...")
 - [x] 4.6 `opendot doctor` (`--ci`, `--json`; `doctor.py`): database and migrations, keychain, access token, daemon, service, ChatGPT sign-in, connectors, disk, backups, restore drill, headless secrets file. `--ci` exits 0 on a fresh temporary database and skips the checks that need your setup
 - [x] 4.7 `deploy/`: server guide (systemd user unit and Docker, both 127.0.0.1 only), Tailscale guide, headless secrets (systemd-creds, Docker secret), SSH-forward ChatGPT sign-in, section 11 caveat; `daemon/tests/test_deploy_files.py` checks the Docker files. Gaps recorded in `docs/decisions.md` (no keychain in Docker for ChatGPT tokens; Host header behind `tailscale serve`)
+- [x] 4.5 built-in routines (`routines/`): morning brief, inbox triage, weekly review. Settings in `SettingsStore`, off by default, run from the always-on loop, quiet hours respected, one optional cheap/low pass through the agent loop (budgets, plan-limit pause and kill switch apply), plain-text fallback, `opendot routines list|run|enable|disable`. 28 new tests (1242 daemon tests pass). Not wired yet: a GitHub pull-request callable for the weekly review (needs task 4.4's connector).
 
 ## Notes for M3 and M4
 

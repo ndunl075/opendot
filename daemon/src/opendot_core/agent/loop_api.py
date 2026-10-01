@@ -6,6 +6,7 @@ against this protocol; `agent/loop.py` implements it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Iterator, Literal, Protocol
 
@@ -89,6 +90,7 @@ class AgentLoopProtocol(Protocol):
         job_type: str = "chat",
         chat_id: int | None = None,
         preapproved_actions: frozenset[str] = frozenset(),
+        tool_group: Sequence[str] | None = None,
     ) -> str:
         """Create a durable task and return its id. Does not call a model."""
         ...
