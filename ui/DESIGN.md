@@ -112,3 +112,13 @@ Per task scope, only `ui/` is changed. Project-level STATUS.md and decisions.md
 are left to the milestone lead; the dated design choices are recorded here.
 Full screens, desktop icon generation/packaging, daemon CORS, and milestone-wide
 review remain their respective later tasks.
+
+## Task 3.3 screens (2026-09-30)
+
+The nine screen implementations now live in `src/screens/`. They use the existing
+tokens and primitives, with shared layout rules in `src/screens/screens.css`.
+Mutations wait for daemon responses; unavailable values never become invented
+success or zero usage. ConfirmDialog accepts an optional error to keep failures
+inside the accessible modal. OpenAI-required elements remain text until licensed
+official assets are supplied. See [TASK-3.3.md](TASK-3.3.md) for verification,
+contract gaps, mock limitations, and the milestone handoff.

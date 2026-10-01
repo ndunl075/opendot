@@ -9,5 +9,6 @@ import "@fontsource/ibm-plex-sans/latin-600.css";
 import "./design/tokens.css";
 import "./design/components.css";
 import "./shell.css";
+import "./screens/screens.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><ThemeProvider><BrowserRouter><App /></BrowserRouter></ThemeProvider></StrictMode>);

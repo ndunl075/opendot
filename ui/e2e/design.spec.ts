@@ -1,19 +1,26 @@
 import { expect, test } from "@playwright/test";
 
 test("all routes, About copy, self-hosted fonts, and persisted OS/override themes", async ({ page }) => {
+  // The daemon mock is deliberately stateless. Only mark setup complete for this
+  // navigation/design test; every screen still reads the real contract mock.
+  await page.route("**/v1/onboarding", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), current_step: "done", completed_steps: ["companion", "chatgpt", "weekly_limit", "connections", "intro", "done"] } });
+  });
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByRole("status")).toHaveText("Daemon connected");
+  await expect(page.locator("footer").getByRole("status")).toHaveText("Daemon connected");
   await page.getByLabel("Appearance").selectOption("light");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   for (const name of ["Onboarding", "Chat", "Companion", "Activity", "Rules", "Memory", "Connections", "Usage", "Settings"]) {
     await page.getByRole("link", { name, exact: true }).click();
-    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-    await expect(page.getByText("Coming soon", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: name === "Onboarding" ? "Welcome to OpenDot" : name, level: 1 })).toBeVisible();
+    const markers: Record<string, string> = { Onboarding: "Open chat", Chat: "Send message", Companion: "Rename", Activity: "Refresh activity", Rules: "Create rule", Memory: "Search", Connections: "Connect Gmail", Usage: "Save budgets", Settings: "Save settings" };
+    await expect(page.getByRole("button", { name: markers[name], exact: true })).toBeVisible();
     await expect(page.locator("main")).toBeFocused();
   }
   await page.getByRole("link", { name: "About", exact: true }).click();
@@ -29,6 +36,46 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   const fonts = await page.evaluate(() => performance.getEntriesByType("resource").map(entry => entry.name).filter(name => /\.woff2?/.test(name)));
   expect(fonts.length).toBeGreaterThan(0);
   expect(fonts.every(url => new URL(url).origin === "http://127.0.0.1:5173")).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("unfinished setup redirects to onboarding; mock chat streams a stamped reply and approval", async ({ page }) => {
+  await page.goto("/chat");
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByRole("button", { name: "Continue to introduction" })).toBeVisible();
+  await page.route("**/v1/onboarding", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), current_step: "done" } });
+  });
+  await page.goto("/chat");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await page.getByLabel("Message your companion").fill("Draft a reply");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("mock-model-terra", { exact: true })).toBeVisible();
+  await expect(page.getByText("0.12 credits", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Always allow this", exact: true })).toBeVisible();
+});
+
+test("screens fit 720px in both themes without runtime errors", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.setViewportSize({ width: 720, height: 1000 });
+  await page.route("**/v1/onboarding", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), current_step: "done" } });
+  });
+  for (const theme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    for (const path of ["onboarding", "chat", "companion", "activity", "rules", "memory", "connections", "usage", "settings"]) {
+      await page.goto(`/${path}`);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(page.locator("main .skeleton")).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect(await page.locator("vite-error-overlay").count()).toBe(0);
+      if (["chat", "rules", "settings"].includes(path)) await page.screenshot({ path: testInfo.outputPath(`${path}-${theme}.png`), fullPage: true });
+    }
+  }
   expect(errors).toEqual([]);
 });
 

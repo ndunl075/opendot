@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode, type RefObject, type Keyboard
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button, IconButton } from "./primitives";
+import { ErrorState } from "./feedback";
 
 export interface DialogProps {
   open: boolean;
@@ -63,10 +64,11 @@ export interface ConfirmDialogProps extends Omit<DialogProps, "children" | "init
   onConfirm: () => void;
   danger?: boolean;
   loading?: boolean;
+  error?: unknown;
 }
-export function ConfirmDialog({ confirmLabel, onConfirm, danger = false, loading = false, ...props }: ConfirmDialogProps) {
+export function ConfirmDialog({ confirmLabel, onConfirm, danger = false, loading = false, error, ...props }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-  return <Dialog {...props} initialFocusRef={cancelRef}><div className="dialog-actions">
+  return <Dialog {...props} initialFocusRef={cancelRef}>{error != null && <ErrorState error={error} />}<div className="dialog-actions">
     <Button variant="secondary" ref={cancelRef} onClick={props.onClose}>Cancel</Button>
     <Button variant={danger ? "danger" : "primary"} loading={loading} onClick={onConfirm}>{confirmLabel}</Button>
   </div></Dialog>;
