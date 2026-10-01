@@ -60,6 +60,9 @@ class Router:
         auto_top: bool = False,
     ) -> None:
         self.auto_top = auto_top
+        self.job_overrides: dict[Job, tuple[Tier, Effort | None]] = {}
+        """The user's per-job choices (Settings, model tier overrides): a tier and optionally an effort.
+        Reaching the top tier this way still needs approval unless ``auto_top`` is on."""
         self.overrides: dict[Tier, str] = {Tier(tier): model for tier, model in (overrides or {}).items()}
         self.refresh(catalog)
 
@@ -80,6 +83,9 @@ class Router:
 
     def route(self, job: Job, *, failed_at: Tier | None = None, effort_bump: bool = False) -> Route:
         tier, effort = JOB_TABLE[Job(job)]
+        chosen = self.job_overrides.get(Job(job))
+        if chosen is not None:
+            tier, effort = chosen[0], chosen[1] or effort
         if failed_at is not None:
             failed_at = Tier(failed_at)
             up = next_tier_up(failed_at)

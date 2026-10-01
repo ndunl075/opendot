@@ -16,6 +16,7 @@ message content).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -368,7 +369,23 @@ class RuleEngine:
         }
 
     def _all_rules(self) -> list[Rule]:
-        return self._stored_rules() + self._default_rules()
+        disabled = self.disabled_ids()
+        return [rule for rule in self._stored_rules() + self._default_rules() if rule.id not in disabled]
+
+    def disabled_ids(self) -> set[str]:
+        """Ids of rules the user switched off (kept, but ignored by ``decide``). Stored in the
+        ``rules_disabled`` setting, a JSON list. The deny list is never in play here: it is checked
+        before any rule and cannot be disabled."""
+        self.database.migrate()
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT value_json FROM app_settings WHERE key = 'rules_disabled'").fetchone()
+        if row is None:
+            return set()
+        try:
+            values = json.loads(row["value_json"])
+        except ValueError:
+            return set()
+        return {str(item) for item in values} if isinstance(values, list) else set()
 
     def _stored_rules(self) -> list[Rule]:
         self.database.migrate()

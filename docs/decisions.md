@@ -200,3 +200,68 @@ section 1. Newest last.
   `Host` headers; `tailscale serve` may forward the tailnet name, which would need a deliberate Host
   allow-list in the daemon. (4) The guide uses `POST /v1/auth/chatgpt/start`, which is a contract
   endpoint another M4 task wires up.
+- 2026-10-01 (M4): Rules endpoints map the contract rule onto the engine rule without a migration: `action` is
+  `tool` or `tool.action`; `name` and `enabled` live in the `rule_names` and `rules_disabled` settings and
+  `RuleEngine.decide` skips disabled rules. Built-in defaults and the deny list are both `locked` (403); a user
+  rule that skips asking is capped at "sensitive" data. Reason: the contract has no tool or sensitivity field and
+  the rules table has no name or enabled column; a new column would collide with parallel migrations.
+- 2026-10-01 (M4): Tier overrides are per job type (`Router.job_overrides`, tier plus optional effort), separate
+  from `Router.overrides` (tier to model id). A top-tier override still needs approval unless auto top-tier is on.
+- 2026-10-01 (M4): Restore over HTTP is two calls with the user's approval in between: the first proposes a
+  `database_restore` approval (202, `restored: false`), the user approves it, the repeat call consumes the
+  escrowed one-time token and restores. Backups are encrypted files in `<database folder>/backups` and the AES
+  key is created in the keychain (`backup-encryption-key`) on the first backup.
+- 2026-10-01 (M4): API keys saved from the UI go only to the keychain; the settings and providers endpoints never
+  return one and enabling a provider or feature is always its own call.
+- 2026-10-01 (M4): Built-in routines (task 4.5) live in `opendot_core/routines/`. Each has a small
+  pydantic settings model stored through `SettingsStore` (`routine_morning_brief`,
+  `routine_inbox_triage`, `routine_weekly_review`) and is OFF until the user enables it and picks when it
+  runs. Reason: a routine delivers things the user did not just ask for, and the time and timezone are
+  the user's choice.
+- 2026-10-01 (M4): Routines are run by a `RoutineScheduler` that the always-on loop calls once per cycle
+  (`OpenDotRunner(routines=...)`), not inside `JobRunner`. Reason: a model pass is slow and must not run
+  inside the job runner's write transaction. Each enabled routine still owns one `jobs` row (kind
+  `routine`, key `routine:<name>`), which `JobRunner` skips. The row holds the schedule, the next run and
+  the routine's state, and gives every delivery a `job_id` so the delivery workers also hold it in quiet
+  hours. A routine that is off and never ran adds no row.
+- 2026-10-01 (M4): A scheduled run needs: enabled, due, and outside quiet hours (stored `quiet_hours`
+  setting, else the environment). A late run is caught up once, never made up for a time before the
+  routine was switched on, and quiet hours defer the run (it stays due) instead of running and holding
+  the message, so no model call is spent during the window. Results go to the outbox, destination
+  `desktop:owner` by default; a manual `opendot routines run <name>` ignores the schedule, the switch and
+  quiet hours but not budgets or the kill switch.
+- 2026-10-01 (M4): The only model passes are `AgentLoop` tasks (`job_type` `summarize` for the brief and
+  weekly review wording, `sort` for triage; both cheap/low), started with an empty tool group
+  (`start_task(..., tool_group=())`). Budgets, the plan-limit pause, the kill switch and the usage meter
+  therefore apply, and routines are read-only at the tool layer: a model reply that asks for a tool is
+  refused by the loop, so triage cannot send, draft, label or delete. A pass that fails or is paused is
+  abandoned (`AgentLoop.abandon`) so a later resume never spends a call on a result nobody waits for, and
+  the plain-code text is delivered instead. After a failure there is no retry: triaged messages count as
+  seen. Reason: no retry loop that could burn credits or spam.
+- 2026-10-01 (M4): Inbox triage runs only when the synced unread Gmail records contain ids not yet
+  triaged (state keeps ids that are still unread). Plain code drops bulk mail, merges threads and
+  duplicates, and ranks by sender importance (people graph: confirmed person 3, calendar-vouched 2),
+  high-signal wording, threads awaiting reply, and mentions of open tasks and close dates. At most 12
+  items go to one pass as numbered `from | subject | snippet` lines (each field one line and capped, the
+  snippet at 200 chars). Message bodies never reach the model, and email text is HTML-escaped inside
+  `<untrusted-data>` tags in the tail, after an instruction that it is data. If none are worth it the
+  model answers `none` and nothing is delivered. Audit rows hold counts and flags, never message text.
+- 2026-10-01 (M4): The brief and weekly review skip the model pass when there is nothing to reword (an
+  empty brief or a quiet week). The weekly review reads local tables (tasks, reminder jobs, synced calendar
+  events, the usage meter) and takes pull requests from an optional callable, because the GitHub transport
+  is a connector concern (task 4.4); without it the review omits pull requests.
+- 2026-10-01 (M4): The ChatGPT plan scope is only granted to Plus and Pro but does not say which, and the contract's
+  `PlanEligibility` has no "eligible, tier unknown" value while the UI blocks onboarding unless it is `eligible_plus`
+  or `eligible_pro`. So a signed-in account that granted the plan scope reports `eligible_plus` with the label "Using
+  ChatGPT plan" (no tier name). `credits_enabled` is false unless the provider exposes a `credits_enabled` attribute
+  (it does not yet). A plan-limit pause is reported as `signed_in` with an `error` note, since the contract has no
+  paused state.
+- 2026-10-01 (M4): Conversations are persisted by `ChatHub` through a `ConversationRecorder` (migration 0023): the user
+  message when a task starts, the assistant reply (final text, usage stamp, tool calls, approval card) as events are
+  published. Assistant message ids are `<user message id>_a`. Companion Reset deletes conversations, agent tasks and
+  steps, cancels scheduled agent tasks and rejects pending approvals, appends a `companion_reset` audit record, and never
+  touches `tool_runs`; memory is cleared only when `forget_memory` is true.
+- 2026-10-01 (M4): Connection ids are the app names (`gmail`, `google_calendar`, `github`). Syncing and credential
+  revocation are injected through `ApiContext.extras` (`connector_syncers`, `connector_disconnectors`); with no syncer
+  registered, sync answers 409 `sync_unavailable`. Disconnect deletes the app's `sync_state` and `connector_records`
+  rows, and with "forget everything learned from this app" tombstones every memory whose source event came from it.

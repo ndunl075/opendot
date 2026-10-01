@@ -18,13 +18,17 @@ from typing import Any
 from starlette.applications import Starlette
 
 from ..api.escrow import TokenEscrow
+from ..api.routes.config_support import load_provider_settings, load_router_settings, register_enabled
 from ..api.server import create_app
 from ..db import Database
 from ..policy import ApprovalService
 from ..providers.errors import ProviderError
 from ..providers.registry import DEFAULT_PROVIDER, ProviderRegistry
+from ..providers.spend import SpendTracker
 from ..router import Router
 from ..rules import RuleEngine
+from ..secret_store import SecretStore, SystemKeyringSecretStore
+from ..settings_store import SettingsStore
 from ..usage.meter import Budgets, UsageMeter
 from .executor import ApprovalExecutor, ApprovalGatedTools, ApprovedHandler
 from .loop import AgentLoop
@@ -62,6 +66,7 @@ def build_agent_runtime(
     budgets: Budgets | None = None,
     execute: ApprovedHandler | None = None,
     clock: Callable[[], datetime] = _utc_now,
+    secret_store: SecretStore | None = None,
 ) -> AgentRuntime:
     """Build the whole agent. ``tools`` supplies specs, intents, auto runs and proposals;
     approved actions always execute through the escrow and ``execute`` (default ``ActionExecutor``).
@@ -75,6 +80,15 @@ def build_agent_runtime(
     except ProviderError:
         catalog = []  # not signed in yet: the loop re-reads the catalog on its first request
     router = Router(catalog)
+    # Saved settings win over defaults: provider opt-ins and feature switches go into the live registry
+    # settings, tier overrides and automatic top-tier use into the live router. Nothing is turned on that
+    # the user did not turn on (the defaults stay off), and without saved settings nothing changes.
+    settings = SettingsStore(database)
+    secrets = secret_store or SystemKeyringSecretStore()
+    spend = SpendTracker(database)
+    if load_provider_settings(registry, settings):
+        register_enabled(registry, secrets, spend)  # providers the user enabled before the restart
+    load_router_settings(router, settings)
     meter = UsageMeter(database, budgets=budgets, clock=clock)
     rules = RuleEngine(database)
     reviewer = Reviewer(
@@ -86,7 +100,10 @@ def build_agent_runtime(
     )
     app = create_app(
         loop=loop, approvals=approvals, rules=rules, token=api_token, token_escrow=escrow, meter=meter, actor=actor,
-        database=database, registry=registry, extras={"router": router, "reviewer": reviewer},
+        database=database, registry=registry, extras={
+            "router": router, "reviewer": reviewer, "settings_store": settings, "secret_store": secrets,
+            "spend": spend,
+        },
     )
     return AgentRuntime(
         database=database, loop=loop, app=app, escrow=escrow, approvals=approvals, rules=rules, meter=meter,

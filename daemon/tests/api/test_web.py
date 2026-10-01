@@ -95,8 +95,14 @@ def test_api_needs_the_bearer_token_not_the_cookie(tmp_path: Path, dist: Path) -
     assert ok.status_code == 200 and ok.json()["status"] == "ok"
 
 
-def test_unimplemented_contract_endpoints_answer_501_behind_auth(tmp_path: Path, dist: Path) -> None:
-    client, _ = _client(tmp_path, dist)
+def test_unimplemented_contract_endpoints_answer_501_behind_auth(dist: Path) -> None:
+    # An API app that serves no contract routes at all, so every contract endpoint is "not implemented"
+    # (the real daemon serves /v1/rules and friends now; see test_config_endpoints.py).
+    from starlette.applications import Starlette
+
+    from opendot_core.api.web import create_web_app
+
+    client = TestClient(create_web_app(Starlette(routes=[]), token=TOKEN, ui_dist=dist), base_url=BASE)
     assert client.get("/v1/rules").status_code == 401
     missing = client.get("/v1/rules", headers={"Authorization": f"Bearer {TOKEN}"})
     assert missing.status_code == 501 and missing.json()["code"] == "not_implemented"

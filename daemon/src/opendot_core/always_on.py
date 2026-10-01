@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from .audit import AuditEvent, AuditLog
 from .catch_up import CatchUp
+from .companion_inbox import deliver_local
 from .db import Database
 from .keep_awake import KeepAwake
 from .runner import ConnectorSync, OpenDotRunner
@@ -92,6 +93,8 @@ class AlwaysOnWorker:
         self._guard("runner", runner.run_once)
         if report is not None:
             self._guard("catch_up_note", lambda: self.catch_up.announce(report))
+        # Reminders, routine results and the catch-up note reach the UI as companion messages.
+        self._guard("companion_inbox", lambda: deliver_local(self.database, clock=self.clock))
         self.catch_up.mark_cycle_done()
         return bool(self._guard("restart", runner.handle_restart_request))
 

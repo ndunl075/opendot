@@ -6,3 +6,7 @@ e19c8f50584d8a5bda33184453bc10260f82fbcd:tests/test_models.py:aws-access-token:1
 
 # False positive: arithmetic ("credits=total / TOKENS_PER_UNIT") matched the generic-api-key rule.
 e3e50ee041b77a69b527f34743cb449a989dbc8c:daemon/src/opendot_core/usage/meter.py:generic-api-key:60
+
+# Fake key in the M4 provider-endpoint tests ("sk-live-THIS-MUST-NEVER-LEAK-..."): the test asserts it never
+# appears in responses, logs or SQLite. Not a real credential.
+c2726dd886bc76ee8d185ac02b810bb767791653:daemon/tests/api/test_config_endpoints.py:generic-api-key:27
