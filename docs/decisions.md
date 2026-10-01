@@ -134,3 +134,40 @@ section 1. Newest last.
 - 2026-09-30 (M3): Package scripts never call `pnpm`, `npm` or `corepack` by name: on this machine
   `cmd.exe` cannot see them. Nested pnpm goes through `npm_execpath`, the Tauri CLI through Node, and
   `uv` is found by path search (`UV`, PATH, per-user install folders).
+- 2026-10-01 (M4, 4.6): `opendot doctor` returns ok, warn, fail or skipped per check, one line each.
+  Only `fail` makes the exit code non-zero; warnings (daemon not running, signed out, no backup, a
+  headless secrets file) never do. A missing keychain is a `fail` unless a secrets file is in use,
+  where it is a warn. Reason: warnings describe a normal setup that needs attention; failures mean the
+  install cannot work.
+- 2026-10-01 (M4, 4.6): `opendot doctor --ci` runs against a fresh temporary database and never reads
+  the keychain, probes the daemon, or contacts a network. It runs: database and migrations, packaged
+  migration numbering, audit hash chain, an encrypted-backup round trip with a throwaway key,
+  connector-health query, and disk space (low space is a warn there). The keychain, access token,
+  secrets file, daemon, service, ChatGPT sign-in, backups and restore drill print "skipped (needs
+  your setup)". Reason: the milestone finish line must pass on a clean CI runner with no account.
+- 2026-10-01 (M4, 4.6): the doctor reads ChatGPT state with `ChatGPTPlanProvider.status()` (keychain
+  plus the local state file, no request). It uses the provider's default state path
+  `.opendot/chatgpt_plan.json`, the same one `opendot serve` uses.
+- 2026-10-01 (M4, 4.6): nothing recorded when a backup or restore drill ran, so `backup-create` and
+  `backup-verify` now write `backup-status.json` (paths and times only, never keys) next to the
+  database. Doctor reads it, and also scans the backup folder (`--backup-dir`, `OPENDOT_BACKUP_DIR`,
+  or `<data folder>/backups`) for `*.opendot-backup` by modification time.
+- 2026-10-01 (M4, 4.6): service status comes from `opendot_core.service` if it exists (module
+  `status()` or `service_status()` returning an object or dict with `installed`); otherwise doctor
+  warns "service command not available". Written defensively because task 4.1 is built in parallel;
+  when it lands, check that its status shape matches `_default_service_status` in `doctor.py`.
+- 2026-10-01 (M4, 4.6): a headless secrets file is detected from `--token-file`, `OPENDOT_TOKEN_FILE`,
+  `$CREDENTIALS_DIRECTORY/opendot-token` (systemd) or `/run/secrets/opendot-token` (Docker), and is
+  always a WARN with the section 11 explanation (plus a mode check on POSIX).
+- 2026-10-01 (M4, 4.7): the Docker image shares the host's network namespace (`network_mode: host`,
+  Linux only) instead of publishing a port. Reason: `opendot serve` hard-codes 127.0.0.1, so a
+  published port could not reach it, and widening the bind address is not allowed.
+- 2026-10-01 (M4, 4.7): known gaps found while writing the guides, not fixed here: (1) the ChatGPT
+  sign-in tokens, backup key and connector secrets are kept only through the OS keychain, so the Docker
+  image cannot hold a ChatGPT sign-in and a systemd server needs a Secret Service keychain; the token
+  file covers only the access token. A protected-file token store is needed for a true headless setup.
+  (2) The sign-in callback port is random per attempt, so the SSH-forward guide has the user read the port
+  from the authorize URL; a `--redirect-port` option would simplify it. (3) The daemon refuses non-loopback
+  `Host` headers; `tailscale serve` may forward the tailnet name, which would need a deliberate Host
+  allow-list in the daemon. (4) The guide uses `POST /v1/auth/chatgpt/start`, which is a contract
+  endpoint another M4 task wires up.

@@ -48,6 +48,11 @@ Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the 
 - [x] 3.6 Tauri shell: PyInstaller sidecar, start or attach, tray (Open, Pause, Resume, Quit), NSIS installer
 - [x] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md` (U1 to U15 fixed, verdict "ready"; contract gaps for M4 accepted)
 
+## M4 progress
+
+- [x] 4.6 `opendot doctor` (`--ci`, `--json`; `doctor.py`): database and migrations, keychain, access token, daemon, service, ChatGPT sign-in, connectors, disk, backups, restore drill, headless secrets file. `--ci` exits 0 on a fresh temporary database and skips the checks that need your setup
+- [x] 4.7 `deploy/`: server guide (systemd user unit and Docker, both 127.0.0.1 only), Tailscale guide, headless secrets (systemd-creds, Docker secret), SSH-forward ChatGPT sign-in, section 11 caveat; `daemon/tests/test_deploy_files.py` checks the Docker files. Gaps recorded in `docs/decisions.md` (no keychain in Docker for ChatGPT tokens; Host header behind `tailscale serve`)
+
 ## Notes for M3 and M4
 
 - `agent/runtime.py` `build_agent_runtime` is the production assembly of the agent loop and the API. M3 task 3.5 serves `runtime.app` on 127.0.0.1. The browser WebSocket authenticates with the subprotocols `["opendot", "opendot.bearer.<token>"]` from a local origin.
