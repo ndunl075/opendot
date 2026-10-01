@@ -15,6 +15,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::ShellExt;
 
 const PORT: u16 = 8765;
@@ -24,6 +25,24 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 struct Daemon {
     token: String,
     child: Mutex<Option<CommandChild>>,
+}
+
+/// The origins the bundled UI is served from (Windows/Android use http(s)://tauri.localhost, the
+/// others tauri://localhost). Only these ever receive the token.
+const APP_ORIGINS: [&str; 3] = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
+
+fn is_app_url(url: &tauri::Url) -> bool {
+    let origin = url.origin().ascii_serialization();
+    APP_ORIGINS.contains(&origin.as_str()) || (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+}
+
+/// Open an http(s) link in the user's browser (never inside the app's webview).
+fn open_external(app: &AppHandle, url: &tauri::Url) {
+    if matches!(url.scheme(), "http" | "https") && url.username().is_empty() && url.password().is_none() {
+        if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
+            eprintln!("could not open {url}: {error}");
+        }
+    }
 }
 
 fn base_url() -> String {
@@ -126,6 +145,7 @@ fn stop_started_daemon(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let child = if daemon_running() {
@@ -143,14 +163,34 @@ pub fn run() {
                 eprintln!("{error}");
                 String::new()
             });
+            // The token goes only to the app's own origin: initialization scripts run on every
+            // top-level navigation, so the script checks where it is before writing anything.
             let init = format!(
-                "window.__OPENDOT__ = Object.freeze({});",
-                json!({ "token": token, "baseUrl": base_url() })
+                "if ({origins}.includes(window.location.origin)) {{ window.__OPENDOT__ = Object.freeze({config}); }}",
+                origins = json!(APP_ORIGINS),
+                config = json!({ "token": token, "baseUrl": base_url() })
             );
             app.manage(Daemon { token, child: Mutex::new(child) });
 
+            let nav_handle = handle.clone();
+            let popup_handle = handle.clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("OpenDot")
+                // The main window never leaves the app: external links open in the user's browser
+                // (Google sign-in refuses embedded webviews anyway).
+                .on_navigation(move |url| {
+                    if is_app_url(url) {
+                        return true;
+                    }
+                    open_external(&nav_handle, url);
+                    false
+                })
+                .on_new_window(move |url, _features| {
+                    if !is_app_url(&url) {
+                        open_external(&popup_handle, &url);
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(720.0, 520.0)
                 .initialization_script(&init)

@@ -165,3 +165,37 @@ def test_approval_items_carry_the_reviewer_note(tmp_path: Path) -> None:
     assert item["review_verdict"] == "concern" and "Check tone." in item["review_note"]
     again = client.get(f"/v1/approvals/{item['id']}", headers=AUTH).json()
     assert again["review_note"] == item["review_note"]  # durable, not only in the streamed card
+
+
+def test_replay_never_brings_back_a_decided_approval_or_a_stale_pause(tmp_path: Path) -> None:
+    from opendot_core.providers.types import Usage
+    from opendot_core.usage.meter import Budgets
+
+    world = build_world(tmp_path, script=[
+        tool_turn("gmail_draft_create", DRAFT), text_turn('{"verdict": "ok", "reasons": []}'), text_turn("Drafted."),
+        tool_turn("memory_search", {"query": "x"}, usage=Usage(input_tokens=400000)), text_turn("Done."),
+    ])
+    registry = ProviderRegistry(ProviderSettings(enabled={"chatgpt_plan"}))
+    registry.register(world.provider)
+    gmail = GmailActions(world.database, ApprovalService(world.database), world.world.gmail)
+    runtime = build_agent_runtime(world.database, registry, world.tools, api_token=TOKEN, actor=world.tools.actor,
+                                  execute=gmail.execute, budgets=Budgets(task_credits=1.0, daily_credits=100),
+                                  clock=world.clock)
+    client = TestClient(runtime.app)
+    hub = runtime.app.state.hub
+    sent = client.post("/v1/chat/messages", headers=AUTH, json={"text": "draft an email to bob@example.com"}).json()
+    hub.wait_idle()
+    approval_id = client.get("/v1/approvals", headers=AUTH).json()["approvals"][0]["id"]
+    client.post(f"/v1/approvals/{approval_id}/approve", headers=AUTH, json={})
+    hub.wait_idle()
+    replayed = hub.replay(sent["conversation_id"], 0)
+    cards = [e["approval"] for e in replayed if e["type"] == "approval_required"]
+    assert cards and all(card["status"] == "approved" for card in cards)
+
+    second = client.post("/v1/chat/messages", headers=AUTH, json={"text": "what do you know"}).json()
+    hub.wait_idle()
+    paused = [e for e in hub.replay(second["conversation_id"], 0) if e["type"] == "paused"]
+    assert paused and paused[0]["reason"] == "task_budget"
+    client.post(f"/v1/tasks/{paused[0]['task_id']}/continue", headers=AUTH)
+    hub.wait_idle()
+    assert [e for e in hub.replay(second["conversation_id"], 0) if e["type"] == "paused"] == []

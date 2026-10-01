@@ -72,6 +72,15 @@ _PAUSE_REASONS: dict[TaskState, str] = {
     TaskState.PAUSED_PLAN_LIMIT: "rate_limited",
     TaskState.WAITING_TOP_TIER: "top_tier_approval",
 }
+_PAUSED_STATES = frozenset(
+    {
+        TaskState.PAUSED,
+        TaskState.PAUSED_TASK_BUDGET,
+        TaskState.PAUSED_DAILY_BUDGET,
+        TaskState.PAUSED_PLAN_LIMIT,
+        TaskState.WAITING_TOP_TIER,
+    }
+)
 _APPROVAL_STATUS: dict[str, ApprovalStatus] = {
     "pending": "pending",
     "approved": "approved",
@@ -190,8 +199,28 @@ class ChatHub:
             self._subs.discard(sub)
 
     def replay(self, conversation_id: str, after_seq: int) -> list[dict[str, Any]]:
+        """Missed events, made current: a replayed approval card shows the approval's status now, and a
+        pause whose task is no longer paused is dropped, so nothing stale comes back actionable."""
         with self._lock:
-            return [e for e in self._history if e["seq"] > after_seq and e["conversation_id"] == conversation_id]
+            events = [e for e in self._history if e["seq"] > after_seq and e["conversation_id"] == conversation_id]
+        return [fresh for event in events if (fresh := self._current(event)) is not None]
+
+    def _current(self, event: dict[str, Any]) -> dict[str, Any] | None:
+        if event["type"] == "approval_required":
+            approval = self.approvals.get(event["approval"]["id"])
+            if approval is None:
+                return event
+            current = approval_to_item(approval, self.loop).model_copy(
+                update={"conversation_id": event["approval"].get("conversation_id")}
+            )
+            return {**event, "approval": current.model_dump(mode="json")}
+        if event["type"] == "paused" and event.get("task_id"):
+            try:
+                state = self.loop.task(event["task_id"]).state
+            except KeyError:
+                return None
+            return event if state in _PAUSED_STATES else None
+        return event
 
     def _publish(self, conversation_id: str, message_id: str, payload: dict[str, Any]) -> None:
         with self._lock:
