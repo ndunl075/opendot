@@ -1,5 +1,6 @@
 import { streamPath, type ClientFrame, type StreamEvent } from "./endpoints.gen";
 import { getApiToken } from "./client";
+import { socketUrl } from "./connection";
 
 type SocketFactory = (url: string, protocols: string[]) => WebSocket;
 
@@ -15,10 +16,9 @@ export class ChatStream {
   ) {}
 
   connect(): void {
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const token = this.getToken();
     const protocols = token ? ["opendot", `opendot.bearer.${token}`] : ["opendot"];
-    this.socket = this.createSocket(`${protocol}//${location.host}${streamPath}`, protocols);
+    this.socket = this.createSocket(socketUrl(streamPath), protocols);
     this.socket.addEventListener("open", () => {
       if (this.lastSeq > 0) this.send({ type: "resume", conversation_id: this.conversationId, after_seq: this.lastSeq });
     });

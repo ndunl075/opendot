@@ -14,5 +14,6 @@ export default tseslint.config(
     rules: reactHooks.configs.recommended.rules
   },
   { files: ["tests/**/*", "scripts/**/*", "*.config.ts"], languageOptions: { globals: globals.node } },
+  { files: ["public/*.js"], languageOptions: { globals: globals.browser } },
   { files: ["src/api/*.gen.ts"], rules: { "@typescript-eslint/no-namespace": "off" } }
 );
