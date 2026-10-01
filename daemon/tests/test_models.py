@@ -175,6 +175,15 @@ def test_redactor_leaves_ordinary_text_alone() -> None:
     assert Redactor().redact("Buy milk on Friday.") == "Buy milk on Friday."
 
 
+def test_redactor_keeps_record_ids_that_look_like_card_numbers() -> None:
+    # This id's digits and hyphens match the credit-card shape; it used to come
+    # out as "[REDACTED:credit_card]8c43-...", hiding ids from the model.
+    record_id = "81443400-9132-4199-8c43-2a6931b3ef5b"
+    redacted = Redactor().redact(f"id {record_id}, card 4111 1111 1111 1111")
+    assert record_id in redacted
+    assert "4111" not in redacted
+
+
 class _FakeCloudProvider:
     def __init__(self, *, model_name: str = "fake-model") -> None:
         self.model_name = model_name
