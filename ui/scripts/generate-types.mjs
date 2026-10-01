@@ -19,7 +19,7 @@ for (const filename of schemas) {
     bannerComment: "",
     style: { singleQuote: true }
   })).trim();
-  generated.push(`export namespace ${name}Schema {\n${compiled.split("\\n").map((line) => `  ${line}`).join("\\n")}\n}\nexport type ${name} = ${name}Schema.${name};`);
+  generated.push(`export namespace ${name}Schema {\n${compiled.split("\n").map((line) => line ? `  ${line}` : "").join("\n")}\n}\nexport type ${name} = ${name}Schema.${name};`);
 }
 
 const index = JSON.parse(await readFile(path.join(contractDir, "index.json"), "utf8"));

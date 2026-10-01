@@ -10,7 +10,7 @@
     "check:types": "node scripts/check-types.mjs",
     "lint": "eslint . && tsc --noEmit",
     "test": "vitest run",
-    "build": "corepack pnpm check:types && vite build",
+    "build": "node scripts/check-types.mjs && vite build",
     "e2e": "playwright test"
   },
   "dependencies": {
