@@ -31,6 +31,46 @@ jobs:
       - name: Test
         run: uv run --project daemon pytest daemon/tests -q
 
+      - name: Doctor (CI-safe checks)
+        run: uv run --project daemon opendot doctor --ci
+
+  ui:
+    # The UI is platform-independent web code, so one Linux job covers it. The desktop (Tauri) build
+    # needs native WebKit packages and many Actions minutes; it is built locally for each milestone.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm -C ui install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm -C ui lint
+
+      - name: Unit tests
+        run: pnpm -C ui test
+
+      - name: Build (fails if the generated contract types drifted)
+        run: pnpm -C ui build
+
+      - name: Install the Playwright browser
+        run: pnpm -C ui exec playwright install --with-deps chromium
+
+      - name: End-to-end tests (against the contract mock server)
+        run: pnpm -C ui e2e
+
   secrets:
     runs-on: ubuntu-latest
     steps:
