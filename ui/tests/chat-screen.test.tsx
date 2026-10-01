@@ -65,9 +65,21 @@ it("requires confirmation quoting the block reviewer note", async () => {
   await waitFor(() => expect(call).toHaveBeenCalledOnce());
 });
 
-it.each(["approved", "edited", "denied", "expired"] as const)("never offers actions for %s approvals", status => {
+it.each(["approved", "denied", "expired"] as const)("never offers actions for %s approvals", status => {
   render(<MemoryRouter><ApprovalCard approval={{ ...approval, status }} onDecision={vi.fn()} /></MemoryRouter>);
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
+it("keeps an edited approval actionable after saving an edit", async () => {
+  const call = vi.spyOn(api, "call").mockResolvedValue({ approval: { ...approval, status: "edited" }, executed: false });
+  card();
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save edit" }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith("approval_edit", { params: { approval_id: "approval-1" }, body: { payload: approval.payload, approve: false } }));
+  expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Always allow this" })).toBeEnabled();
 });
 
 it.each([404, 409, 410])("refreshes after a %s decision conflict and removes stale actions", async status => {

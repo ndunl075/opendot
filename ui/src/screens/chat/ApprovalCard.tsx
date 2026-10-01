@@ -16,7 +16,7 @@ export function ApprovalCard({ approval, onDecision }: { approval: ApprovalItem;
   const [invalid, setInvalid] = useState(false);
   const mutation = useMutation();
   const current = refreshed ?? result?.approval ?? approval;
-  const actionable = current.status === "pending" && !invalid && !isSessionError(mutation.error);
+  const actionable = (current.status === "pending" || current.status === "edited") && !invalid && !isSessionError(mutation.error);
   const params = { approval_id: approval.id };
   async function decide(action: () => Promise<ApprovalDecisionResult>) {
     if (!actionable) return;
