@@ -599,6 +599,7 @@ export type CompletedEvent = CompletedEventSchema.CompletedEvent;
 export namespace ConnectionSchema {
   export type AccountLabel = string;
   export type App = 'gmail' | 'google_calendar' | 'github';
+  export type AuthorizeUrl = string | null;
   export type Health = 'ok' | 'stale' | 'error' | 'never_synced';
   export type HealthDetail = string | null;
   export type Id = string;
@@ -611,6 +612,7 @@ export namespace ConnectionSchema {
   export interface Connection {
     account_label: AccountLabel;
     app: App;
+    authorize_url?: AuthorizeUrl;
     health: Health;
     health_detail?: HealthDetail;
     id: Id;
@@ -646,6 +648,7 @@ export type ConnectionDisconnectResult = ConnectionDisconnectResultSchema.Connec
 export namespace ConnectionListSchema {
   export type AccountLabel = string;
   export type App = 'gmail' | 'google_calendar' | 'github';
+  export type AuthorizeUrl = string | null;
   export type Health = 'ok' | 'stale' | 'error' | 'never_synced';
   export type HealthDetail = string | null;
   export type Id = string;
@@ -662,6 +665,7 @@ export namespace ConnectionListSchema {
   export interface Connection {
     account_label: AccountLabel;
     app: App;
+    authorize_url?: AuthorizeUrl;
     health: Health;
     health_detail?: HealthDetail;
     id: Id;
@@ -853,6 +857,49 @@ export namespace FeatureSwitchStateSchema {
   }
 }
 export type FeatureSwitchState = FeatureSwitchStateSchema.FeatureSwitchState;
+
+export namespace GithubTokenRequestSchema {
+  export type Token = string;
+
+  export interface GithubTokenRequest {
+    token: Token;
+  }
+}
+export type GithubTokenRequest = GithubTokenRequestSchema.GithubTokenRequest;
+
+export namespace GithubTokenStatusSchema {
+  export type Configured = boolean;
+
+  export interface GithubTokenStatus {
+    configured: Configured;
+  }
+}
+export type GithubTokenStatus = GithubTokenStatusSchema.GithubTokenStatus;
+
+export namespace GoogleClientRequestSchema {
+  export type ClientId = string;
+  export type ClientSecret = string;
+
+  /**
+   * The user's own Google OAuth client ("Desktop app" type). Stored only in the OS keychain.
+   */
+  export interface GoogleClientRequest {
+    client_id: ClientId;
+    client_secret: ClientSecret;
+  }
+}
+export type GoogleClientRequest = GoogleClientRequestSchema.GoogleClientRequest;
+
+export namespace GoogleClientStatusSchema {
+  export type Configured = boolean;
+  export type SetupSteps = string[];
+
+  export interface GoogleClientStatus {
+    configured: Configured;
+    setup_steps?: SetupSteps;
+  }
+}
+export type GoogleClientStatus = GoogleClientStatusSchema.GoogleClientStatus;
 
 export namespace HealthResponseSchema {
   export type CheckedAt = string;

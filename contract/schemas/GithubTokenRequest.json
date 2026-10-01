@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "token": {
+      "minLength": 1,
+      "title": "Token",
+      "type": "string"
+    }
+  },
+  "required": [
+    "token"
+  ],
+  "title": "GithubTokenRequest",
+  "type": "object"
+}

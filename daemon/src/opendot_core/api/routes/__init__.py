@@ -37,8 +37,14 @@ class ApiContext:
 
 RouteModule = Callable[[ApiContext], list[BaseRoute]]
 
+def _connect(ctx: ApiContext) -> list[BaseRoute]:
+    from . import connect
+
+    return connect.routes(ctx)
+
+
 #: Every route module, in mount order. Add yours here (one line per module).
-ROUTE_MODULES: list[RouteModule] = []
+ROUTE_MODULES: list[RouteModule] = [_connect]
 
 
 def build_routes(ctx: ApiContext, modules: list[RouteModule] | None = None) -> list[BaseRoute]:

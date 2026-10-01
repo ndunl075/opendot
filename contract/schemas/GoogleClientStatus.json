@@ -1,0 +1,21 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "configured": {
+      "title": "Configured",
+      "type": "boolean"
+    },
+    "setup_steps": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Setup Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "configured"
+  ],
+  "title": "GoogleClientStatus",
+  "type": "object"
+}

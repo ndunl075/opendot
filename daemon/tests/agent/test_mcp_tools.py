@@ -24,7 +24,26 @@ def db_path(tmp_path: Path) -> Path:
     return path
 
 
+def allow_google_writes(path: Path) -> None:
+    from opendot_core.google_oauth import READ_SCOPES, WRITE_SCOPES
+    from opendot_core.settings_store import SettingsStore
+
+    SettingsStore(Database(path)).set(
+        "google_connection", {"write_opt_in": True, "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES]}
+    )
+
+
+def test_google_write_tools_are_hidden_until_the_user_opts_in(db_path: Path) -> None:
+    names = {spec.name for spec in McpTools(db_path).specs()}
+    assert not names & {"message_draft", "message_send_propose", "calendar_event_propose"}
+    with pytest.raises(KeyError):
+        McpTools(db_path).intent("message_draft", {"to": "x@y.test"})
+    allow_google_writes(db_path)
+    assert {"message_draft", "calendar_event_propose"} <= {spec.name for spec in McpTools(db_path).specs()}
+
+
 def test_every_mcp_tool_is_declared_and_action_commit_is_never_offered(db_path: Path) -> None:
+    allow_google_writes(db_path)
     assert set(TOOL_FACTS) | {"action_commit"} == set(MCP_TOOL_NAMES)
     names = [spec.name for spec in McpTools(db_path).specs()]
     assert "action_commit" not in names
@@ -34,6 +53,7 @@ def test_every_mcp_tool_is_declared_and_action_commit_is_never_offered(db_path: 
 
 
 def test_sending_is_declared_as_reaching_people_and_always_asks(db_path: Path) -> None:
+    allow_google_writes(db_path)
     tools = McpTools(db_path)
     rules = RuleEngine(Database(db_path))
     intent = tools.intent("message_send_propose", {"to": "a@b.test", "subject": "s", "body": "b"})
@@ -52,6 +72,7 @@ def test_unknown_tools_fail_closed(db_path: Path) -> None:
 
 
 def test_propose_creates_an_approval_and_touches_nothing(db_path: Path) -> None:
+    allow_google_writes(db_path)
     tools = McpTools(db_path)
     approval = tools.propose("message_draft", {"to": "bob@example.com", "subject": "Hi", "body": "Lunch?"}, task_id="t")
     assert approval.action_type == "gmail_draft_create" and approval.state == "pending"
@@ -61,6 +82,7 @@ def test_propose_creates_an_approval_and_touches_nothing(db_path: Path) -> None:
 
 
 def test_auto_run_of_a_proposal_tool_approves_and_executes_once(db_path: Path) -> None:
+    allow_google_writes(db_path)
     executed: list[str] = []
 
     def execute(approval_id: str, *, actor: str, token: str) -> dict:

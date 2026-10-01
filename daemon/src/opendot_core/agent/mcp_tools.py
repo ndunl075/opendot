@@ -33,6 +33,8 @@ from ..rules import ToolIntent
 AGENT_CLIENT_ID = "agent"
 AGENT_ACTOR = f"mcp:{AGENT_CLIENT_ID}"
 NEVER_OFFERED = frozenset({"action_commit"})
+#: Offered only while the user's Google write opt-in is on and Google granted the write scopes.
+GOOGLE_WRITE_TOOLS = frozenset({"message_draft", "message_send_propose", "calendar_event_propose"})
 
 
 @dataclass(frozen=True)
@@ -125,17 +127,25 @@ class McpTools:
 
     # -- ToolExecutor -------------------------------------------------------------------------
 
+    def offered(self) -> list[str]:
+        from ..connections_google import google_write_allowed
+
+        if google_write_allowed(self.database):
+            return list(self._offered)
+        return [name for name in self._offered if name not in GOOGLE_WRITE_TOOLS]
+
     def specs(self) -> list[ToolSpec]:
+        offered = set(self.offered())
         tools = _run_sync(self._server.list_tools())
         return [
             ToolSpec(name=tool.name, description=tool.description or "", parameters=tool.inputSchema)
             for tool in tools
-            if tool.name in self._offered
+            if tool.name in offered
         ]
 
     def intent(self, name: str, arguments: dict[str, Any] | str) -> ToolIntent:
         facts = TOOL_FACTS.get(name)
-        if facts is None or name not in self._offered:
+        if facts is None or name not in self.offered():
             raise KeyError(name)
         args = _arguments(arguments)
         action = facts.action

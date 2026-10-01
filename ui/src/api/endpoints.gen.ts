@@ -1,6 +1,6 @@
 /* This file is generated from contract/. Do not edit. */
 
-import type { ActivityList, ActivityQuery, ApprovalAlwaysAllowRequest, ApprovalApproveRequest, ApprovalDecisionResult, ApprovalDenyRequest, ApprovalEditRequest, ApprovalItem, ApprovalList, ApprovalRequiredEvent, BackupCreateRequest, BackupInfo, BackupRestoreRequest, BackupRestoreResult, BackupStatus, ChatGPTSignInStart, ChatGPTSignInStartRequest, ChatGPTStatus, ChatSendAccepted, ChatSendRequest, ClientPingFrame, ClientResumeFrame, ClientSendFrame, CompanionAvatarRequest, CompanionPauseRequest, CompanionProfile, CompanionRenameRequest, CompanionResetRequest, CompanionSetupRequest, CompanionTaskList, CompletedEvent, Connection, ConnectionDisconnectRequest, ConnectionDisconnectResult, ConnectionList, ConnectionStart, ConnectionStartRequest, ConnectionWriteOptInRequest, Conversation, ConversationList, ErrorEvent, FeatureSwitchList, FeatureSwitchSetRequest, FeatureSwitchState, HealthResponse, MemoryCorrectRequest, MemoryCorrectResult, MemoryForgetRequest, MemoryForgetResult, MemorySearchQuery, MemorySearchResult, MessageStartedEvent, OkResponse, OnboardingAcknowledgeRequest, OnboardingState, PausedEvent, PlanLimitResumeResult, ProviderApiKeyRequest, ProviderEnabledRequest, ProviderKeyStatus, ProviderOptIn, ProviderSpend, ProviderSpendCapRequest, ProviderSpendList, Rule, RuleCreateRequest, RuleList, RuleUpdateRequest, Settings, SettingsUpdateRequest, TaskActionResult, TextDeltaEvent, ToolCallEvent, UsageBudgets, UsageQuery, UsageSummary, VersionResponse } from "./types.gen";
+import type { ActivityList, ActivityQuery, ApprovalAlwaysAllowRequest, ApprovalApproveRequest, ApprovalDecisionResult, ApprovalDenyRequest, ApprovalEditRequest, ApprovalItem, ApprovalList, ApprovalRequiredEvent, BackupCreateRequest, BackupInfo, BackupRestoreRequest, BackupRestoreResult, BackupStatus, ChatGPTSignInStart, ChatGPTSignInStartRequest, ChatGPTStatus, ChatSendAccepted, ChatSendRequest, ClientPingFrame, ClientResumeFrame, ClientSendFrame, CompanionAvatarRequest, CompanionPauseRequest, CompanionProfile, CompanionRenameRequest, CompanionResetRequest, CompanionSetupRequest, CompanionTaskList, CompletedEvent, Connection, ConnectionDisconnectRequest, ConnectionDisconnectResult, ConnectionList, ConnectionStart, ConnectionStartRequest, ConnectionWriteOptInRequest, Conversation, ConversationList, ErrorEvent, FeatureSwitchList, FeatureSwitchSetRequest, FeatureSwitchState, GithubTokenRequest, GithubTokenStatus, GoogleClientRequest, GoogleClientStatus, HealthResponse, MemoryCorrectRequest, MemoryCorrectResult, MemoryForgetRequest, MemoryForgetResult, MemorySearchQuery, MemorySearchResult, MessageStartedEvent, OkResponse, OnboardingAcknowledgeRequest, OnboardingState, PausedEvent, PlanLimitResumeResult, ProviderApiKeyRequest, ProviderEnabledRequest, ProviderKeyStatus, ProviderOptIn, ProviderSpend, ProviderSpendCapRequest, ProviderSpendList, Rule, RuleCreateRequest, RuleList, RuleUpdateRequest, Settings, SettingsUpdateRequest, TaskActionResult, TextDeltaEvent, ToolCallEvent, UsageBudgets, UsageQuery, UsageSummary, VersionResponse } from "./types.gen";
 
 export interface EndpointTable {
   "activity_list": { method: "GET"; path: "/v1/activity"; request: ActivityQuery; response: ActivityList; requestIn: "query" };
@@ -33,6 +33,10 @@ export interface EndpointTable {
   "connections_list": { method: "GET"; path: "/v1/connections"; request: never; response: ConnectionList; requestIn: null };
   "feature_set": { method: "PUT"; path: "/v1/providers/features/{feature}"; request: FeatureSwitchSetRequest; response: FeatureSwitchState; requestIn: "body" };
   "features_list": { method: "GET"; path: "/v1/providers/features"; request: never; response: FeatureSwitchList; requestIn: null };
+  "github_token_remove": { method: "DELETE"; path: "/v1/connections/github/token"; request: never; response: GithubTokenStatus; requestIn: null };
+  "github_token_set": { method: "PUT"; path: "/v1/connections/github/token"; request: GithubTokenRequest; response: GithubTokenStatus; requestIn: "body" };
+  "google_client_get": { method: "GET"; path: "/v1/connections/google/client"; request: never; response: GoogleClientStatus; requestIn: null };
+  "google_client_set": { method: "PUT"; path: "/v1/connections/google/client"; request: GoogleClientRequest; response: GoogleClientStatus; requestIn: "body" };
   "health": { method: "GET"; path: "/v1/health"; request: never; response: HealthResponse; requestIn: null };
   "memory_correct": { method: "POST"; path: "/v1/memory/{memory_id}/correct"; request: MemoryCorrectRequest; response: MemoryCorrectResult; requestIn: "body" };
   "memory_forget": { method: "POST"; path: "/v1/memory/forget"; request: MemoryForgetRequest; response: MemoryForgetResult; requestIn: "body" };
@@ -92,6 +96,10 @@ export const endpointTable = {
   "connections_list": { method: "GET", path: "/v1/connections", requestIn: null },
   "feature_set": { method: "PUT", path: "/v1/providers/features/{feature}", requestIn: "body" },
   "features_list": { method: "GET", path: "/v1/providers/features", requestIn: null },
+  "github_token_remove": { method: "DELETE", path: "/v1/connections/github/token", requestIn: null },
+  "github_token_set": { method: "PUT", path: "/v1/connections/github/token", requestIn: "body" },
+  "google_client_get": { method: "GET", path: "/v1/connections/google/client", requestIn: null },
+  "google_client_set": { method: "PUT", path: "/v1/connections/google/client", requestIn: "body" },
   "health": { method: "GET", path: "/v1/health", requestIn: null },
   "memory_correct": { method: "POST", path: "/v1/memory/{memory_id}/correct", requestIn: "body" },
   "memory_forget": { method: "POST", path: "/v1/memory/forget", requestIn: "body" },

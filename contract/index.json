@@ -344,6 +344,42 @@
       "summary": "Begin connecting an app"
     },
     {
+      "method": "GET",
+      "name": "google_client_get",
+      "path": "/v1/connections/google/client",
+      "request": null,
+      "request_in": null,
+      "response": "GoogleClientStatus",
+      "summary": "Whether the user's own Google OAuth client is set up"
+    },
+    {
+      "method": "PUT",
+      "name": "google_client_set",
+      "path": "/v1/connections/google/client",
+      "request": "GoogleClientRequest",
+      "request_in": "body",
+      "response": "GoogleClientStatus",
+      "summary": "Save the user's own Google OAuth client (keychain only)"
+    },
+    {
+      "method": "PUT",
+      "name": "github_token_set",
+      "path": "/v1/connections/github/token",
+      "request": "GithubTokenRequest",
+      "request_in": "body",
+      "response": "GithubTokenStatus",
+      "summary": "Save a GitHub personal access token (keychain only)"
+    },
+    {
+      "method": "DELETE",
+      "name": "github_token_remove",
+      "path": "/v1/connections/github/token",
+      "request": null,
+      "request_in": null,
+      "response": "GithubTokenStatus",
+      "summary": "Remove the GitHub token"
+    },
+    {
       "method": "PUT",
       "name": "connection_write_opt_in",
       "path": "/v1/connections/{connection_id}/write-opt-in",
@@ -552,6 +588,10 @@
     "schemas/FeatureSwitchList.json",
     "schemas/FeatureSwitchSetRequest.json",
     "schemas/FeatureSwitchState.json",
+    "schemas/GithubTokenRequest.json",
+    "schemas/GithubTokenStatus.json",
+    "schemas/GoogleClientRequest.json",
+    "schemas/GoogleClientStatus.json",
     "schemas/HealthResponse.json",
     "schemas/MemoryCorrectRequest.json",
     "schemas/MemoryCorrectResult.json",

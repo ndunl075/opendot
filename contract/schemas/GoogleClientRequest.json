@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "description": "The user's own Google OAuth client (\"Desktop app\" type). Stored only in the OS keychain.",
+  "properties": {
+    "client_id": {
+      "minLength": 1,
+      "title": "Client Id",
+      "type": "string"
+    },
+    "client_secret": {
+      "minLength": 1,
+      "title": "Client Secret",
+      "type": "string"
+    }
+  },
+  "required": [
+    "client_id",
+    "client_secret"
+  ],
+  "title": "GoogleClientRequest",
+  "type": "object"
+}

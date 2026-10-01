@@ -70,7 +70,16 @@ def run_token(args: argparse.Namespace, *, store: SecretStore | None = None, out
     return 0
 
 
-def build_serve_app(database: Database, *, token: str, ui_dist: Path | None, registry: Any = None, tools: Any = None):  # noqa: ANN201
+def build_serve_app(  # noqa: ANN201
+    database: Database,
+    *,
+    token: str,
+    ui_dist: Path | None,
+    registry: Any = None,
+    tools: Any = None,
+    port: int = DEFAULT_PORT,
+    secret_store: Any = None,
+):
     """The whole loopback app. ``registry`` defaults to the ChatGPT plan provider only."""
     from ..agent.runtime import build_agent_runtime
     from ..providers.registry import ProviderRegistry, ProviderSettings
@@ -86,6 +95,13 @@ def build_serve_app(database: Database, *, token: str, ui_dist: Path | None, reg
 
         tools = McpTools(database.path)
     runtime = build_agent_runtime(database, registry, tools, api_token=token, actor=getattr(tools, "actor", "owner"))
+    from ..connections_google import GoogleConnector
+
+    secrets = secret_store or SystemKeyringSecretStore()
+    runtime.app.state.context.extras["secret_store"] = secrets
+    runtime.app.state.context.extras["google_connector"] = GoogleConnector(
+        database, secrets, base_url=f"http://{HOST}:{port}"
+    )
     runtime.loop.resume_all()
     return create_web_app(runtime.app, token=token, ui_dist=ui_dist), runtime
 
@@ -116,7 +132,7 @@ def run_serve(args: argparse.Namespace, database: Database) -> int:
     else:
         token = load_or_create_token(SystemKeyringSecretStore())
     ui_dist = Path(args.ui_dist) if args.ui_dist else default_ui_dist()
-    app, _ = build_serve_app(database, token=token, ui_dist=ui_dist)
+    app, _ = build_serve_app(database, token=token, ui_dist=ui_dist, port=args.port)
     config = uvicorn.Config(app, host=HOST, port=args.port, log_level="warning")
     server = uvicorn.Server(config)
     if args.print_ready:
