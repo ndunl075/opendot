@@ -375,6 +375,10 @@ def create_app(
     meter: Any = None,
     actor: str = "owner",
     companion_name: str = "OpenDot",
+    database: Any = None,
+    registry: Any = None,
+    extras: dict[str, Any] | None = None,
+    route_modules: list[Any] | None = None,
 ) -> Starlette:
     """Build the app. Bind it to 127.0.0.1 when serving; every route needs the bearer token."""
     if not token:
@@ -597,7 +601,21 @@ def create_app(
         Route(f"{v}/tasks/{{task_id}}/approve-top-tier", task_approve_top_tier, methods=["POST"]),
         WebSocketRoute(CHAT_STREAM_PATH, chat_stream),
     ]
+    from .routes import ApiContext, build_routes
+
+    context = ApiContext(
+        loop=loop, approvals=approvals, rules=rules, escrow=token_escrow, hub=hub, actor=actor, meter=meter,
+        database=database, registry=registry, extras=dict(extras or {}),
+    )
+    taken = {(getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", None) or ()))) for route in routes}
+    for extra in build_routes(context, route_modules):
+        key = (getattr(extra, "path", ""), tuple(sorted(getattr(extra, "methods", None) or ())))
+        if key in taken:
+            raise ValueError(f"route registered twice: {key}")
+        taken.add(key)
+        routes.append(extra)
     app = Starlette(routes=routes, middleware=[Middleware(BearerAuth, token=token)])
+    app.state.context = context
     app.state.hub = hub
     app.state.token_escrow = token_escrow
     app.state.meter = meter

@@ -85,7 +85,8 @@ def build_agent_runtime(
         provider_name=provider_name, clock=clock,
     )
     app = create_app(
-        loop=loop, approvals=approvals, rules=rules, token=api_token, token_escrow=escrow, meter=meter, actor=actor
+        loop=loop, approvals=approvals, rules=rules, token=api_token, token_escrow=escrow, meter=meter, actor=actor,
+        database=database, registry=registry, extras={"router": router, "reviewer": reviewer},
     )
     return AgentRuntime(
         database=database, loop=loop, app=app, escrow=escrow, approvals=approvals, rules=rules, meter=meter,
