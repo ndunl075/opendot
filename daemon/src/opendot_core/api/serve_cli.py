@@ -36,9 +36,9 @@ def register(subparsers: Any) -> None:
         help="serve only the API and UI; skip the always-on loop (due jobs, reminders, syncs, keep-awake)",
     )
     serve.add_argument("--print-ready", action="store_true", help="print one JSON line when listening (for the desktop shell)")
-    opener = subparsers.add_parser("open", help="open OpenDot in your browser (signs in with a one-time link)")
+    opener = subparsers.add_parser("open", help="open OpenDot in your browser and show a one-time sign-in code")
     opener.add_argument("--port", type=int, default=DEFAULT_PORT)
-    opener.add_argument("--no-browser", action="store_true", help="print the one-time link instead of opening it")
+    opener.add_argument("--no-browser", action="store_true", help="print the address instead of opening the browser")
     opener.add_argument("--token-file", help="read the access token from this file instead of the OS keychain")
     token = subparsers.add_parser("api-token", help="show or rotate the UI/API access token")
     token.add_argument("action", choices=["show", "rotate"])
@@ -120,12 +120,12 @@ def run_open(args: argparse.Namespace, *, store: SecretStore | None = None, out:
     except Exception as error:  # daemon not running, network error
         out.write(f"OpenDot is not answering at {base} ({type(error).__name__}). Start it with `opendot serve`.\n")
         return 1
-    url = f"{base}/login#code={code}"
+    url = f"{base}/login"  # never carries the code: launch arguments can be visible to other users (S12)
+    out.write(f"Your sign-in code: {code}  (type it into the OpenDot page; it works once, for two minutes)\n")
     if args.no_browser:
-        out.write(f"Open this link within two minutes (it works once): {url}\n")
+        out.write(f"Open {url}\n")
     else:
         webbrowser.open(url)
-        out.write("Opened OpenDot in your browser.\n")
     return 0
 
 

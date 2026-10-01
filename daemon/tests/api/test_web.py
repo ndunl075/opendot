@@ -67,7 +67,7 @@ def test_no_cookie_ever_and_no_page_carries_or_asks_for_the_token(tmp_path: Path
     assert client.get("/rules/123").text == index.text  # SPA fallback, public
     login = client.get("/login")
     assert login.status_code == 200 and TOKEN not in login.text and "set-cookie" not in login.headers
-    assert 'type="password"' not in login.text and "opendot open" in login.text
+    assert 'type="password"' not in login.text and "opendot open" in login.text and "one-time-code" in login.text
     assert f'localStorage.setItem("{TOKEN_STORAGE_KEY}", body.session_token)' in login.text
     assert "frame-ancestors 'none'" in login.headers["content-security-policy"]
     logout = client.get("/logout")
@@ -99,7 +99,10 @@ def test_challenge_proves_the_daemon_and_the_client_without_sending_the_token(tm
 
 
 def test_one_time_login_codes_from_opendot_open(tmp_path: Path, dist: Path) -> None:
+    """Security review S10 and S12: the code is shown only in the terminal (never in a URL or the
+    browser's launch arguments), is typed by hand, and works once."""
     import io
+    import re
     from argparse import Namespace
 
     from opendot_core.api.serve_cli import run_open
@@ -109,12 +112,54 @@ def test_one_time_login_codes_from_opendot_open(tmp_path: Path, dist: Path) -> N
     store.store("opendot-api-token", TOKEN)
     out = io.StringIO()
     assert run_open(Namespace(port=8765, no_browser=True, token_file=None), store=store, out=out, client=client) == 0
-    link = out.getvalue().strip().split()[-1]
-    assert link.startswith("http://127.0.0.1:8765/login#code=odl_") and TOKEN not in link
-    code = link.split("code=", 1)[1]
-    first = client.post("/v1/session", json={"login_code": code})
+    text = out.getvalue()
+    code = re.search(r"code: ([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})", text).group(1)
+    assert "Open http://127.0.0.1:8765/login\n" in text and "#code" not in text and TOKEN not in text
+    first = client.post("/v1/session", json={"login_code": code.lower().replace("-", " ")})  # forgiving typing
     assert first.status_code == 200 and first.json()["session_token"].startswith("ods_")
     assert client.post("/v1/session", json={"login_code": code}).status_code == 401  # works once
+
+
+def test_guessing_login_codes_locks_them_out(tmp_path: Path, dist: Path) -> None:
+    from opendot_core.api.server import MAX_FAILED_CODES, session_mac
+
+    client, _ = _client(tmp_path, dist)
+    challenge = client.get("/v1/session/challenge?nonce=" + "ef" * 16).json()["challenge"]
+    code = client.post(
+        "/v1/session", json={"challenge": challenge, "mac": session_mac(TOKEN, challenge), "kind": "login_code"}
+    ).json()["login_code"]
+    for _ in range(MAX_FAILED_CODES):
+        assert client.post("/v1/session", json={"login_code": "AAAA-BBBB-CCCC"}).status_code == 401
+    assert client.post("/v1/session", json={"login_code": code}).status_code == 429  # the real one is dead too
+
+
+def test_sessions_expire_and_can_be_revoked() -> None:
+    from opendot_core.api.server import SESSION_TTL_SECONDS, SessionTokens
+
+    now = [0.0]
+    sessions = SessionTokens(clock=lambda: now[0])
+    token = sessions.mint().encode()
+    assert sessions.valid(token)
+    now[0] = SESSION_TTL_SECONDS + 1
+    assert not sessions.valid(token)
+    other = sessions.mint().encode()
+    sessions.revoke(other)
+    assert not sessions.valid(other)
+
+
+def test_logout_revokes_the_session(tmp_path: Path, dist: Path) -> None:
+    from opendot_core.api.server import session_mac
+
+    client, _ = _client(tmp_path, dist)
+    challenge = client.get("/v1/session/challenge?nonce=" + "aa" * 16).json()["challenge"]
+    session = client.post("/v1/session", json={"challenge": challenge, "mac": session_mac(TOKEN, challenge)}).json()[
+        "session_token"
+    ]
+    auth = {"Authorization": f"Bearer {session}"}
+    assert client.get("/v1/health", headers=auth).status_code == 200
+    assert '"/v1/session/revoke"' in client.get("/logout").text
+    assert client.post("/v1/session/revoke", headers=auth).status_code == 200
+    assert client.get("/v1/health", headers=auth).status_code == 401
 
 
 def test_opendot_open_refuses_an_impostor(tmp_path: Path, dist: Path) -> None:
