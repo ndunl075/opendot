@@ -16,7 +16,7 @@ from .api.cli_glue import add_parsers as api_contract_add_parsers
 from .api.cli_glue import dispatch as api_contract_dispatch
 from .audit import AuditEvent, AuditLog
 from .availability import AvailabilityService
-from .backup import EncryptedBackupService, latest_backup
+from .backup import EncryptedBackupService, latest_backup, record_backup_event
 from .brief_schedule import create_daily
 from .briefing import BriefingService
 from .calendar_history import CalendarMemoryService, CalendarRollupService
@@ -831,6 +831,14 @@ def build_parser() -> argparse.ArgumentParser:
     from .api import serve_cli
 
     serve_cli.register(subcommands)
+
+    from . import service as service_cli
+
+    service_cli.register(subcommands)
+
+    from . import doctor
+
+    doctor.register(subcommands)
     return parser
 
 
@@ -847,6 +855,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .eval import cli as eval_cli
 
         return eval_cli.run(args)
+    if args.command == "service":
+        from . import service as service_cli
+
+        return service_cli.run_service(args)
+
+    if args.command == "doctor":
+        from . import doctor
+
+        return doctor.run(args)
     if args.command == "api-token":
         from .api import serve_cli
 
@@ -894,6 +911,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         receipt = EncryptedBackupService(database, ApprovalService(database)).create(
             args.output, encoded_key=SystemKeyringSecretStore().get_required(args.secret_name)
         )
+        record_backup_event(database.path.resolve().parent, "last_backup", path=receipt.path, at=receipt.created_at)
         print(receipt.model_dump_json())
         return 0
     if args.command == "backup-verify":
@@ -901,6 +919,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = EncryptedBackupService(database, ApprovalService(database)).verify_restore(
             target, encoded_key=SystemKeyringSecretStore().get_required(args.secret_name)
         )
+        record_backup_event(database.path.resolve().parent, "last_drill", path=target, ok=report.ok)
         print(report.model_dump_json())
         # Non-zero on failure so a scheduled drill is noticed rather than
         # logging a cheerful "ok": false into a file nobody reads.

@@ -28,6 +28,12 @@ def register(subparsers: Any) -> None:
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
     serve.add_argument("--ui-dist", help="built UI directory (default: ui/dist next to the daemon, or OPENDOT_UI_DIST)")
     serve.add_argument("--token-file", help="read the access token from this file instead of the OS keychain")
+    serve.add_argument("--log-file", help="append stdout and stderr to this file (used by the Windows service)")
+    serve.add_argument(
+        "--no-background",
+        action="store_true",
+        help="serve only the API and UI; skip the always-on loop (due jobs, reminders, syncs, keep-awake)",
+    )
     serve.add_argument("--print-ready", action="store_true", help="print one JSON line when listening (for the desktop shell)")
     token = subparsers.add_parser("api-token", help="show or rotate the UI/API access token")
     token.add_argument("action", choices=["show", "rotate"])
@@ -124,8 +130,20 @@ class NoTools:
         raise KeyError(name)
 
 
-def run_serve(args: argparse.Namespace, database: Database) -> int:
+def redirect_output(path: str) -> None:
+    """Send this process's stdout and stderr to ``path`` (line-buffered, appended)."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    stream = open(target, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - lives as long as the process
+    sys.stdout = stream
+    sys.stderr = stream
+
+
+def run_serve(args: argparse.Namespace, database: Database, *, worker: Any = None) -> int:
     import uvicorn
+
+    if getattr(args, "log_file", None):
+        redirect_output(args.log_file)
 
     if args.token_file:
         token = Path(args.token_file).read_text(encoding="utf-8").strip()
@@ -145,7 +163,17 @@ def run_serve(args: argparse.Namespace, database: Database) -> int:
         server.startup = startup  # type: ignore[method-assign]
     else:
         print(f"OpenDot is running at http://{HOST}:{args.port} (sign in with `opendot api-token show`)")
-    server.run()
+    if worker is None and not getattr(args, "no_background", False):
+        from ..always_on import AlwaysOnWorker
+
+        worker = AlwaysOnWorker(database)
+    if worker is not None:
+        worker.start()
+    try:
+        server.run()
+    finally:
+        if worker is not None:
+            worker.stop()
     return 0
 
 

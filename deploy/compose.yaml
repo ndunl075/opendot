@@ -1,0 +1,35 @@
+# OpenDot on a server (deploy/README.md). Start with:  docker compose -f deploy/compose.yaml up -d --build
+#
+# Loopback only. The daemon always listens on 127.0.0.1, so the container shares the host's network
+# namespace (network_mode: host, Linux only): that 127.0.0.1 IS the host's loopback, and no port is
+# published on any other interface. Reach it from other devices with Tailscale (deploy/tailscale.md),
+# never by opening a port.
+services:
+  opendot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: opendot:local
+    restart: unless-stopped
+    network_mode: host
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - opendot-data:/data
+    secrets:
+      - opendot-token
+
+secrets:
+  # A file you create with mode 0600 (deploy/secrets-and-signin.md). Docker mounts it read-only at
+  # /run/secrets/opendot-token. `opendot doctor` warns that a secrets file is in use.
+  opendot-token:
+    file: ./secrets/opendot-token
+
+volumes:
+  opendot-data:

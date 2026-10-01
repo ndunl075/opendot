@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import gc
 import hashlib
+import json
 import secrets
 import shutil
 import sqlite3
@@ -285,3 +286,29 @@ def _validate_database(path: Path) -> None:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+BACKUP_STATUS_FILE = "backup-status.json"
+
+
+def read_backup_status(data_dir: Path | str) -> dict:
+    """Last backup and last restore drill, as recorded next to the database (non-secret; for ``opendot doctor``)."""
+    try:
+        data = json.loads((Path(data_dir) / BACKUP_STATUS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_backup_event(data_dir: Path | str, kind: str, *, path: Path | str, ok: bool = True, at: datetime | None = None) -> None:
+    """Remember that a backup (``last_backup``) or restore drill (``last_drill``) just ran.
+
+    Stores a path and a time only, never a key or any backup content.
+    """
+    if kind not in ("last_backup", "last_drill"):
+        raise ValueError(f"unknown backup event: {kind}")
+    folder = Path(data_dir)
+    status = read_backup_status(folder)
+    status[kind] = {"path": str(path), "at": (at or datetime.now(UTC)).isoformat(), "ok": ok}
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / BACKUP_STATUS_FILE).write_text(json.dumps(status), encoding="utf-8")

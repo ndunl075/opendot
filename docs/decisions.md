@@ -134,3 +134,69 @@ section 1. Newest last.
 - 2026-09-30 (M3): Package scripts never call `pnpm`, `npm` or `corepack` by name: on this machine
   `cmd.exe` cannot see them. Nested pnpm goes through `npm_execpath`, the Tauri CLI through Node, and
   `uv` is found by path search (`UV`, PATH, per-user install folders).
+- 2026-10-01 (M4): One service process: `opendot serve` runs the API and UI plus a background thread
+  (`always_on.AlwaysOnWorker`) with the `opendot run` runner (due jobs and reminders, outbox delivery,
+  connector syncs), so launchd, Task Scheduler and systemd each start exactly one command. Telegram and
+  Slack stay off (no pairing in the default `run` arguments). Connectors without stored credentials are
+  skipped quietly instead of logging an error every cycle; syncs run in the runner's background worker so a
+  slow sync never delays a due reminder. `--no-background` serves only the API. Do not run `opendot run`
+  next to the service: they would both deliver.
+- 2026-10-01 (M4): Service definitions run `python -m opendot_core.cli --db <app-data>/opendot.db serve` (the
+  frozen sidecar itself when `sys.frozen`), using the same `org.opendot.desktop` app-data folder as the
+  desktop app so both share one database. Logs: macOS `~/Library/Logs/OpenDot/daemon.log` and Linux
+  `<app-data>/logs/daemon.log` through the OS service manager; Windows through `serve --log-file` (Task
+  Scheduler cannot redirect output). Restart on failure: launchd `KeepAlive.SuccessfulExit=false`, systemd
+  `Restart=on-failure`, Task Scheduler `RestartOnFailure` (1 minute, 999 tries). The Windows task is created
+  for the current user with `LeastPrivilege` and runs on battery. Reason: no admin or sudo anywhere. The
+  definitions are pure functions; the install shells out through an injected runner. Windows `status`
+  parses the English `Status:` line of `schtasks /Query`.
+- 2026-10-01 (M4): Keep-awake holds the lock only from the always-on thread (the Windows execution-state flag
+  belongs to the calling thread) and re-reads the setting every 15 seconds. "Only while plugged in" treats an
+  unknown power state as battery. A machine with no battery counts as plugged in. The Linux helper is
+  `systemd-inhibit --what=idle ... tail --pid=<daemon>` and is stopped by killing its process group.
+- 2026-10-01 (M4): Wake detection is a wall-clock gap larger than the loop interval plus 60 seconds of slack
+  for a slow cycle; on start the reference is the last runner heartbeat, so a restart after downtime counts
+  too (a fresh install does not). Catch-up never delivers anything itself: `JobRunner` still marks late
+  deliveries. A recurring job (daily reminder, daily agent task, morning brief) whose next occurrences were
+  also missed is moved to its latest missed occurrence before `run_due`, so it runs once and the older runs
+  are counted as skipped. Annual dates and nags already run once and reschedule. Every connector then syncs
+  once (`mark_connectors_due`). The single note goes to the first destination of the late jobs, or to
+  `ui:owner` when there is none (no channel worker delivers that; the UI reads it from the outbox, M4 UI work).
+  No note when nothing was missed.
+- 2026-10-01 (M4, 4.6): `opendot doctor` returns ok, warn, fail or skipped per check, one line each.
+  Only `fail` makes the exit code non-zero; warnings (daemon not running, signed out, no backup, a
+  headless secrets file) never do. A missing keychain is a `fail` unless a secrets file is in use,
+  where it is a warn. Reason: warnings describe a normal setup that needs attention; failures mean the
+  install cannot work.
+- 2026-10-01 (M4, 4.6): `opendot doctor --ci` runs against a fresh temporary database and never reads
+  the keychain, probes the daemon, or contacts a network. It runs: database and migrations, packaged
+  migration numbering, audit hash chain, an encrypted-backup round trip with a throwaway key,
+  connector-health query, and disk space (low space is a warn there). The keychain, access token,
+  secrets file, daemon, service, ChatGPT sign-in, backups and restore drill print "skipped (needs
+  your setup)". Reason: the milestone finish line must pass on a clean CI runner with no account.
+- 2026-10-01 (M4, 4.6): the doctor reads ChatGPT state with `ChatGPTPlanProvider.status()` (keychain
+  plus the local state file, no request). It uses the provider's default state path
+  `.opendot/chatgpt_plan.json`, the same one `opendot serve` uses.
+- 2026-10-01 (M4, 4.6): nothing recorded when a backup or restore drill ran, so `backup-create` and
+  `backup-verify` now write `backup-status.json` (paths and times only, never keys) next to the
+  database. Doctor reads it, and also scans the backup folder (`--backup-dir`, `OPENDOT_BACKUP_DIR`,
+  or `<data folder>/backups`) for `*.opendot-backup` by modification time.
+- 2026-10-01 (M4, 4.6): service status comes from `opendot_core.service` if it exists (module
+  `status()` or `service_status()` returning an object or dict with `installed`); otherwise doctor
+  warns "service command not available". Written defensively because task 4.1 is built in parallel;
+  when it lands, check that its status shape matches `_default_service_status` in `doctor.py`.
+- 2026-10-01 (M4, 4.6): a headless secrets file is detected from `--token-file`, `OPENDOT_TOKEN_FILE`,
+  `$CREDENTIALS_DIRECTORY/opendot-token` (systemd) or `/run/secrets/opendot-token` (Docker), and is
+  always a WARN with the section 11 explanation (plus a mode check on POSIX).
+- 2026-10-01 (M4, 4.7): the Docker image shares the host's network namespace (`network_mode: host`,
+  Linux only) instead of publishing a port. Reason: `opendot serve` hard-codes 127.0.0.1, so a
+  published port could not reach it, and widening the bind address is not allowed.
+- 2026-10-01 (M4, 4.7): known gaps found while writing the guides, not fixed here: (1) the ChatGPT
+  sign-in tokens, backup key and connector secrets are kept only through the OS keychain, so the Docker
+  image cannot hold a ChatGPT sign-in and a systemd server needs a Secret Service keychain; the token
+  file covers only the access token. A protected-file token store is needed for a true headless setup.
+  (2) The sign-in callback port is random per attempt, so the SSH-forward guide has the user read the port
+  from the authorize URL; a `--redirect-port` option would simplify it. (3) The daemon refuses non-loopback
+  `Host` headers; `tailscale serve` may forward the tailnet name, which would need a deliberate Host
+  allow-list in the daemon. (4) The guide uses `POST /v1/auth/chatgpt/start`, which is a contract
+  endpoint another M4 task wires up.

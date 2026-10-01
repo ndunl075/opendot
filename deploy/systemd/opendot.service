@@ -1,0 +1,24 @@
+# systemd USER unit for a Linux server (deploy/README.md).
+# Install:  mkdir -p ~/.config/systemd/user && cp deploy/systemd/opendot.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload && systemctl --user enable --now opendot
+#           loginctl enable-linger "$USER"      # keep it running after you log out
+#
+# The access token is a systemd encrypted credential (deploy/secrets-and-signin.md). It reaches the
+# service as ${CREDENTIALS_DIRECTORY}/opendot-token and is never written to disk in the clear.
+# `opendot serve` always listens on 127.0.0.1; there is no option to change that.
+[Unit]
+Description=OpenDot daemon (127.0.0.1 only)
+After=network-online.target
+
+[Service]
+Type=simple
+LoadCredentialEncrypted=opendot-token:%h/.config/opendot/opendot-token.cred
+Environment=OPENDOT_DB_PATH=%h/.local/share/opendot/opendot.db
+ExecStart=%h/.local/bin/opendot serve --port 8765 --token-file ${CREDENTIALS_DIRECTORY}/opendot-token
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
