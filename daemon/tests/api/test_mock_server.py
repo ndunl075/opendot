@@ -103,3 +103,21 @@ def test_mock_chat_socket_selects_the_opendot_subprotocol() -> None:
 
     with TestClient(create_app()).websocket_connect("/v1/chat/stream", subprotocols=["opendot", "opendot.bearer.x"]) as ws:
         assert ws.accepted_subprotocol == "opendot"
+
+
+def test_mock_onboarding_can_be_finished() -> None:
+    """The UI walks onboarding step by step; finishing it must stick, or the preview loops forever."""
+    from starlette.testclient import TestClient
+
+    from opendot_core.api import mock_server
+    from opendot_core.api.models import OnboardingState
+
+    mock_server._onboarding["done"] = False
+    client = TestClient(mock_server.create_app())
+    try:
+        assert client.get("/v1/onboarding").json()["current_step"] != "done"
+        finished = OnboardingState.model_validate(client.post("/v1/onboarding/complete").json())
+        assert finished.current_step == "done" and "done" in finished.completed_steps
+        assert client.get("/v1/onboarding").json()["current_step"] == "done"
+    finally:
+        mock_server._onboarding["done"] = False
