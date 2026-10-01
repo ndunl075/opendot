@@ -57,9 +57,9 @@ def _client(tmp_path: Path, dist: Path | None, script: list | None = None) -> tu
     return TestClient(app, base_url=BASE), provider
 
 
-def test_no_cookie_ever_and_no_page_carries_the_token(tmp_path: Path, dist: Path) -> None:
-    """Security review S2: cookies are shared by every port on 127.0.0.1, so the token never goes in
-    one; the login page keeps it in this origin's localStorage, and no served page contains it."""
+def test_no_cookie_ever_and_no_page_carries_or_asks_for_the_token(tmp_path: Path, dist: Path) -> None:
+    """Security review S2 and S10: no cookie, no page carries the token, and no page asks for it (a
+    fake page on a reclaimed port could capture a pasted token). /login only redeems a one-time code."""
     client, _ = _client(tmp_path, dist)
     index = client.get("/")
     assert index.status_code == 200 and TOKEN not in index.text and "set-cookie" not in index.headers
@@ -67,30 +67,68 @@ def test_no_cookie_ever_and_no_page_carries_the_token(tmp_path: Path, dist: Path
     assert client.get("/rules/123").text == index.text  # SPA fallback, public
     login = client.get("/login")
     assert login.status_code == 200 and TOKEN not in login.text and "set-cookie" not in login.headers
-    assert f'localStorage.setItem("{TOKEN_STORAGE_KEY}"' in login.text and "frame-ancestors 'none'" in login.headers[
-        "content-security-policy"
-    ]
-    assert client.post("/login", data={"token": TOKEN}).status_code == 405  # nothing to post a token to
+    assert 'type="password"' not in login.text and "opendot open" in login.text
+    assert f'localStorage.setItem("{TOKEN_STORAGE_KEY}", body.session_token)' in login.text
+    assert "frame-ancestors 'none'" in login.headers["content-security-policy"]
     logout = client.get("/logout")
     assert f'localStorage.removeItem("{TOKEN_STORAGE_KEY}")' in logout.text
     for response in (index, login, logout):
         assert TOKEN not in response.text
 
 
-def test_identity_proves_the_daemon_knows_the_token_without_revealing_it(tmp_path: Path, dist: Path) -> None:
-    """Security review S1: the desktop app checks this before handing the token to whatever answers."""
-    import hashlib
-    import hmac
+def test_challenge_proves_the_daemon_and_the_client_without_sending_the_token(tmp_path: Path, dist: Path) -> None:
+    """Security review S1: the daemon proves it knows the token; the client answers the daemon's
+    single-use challenge; the access token itself never travels."""
+    from opendot_core.api.server import identity_proof, session_mac
 
     client, _ = _client(tmp_path, dist)
     nonce = "ab" * 16
-    response = client.get(f"/v1/identity?nonce={nonce}")  # no bearer token needed
-    assert response.status_code == 200
-    expected = hmac.new(TOKEN.encode(), b"opendot-identity:" + nonce.encode(), hashlib.sha256).hexdigest()
-    assert response.json() == {"daemon": "opendot", "proof": expected}
-    assert TOKEN not in response.text
-    assert client.get("/v1/identity?nonce=short").status_code == 400
-    assert client.get("/v1/identity?nonce=" + "zz" * 16).status_code == 400
+    first = client.get(f"/v1/session/challenge?nonce={nonce}").json()  # no bearer token needed
+    assert first["daemon"] == "opendot" and first["proof"] == identity_proof(TOKEN, nonce)
+    assert TOKEN not in str(first)
+    assert client.get("/v1/session/challenge?nonce=short").status_code == 400
+    wrong = client.post("/v1/session", json={"challenge": first["challenge"], "mac": "0" * 64})
+    assert wrong.status_code == 401
+    # A challenge is single-use: the wrong answer above spent it.
+    reused = client.post("/v1/session", json={"challenge": first["challenge"], "mac": session_mac(TOKEN, first["challenge"])})
+    assert reused.status_code == 401
+    fresh = client.get(f"/v1/session/challenge?nonce={nonce}").json()["challenge"]
+    session = client.post("/v1/session", json={"challenge": fresh, "mac": session_mac(TOKEN, fresh)}).json()
+    assert session["session_token"].startswith("ods_")
+    assert client.post("/v1/session", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 401  # no bearer minting
+
+
+def test_one_time_login_codes_from_opendot_open(tmp_path: Path, dist: Path) -> None:
+    import io
+    from argparse import Namespace
+
+    from opendot_core.api.serve_cli import run_open
+
+    client, _ = _client(tmp_path, dist)
+    store = MemoryStore()
+    store.store("opendot-api-token", TOKEN)
+    out = io.StringIO()
+    assert run_open(Namespace(port=8765, no_browser=True, token_file=None), store=store, out=out, client=client) == 0
+    link = out.getvalue().strip().split()[-1]
+    assert link.startswith("http://127.0.0.1:8765/login#code=odl_") and TOKEN not in link
+    code = link.split("code=", 1)[1]
+    first = client.post("/v1/session", json={"login_code": code})
+    assert first.status_code == 200 and first.json()["session_token"].startswith("ods_")
+    assert client.post("/v1/session", json={"login_code": code}).status_code == 401  # works once
+
+
+def test_opendot_open_refuses_an_impostor(tmp_path: Path, dist: Path) -> None:
+    import io
+    from argparse import Namespace
+
+    from opendot_core.api.serve_cli import run_open
+
+    client, _ = _client(tmp_path, dist)  # a daemon that knows a different token
+    store = MemoryStore()
+    store.store("opendot-api-token", "a-different-token-0123456789abcdef")
+    out = io.StringIO()
+    assert run_open(Namespace(port=8765, no_browser=True, token_file=None), store=store, out=out, client=client) == 2
+    assert "Refusing to sign in" in out.getvalue()
 
 
 def test_assets_are_public_and_confined_to_the_build(tmp_path: Path, dist: Path) -> None:
@@ -244,15 +282,18 @@ def test_token_file_symlink_is_refused_on_posix(tmp_path: Path) -> None:
         read_token_file(link)
 
 
-def test_session_tokens_die_with_the_daemon_and_cannot_mint_more(tmp_path: Path, dist: Path) -> None:
+def test_session_tokens_die_with_the_daemon(tmp_path: Path, dist: Path) -> None:
     """Security review S1 and S8: UIs hold only session tokens, which a daemon restart invalidates."""
+    from opendot_core.api.server import session_mac
+
     client, _ = _client(tmp_path, dist)
-    assert client.post("/v1/session").status_code == 401
-    session = client.post("/v1/session", headers={"Authorization": f"Bearer {TOKEN}"}).json()["session_token"]
+    challenge = client.get("/v1/session/challenge?nonce=" + "cd" * 16).json()["challenge"]
+    session = client.post("/v1/session", json={"challenge": challenge, "mac": session_mac(TOKEN, challenge)}).json()[
+        "session_token"
+    ]
     assert session.startswith("ods_") and TOKEN not in session
     assert client.get("/v1/health", headers={"Authorization": f"Bearer {session}"}).status_code == 200
     assert client.get("/v1/rules", headers={"Authorization": f"Bearer {session}"}).status_code != 401
-    assert client.post("/v1/session", headers={"Authorization": f"Bearer {session}"}).status_code == 401
     restarted, _ = _client(tmp_path, dist)  # a new daemon process over the same data
     assert restarted.get("/v1/health", headers={"Authorization": f"Bearer {session}"}).status_code == 401
     from opendot_core.api.server import WS_SUBPROTOCOL, WS_TOKEN_PREFIX

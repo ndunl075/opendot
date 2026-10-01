@@ -63,45 +63,52 @@ fn daemon_running() -> bool {
     }
 }
 
-/// Ask whatever answers on the port to prove it knows our token (HMAC of a fresh nonce), so the
-/// token is never handed to another program that grabbed the port first (security review S1).
-fn verify_identity(token: &str) -> bool {
+fn hmac_hex(token: &str, label: &[u8], value: &str) -> Option<String> {
     use hmac::{Hmac, Mac};
-    let mut raw = [0u8; 32];
-    if token.is_empty() || getrandom::getrandom(&mut raw).is_err() {
-        return false;
-    }
-    let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(3)).build();
-    let Ok(response) = agent.get(&format!("{}/v1/identity?nonce={nonce}", base_url())).call() else {
-        return false;
-    };
-    let Ok(body) = response.into_json::<serde_json::Value>() else {
-        return false;
-    };
-    let Some(proof) = body.get("proof").and_then(|value| value.as_str()) else {
-        return false;
-    };
-    let Ok(mut mac) = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()) else {
-        return false;
-    };
-    mac.update(b"opendot-identity:");
-    mac.update(nonce.as_bytes());
-    let expected: String = mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect();
-    // Constant-time enough for a one-shot local check; both are fixed-length hex strings.
-    expected.len() == proof.len() && expected.bytes().zip(proof.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()).ok()?;
+    mac.update(label);
+    mac.update(value.as_bytes());
+    Some(mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn mint_session(token: &str) -> Result<String, String> {
-    let response = ureq::post(&format!("{}/v1/session", base_url()))
-        .timeout(Duration::from_secs(5))
-        .set("Authorization", &format!("Bearer {token}"))
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Get a session token without ever sending the access token (security review S1, S10): the daemon
+/// proves it knows the token (HMAC of our fresh nonce), then we answer its single-use challenge with
+/// an HMAC of our own. A program that grabbed the port gets nothing it can use.
+fn open_session(token: &str) -> Result<String, String> {
+    if token.is_empty() {
+        return Err("no access token".into());
+    }
+    let mut raw = [0u8; 32];
+    getrandom::getrandom(&mut raw).map_err(|e| e.to_string())?;
+    let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build();
+    let body: serde_json::Value = agent
+        .get(&format!("{}/v1/session/challenge?nonce={nonce}", base_url()))
         .call()
-        .map_err(|e| format!("could not start a session: {e}"))?;
-    let body: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
-    body.get("session_token")
-        .and_then(|value| value.as_str())
-        .filter(|value| value.starts_with("ods_"))
+        .map_err(|e| e.to_string())?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    let proof = body.get("proof").and_then(|v| v.as_str()).unwrap_or("");
+    let challenge = body.get("challenge").and_then(|v| v.as_str()).unwrap_or("");
+    let expected = hmac_hex(token, b"opendot-identity:", &nonce).ok_or("hmac failed")?;
+    if challenge.is_empty() || !same(&expected, proof) {
+        return Err(format!("the program on port {PORT} could not prove it is OpenDot; not signing in"));
+    }
+    let mac = hmac_hex(token, b"opendot-session:", challenge).ok_or("hmac failed")?;
+    let answer: serde_json::Value = agent
+        .post(&format!("{}/v1/session", base_url()))
+        .send_json(json!({ "challenge": challenge, "mac": mac, "kind": "session" }))
+        .map_err(|e| format!("could not start a session: {e}"))?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    answer
+        .get("session_token")
+        .and_then(|v| v.as_str())
+        .filter(|v| v.starts_with("ods_"))
         .map(str::to_owned)
         .ok_or_else(|| "the daemon returned no session token".into())
 }
@@ -212,20 +219,12 @@ pub fn run() {
                 eprintln!("{error}");
                 String::new()
             });
-            // Prove the daemon is ours, then trade the long-lived token for a session token that dies
-            // when the daemon restarts. Only the session token reaches the webview and the tray, so a
-            // program that later takes over the port can capture nothing still valid (review S1, S8).
-            let token = if verify_identity(&token) {
-                mint_session(&token).unwrap_or_else(|error| {
-                    eprintln!("{error}");
-                    String::new()
-                })
-            } else {
-                eprintln!("the program on port {PORT} could not prove it is OpenDot; not sending it the token");
+            // Only a session token (dies with the daemon) reaches the webview and the tray, and the
+            // access token itself never goes over the wire (security review S1, S8, S10).
+            let token = open_session(&token).unwrap_or_else(|error| {
+                eprintln!("{error}");
                 String::new()
-            };
-            // The token goes only to the app's own origin: initialization scripts run on every
-            // top-level navigation, so the script checks where it is before writing anything.
+            });
             let init = format!(
                 "if ({origins}.includes(window.location.origin)) {{ window.__OPENDOT__ = Object.freeze({config}); }}",
                 origins = json!(APP_ORIGINS),

@@ -59,15 +59,36 @@ def test_every_mcp_tool_is_declared_and_action_commit_is_never_offered(db_path: 
 
 def test_sending_is_declared_as_reaching_people_and_always_asks(db_path: Path) -> None:
     allow_google_writes(db_path)
-    tools = McpTools(db_path)
     rules = RuleEngine(Database(db_path))
-    intent = tools.intent("message_send_propose", {"to": "a@b.test", "subject": "s", "body": "b"})
-    assert intent.reaches_people and intent.target == "a@b.test"
+    assert TOOL_FACTS["message_send_propose"].reaches_people
+    # v0.1 never offers sending email at all, even with the Gmail drafts switch on (review S11).
+    assert "message_send_propose" not in {spec.name for spec in McpTools(db_path).specs()}
+    with pytest.raises(KeyError):
+        McpTools(db_path).intent("message_send_propose", {"to": "a@b.test", "subject": "s", "body": "b"})
+    from opendot_core.rules import ToolIntent
+
+    intent = ToolIntent(tool="message_send_propose", action="send", target="a@b.test", sensitivity="personal",
+                        reaches_people=True)
     rules.add_rule(tool="message_send_propose", action="send", target="a@b.test", behavior="auto")  # beats the default
     decision = rules.decide(intent)
     assert decision.behavior is Behavior.ASK and decision.locked
-    assert tools.intent("message_draft", {"to": "x@y.test"}).reaches_people is False
 
+
+def test_s11_the_agent_never_executes_an_email_send(db_path: Path) -> None:
+    from opendot_core.agent.executor import ApprovalExecutor
+    from opendot_core.api.escrow import TokenEscrow
+    from opendot_core.policy import ApprovalService, PolicyError
+
+    approvals = ApprovalService(Database(db_path))
+    approval = approvals.propose(actor="owner", action_type="gmail_message_send", preview={"to": "a@b.test"})
+    issued = approvals.approve(approval.id, actor="owner")
+    escrow = TokenEscrow()
+    escrow.put(approval.id, issued.token)
+    calls: list[str] = []
+    executor = ApprovalExecutor(approvals, escrow, actor="owner", execute=lambda *a, **k: calls.append("sent"))
+    with pytest.raises(PolicyError, match="not something the agent can do"):
+        executor.run_approved(approval.id)
+    assert calls == []
 
 def test_unknown_tools_fail_closed(db_path: Path) -> None:
     with pytest.raises(KeyError):
@@ -149,8 +170,8 @@ def test_s9_each_google_app_write_switch_offers_only_its_own_tools(db_path: Path
         },
     )
     names = {spec.name for spec in McpTools(db_path).specs()}
-    assert {"message_draft", "message_send_propose"} <= names
-    assert "calendar_event_propose" not in names
+    assert "message_draft" in names
+    assert "calendar_event_propose" not in names and "message_send_propose" not in names
 
 
 def test_s4_the_production_wrapper_keeps_unrequested_writes_out(tmp_path: Path, db_path: Path) -> None:

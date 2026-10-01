@@ -36,6 +36,10 @@ def register(subparsers: Any) -> None:
         help="serve only the API and UI; skip the always-on loop (due jobs, reminders, syncs, keep-awake)",
     )
     serve.add_argument("--print-ready", action="store_true", help="print one JSON line when listening (for the desktop shell)")
+    opener = subparsers.add_parser("open", help="open OpenDot in your browser (signs in with a one-time link)")
+    opener.add_argument("--port", type=int, default=DEFAULT_PORT)
+    opener.add_argument("--no-browser", action="store_true", help="print the one-time link instead of opening it")
+    opener.add_argument("--token-file", help="read the access token from this file instead of the OS keychain")
     token = subparsers.add_parser("api-token", help="show or rotate the UI/API access token")
     token.add_argument("action", choices=["show", "rotate"])
 
@@ -94,6 +98,35 @@ def default_ui_dist() -> Path | None:
         if candidate.is_dir():
             return candidate
     return None
+
+
+def run_open(args: argparse.Namespace, *, store: SecretStore | None = None, out: Any = None, client: Any = None) -> int:
+    """Sign the browser in without ever pasting the access token into a page (review S10)."""
+    import webbrowser
+
+    from .session_client import NotOurDaemon, exchange
+
+    out = out or sys.stdout
+    if getattr(args, "token_file", None):
+        token = read_token_file(Path(args.token_file))
+    else:
+        token = load_or_create_token(store or SystemKeyringSecretStore())
+    base = f"http://{HOST}:{args.port}"
+    try:
+        code = exchange(base, token, kind="login_code", client=client)
+    except NotOurDaemon as error:
+        out.write(f"Refusing to sign in: {error}.\n")
+        return 2
+    except Exception as error:  # daemon not running, network error
+        out.write(f"OpenDot is not answering at {base} ({type(error).__name__}). Start it with `opendot serve`.\n")
+        return 1
+    url = f"{base}/login#code={code}"
+    if args.no_browser:
+        out.write(f"Open this link within two minutes (it works once): {url}\n")
+    else:
+        webbrowser.open(url)
+        out.write("Opened OpenDot in your browser.\n")
+    return 0
 
 
 def run_token(args: argparse.Namespace, *, store: SecretStore | None = None, out: Any = None) -> int:
@@ -216,7 +249,7 @@ def run_serve(args: argparse.Namespace, database: Database, *, worker: Any = Non
 
         server.startup = startup  # type: ignore[method-assign]
     else:
-        print(f"OpenDot is running at http://{HOST}:{args.port} (sign in with `opendot api-token show`)")
+        print(f"OpenDot is running at http://{HOST}:{args.port} (run `opendot open` to open it in your browser)")
     if worker is None and not getattr(args, "no_background", False):
         from ..always_on import AlwaysOnWorker
 

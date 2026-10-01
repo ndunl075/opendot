@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
-import sys
 from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
@@ -23,20 +22,26 @@ class MigrationConflict(RuntimeError):
     """
 
 
-_WARNED: set[str] = set()
+class InsecureDataError(PermissionError):
+    """OpenDot's data would stay readable by other local users and could not be made private."""
 
 
 def _restrict(path: Path, mode: int) -> None:
+    """Make ``path`` owner-only (POSIX). If that fails while others can still read it, refuse to go
+    on rather than keep personal data readable (security review S3)."""
     if os.name != "posix":
         return
+    current = stat.S_IMODE(path.stat().st_mode)
+    if current == mode:
+        return
     try:
-        if stat.S_IMODE(path.stat().st_mode) != mode:
-            os.chmod(path, mode)
+        os.chmod(path, mode)
     except OSError as error:
-        if str(path) not in _WARNED:  # say so once instead of silently leaving it readable
-            _WARNED.add(str(path))
-            print(f"warning: could not make {path} private ({error.strerror}); other users may read it",
-                  file=sys.stderr)
+        if current & 0o077:
+            raise InsecureDataError(
+                f"{path} is readable by other users and OpenDot could not make it private "
+                f"({error.strerror}). Fix its owner or permissions (chmod {mode:o} {path})."
+            ) from error
 
 
 def _migration_version(filename: str) -> int:

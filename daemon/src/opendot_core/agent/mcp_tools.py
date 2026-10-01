@@ -32,11 +32,13 @@ from ..rules import ToolIntent
 
 AGENT_CLIENT_ID = "agent"
 AGENT_ACTOR = f"mcp:{AGENT_CLIENT_ID}"
-NEVER_OFFERED = frozenset({"action_commit"})
+#: action_commit: the model can never commit an approval. message_send_propose: sending email is not
+#: part of v0.1 (ARCHITECTURE.md section 10: v0.2), and the Gmail drafts switch never covers it
+#: (security review S11).
+NEVER_OFFERED = frozenset({"action_commit", "message_send_propose"})
 #: Offered only while that app's write opt-in is on and Google granted its write scope (review S9).
 GOOGLE_WRITE_TOOLS: dict[str, str] = {
     "message_draft": "gmail",
-    "message_send_propose": "gmail",
     "calendar_event_propose": "google_calendar",
 }
 

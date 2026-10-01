@@ -893,6 +893,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .api import serve_cli
 
         return serve_cli.run_token(args)
+    if args.command == "open":
+        from .api import serve_cli
+
+        return serve_cli.run_open(args)
     database = database_from_args(args)
     if args.command == "serve":
         from .api import serve_cli

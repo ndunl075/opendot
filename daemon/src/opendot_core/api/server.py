@@ -133,8 +133,12 @@ def _ws_protocol_token(value: bytes) -> bytes:
     return b""
 
 
-IDENTITY_PATH = "/v1/identity"
+CHALLENGE_PATH = "/v1/session/challenge"
+SESSION_PATH = "/v1/session"
 IDENTITY_LABEL = b"opendot-identity:"
+SESSION_LABEL = b"opendot-session:"
+CHALLENGE_TTL_SECONDS = 120.0
+LOGIN_CODE_TTL_SECONDS = 120.0
 
 
 def identity_proof(token: str, nonce: str) -> str:
@@ -143,15 +147,44 @@ def identity_proof(token: str, nonce: str) -> str:
     return hmac.new(token.encode(), IDENTITY_LABEL + nonce.encode(), hashlib.sha256).hexdigest()
 
 
-SESSION_PATH = "/v1/session"
+def session_mac(token: str, challenge: str) -> str:
+    """The client's answer to the daemon's challenge: proves it holds the access token without ever
+    sending it, so nothing listening on the port can capture it (review S1, S10)."""
+    return hmac.new(token.encode(), SESSION_LABEL + challenge.encode(), hashlib.sha256).hexdigest()
+
+
+class _OneTimeSecrets:
+    """Single-use random values that expire (challenges, login codes), kept in memory as hashes."""
+
+    def __init__(self, ttl: float, prefix: str, clock: Any = time.monotonic, limit: int = 64) -> None:
+        self._ttl, self._prefix, self._clock, self._limit = ttl, prefix, clock, limit
+        self._items: collections.OrderedDict[bytes, float] = collections.OrderedDict()
+        self._lock = threading.Lock()
+
+    def issue(self) -> str:
+        value = self._prefix + secrets.token_urlsafe(32)
+        with self._lock:
+            self._items[hashlib.sha256(value.encode()).digest()] = self._clock()
+            while len(self._items) > self._limit:
+                self._items.popitem(last=False)
+        return value
+
+    def take(self, value: str) -> bool:
+        """True once, for an issued value that has not expired; it is gone afterwards."""
+        digest = hashlib.sha256(value.encode()).digest()
+        with self._lock:
+            issued = self._items.pop(digest, None)
+        return issued is not None and self._clock() - issued <= self._ttl
 
 
 class SessionTokens:
     """Short-lived credentials for the UI and the desktop shell (security review S1, S8).
 
-    Only the long-lived access token can mint one (POST /v1/session). They live in this process's
-    memory only, so every daemon restart invalidates them: a process that takes over the port after
-    the daemon stops can only capture a token that is already dead. Stored as hashes."""
+    Minted by POST /v1/session only for a client that proved it holds the access token without
+    sending it (challenge and HMAC), or that presents a single-use login code made that same way by
+    `opendot open`. They live in this process's memory only, so every daemon restart invalidates
+    them: a process that takes over the port after the daemon stops can only capture a token that is
+    already dead. Stored as hashes."""
 
     def __init__(self, limit: int = 64) -> None:
         self._hashes: collections.OrderedDict[bytes, None] = collections.OrderedDict()
@@ -194,8 +227,10 @@ class BearerAuth:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        if scope["type"] == "http" and scope.get("path") == IDENTITY_PATH:
-            await self.app(scope, receive, send)  # proves who we are without revealing anything
+        if scope["type"] == "http" and scope.get("path") in (CHALLENGE_PATH, SESSION_PATH):
+            # Self-authenticating: the challenge proves who we are; the session endpoint checks an
+            # HMAC answer or a single-use login code. Neither ever receives the access token.
+            await self.app(scope, receive, send)
             return
         supplied = b""
         origin: str | None = None
@@ -210,10 +245,7 @@ class BearerAuth:
                 origin = value.decode("latin-1")
         allowed_origin = scope["type"] != "websocket" or origin_allowed(origin)
         long_lived = bool(supplied) and secrets.compare_digest(supplied, self._token)
-        if scope["type"] == "http" and scope.get("path") == SESSION_PATH:
-            accepted = long_lived  # only the long-lived token can mint a session
-        else:
-            accepted = long_lived or (bool(supplied) and self._sessions is not None and self._sessions.valid(supplied))
+        accepted = long_lived or (bool(supplied) and self._sessions is not None and self._sessions.valid(supplied))
         if accepted and allowed_origin:
             await self.app(scope, receive, send)
             return
@@ -464,6 +496,8 @@ def create_app(
         raise ValueError("an API token is required")
     hub = ChatHub(loop, approvals)
     sessions = SessionTokens()
+    challenges = _OneTimeSecrets(CHALLENGE_TTL_SECONDS, "odc_")
+    login_codes = _OneTimeSecrets(LOGIN_CODE_TTL_SECONDS, "odl_")
     started = time.monotonic()
     created_at = datetime.now(UTC)
 
@@ -511,13 +545,33 @@ def create_app(
         if task_id is not None:
             hub.run_in_background(task_id)
 
-    async def identity(request: Request) -> Response:
+    async def challenge(request: Request) -> Response:
         nonce = request.query_params.get("nonce", "")
         if not (32 <= len(nonce) <= 128) or not all(ch in "0123456789abcdef" for ch in nonce):
             return _error(400, "invalid_nonce", "Send a fresh random hex nonce (32 to 128 hex digits).")
-        return JSONResponse({"daemon": "opendot", "proof": identity_proof(token, nonce)})
+        return JSONResponse(
+            {"daemon": "opendot", "proof": identity_proof(token, nonce), "challenge": challenges.issue()}
+        )
 
-    async def session(_: Request) -> Response:
+    async def session(request: Request) -> Response:
+        try:
+            body = json.loads(await request.body() or b"{}")
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        code = body.get("login_code")
+        if isinstance(code, str) and code:
+            if not login_codes.take(code):
+                return _error(401, "invalid_login_code", "That sign-in link has expired or was used. Run `opendot open` again.")
+            return JSONResponse({"session_token": sessions.mint()})
+        answer, mac = body.get("challenge"), body.get("mac")
+        if not (isinstance(answer, str) and isinstance(mac, str)) or not challenges.take(answer):
+            return _error(401, "invalid_challenge", "Ask for a fresh challenge first.")
+        if not secrets.compare_digest(mac, session_mac(token, answer)):
+            return _error(401, "unauthorized", "Wrong answer to the challenge.")
+        if body.get("kind") == "login_code":
+            return JSONResponse({"login_code": login_codes.issue()})
         return JSONResponse({"session_token": sessions.mint()})
 
     async def health(_: Request) -> Response:
@@ -680,7 +734,7 @@ def create_app(
     v = f"/{API_VERSION}"
     routes: list[Route | WebSocketRoute] = [
         Route(f"{v}/health", health, methods=["GET"]),
-        Route(IDENTITY_PATH, identity, methods=["GET"]),
+        Route(CHALLENGE_PATH, challenge, methods=["GET"]),
         Route(SESSION_PATH, session, methods=["POST"]),
         Route(f"{v}/chat/messages", chat_send, methods=["POST"]),
         Route(f"{v}/approvals", approvals_list, methods=["GET"]),

@@ -21,6 +21,10 @@ from pydantic import BaseModel
 from ..api.escrow import TokenEscrow
 from ..policy import ApprovalService, PolicyError
 
+#: Approval types the agent never executes in v0.1, whatever an approval says: sending email is
+#: a v0.2 feature with its own opt-in (security review S11).
+NOT_IN_V01 = frozenset({"gmail_message_send"})
+
 #: ``execute(approval_id, *, actor, token) -> receipt`` (a model or a JSON-able dict).
 #: Implementations must be idempotent by approval id, as ``ActionExecutor`` is.
 ApprovedHandler = Callable[..., Any]
@@ -54,6 +58,8 @@ class ApprovalExecutor:
         token = self.escrow.get(approval_id)
         if token is None:
             raise PolicyError("the one-time approval token is not available (for example after a restart)")
+        if approval.action_type in NOT_IN_V01:
+            raise PolicyError(f"{approval.action_type} is not something the agent can do in this version")
         handler = self.handlers.get(approval.action_type, self.execute)
         receipt = handler(approval_id, actor=self.actor, token=token)
         if isinstance(receipt, BaseModel):

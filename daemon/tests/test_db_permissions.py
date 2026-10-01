@@ -56,3 +56,19 @@ def test_an_existing_opendot_folder_is_tightened_but_a_user_folder_is_left_alone
     user_dir.mkdir(mode=0o755)
     Database(user_dir / "opendot.db").migrate()
     assert stat.S_IMODE(user_dir.stat().st_mode) == 0o755
+
+
+@posix_only
+def test_data_that_cannot_be_made_private_is_refused(tmp_path: Path, monkeypatch) -> None:
+    from opendot_core import db as db_module
+
+    path = tmp_path / "opendot.db"
+    path.touch()
+    path.chmod(0o644)
+
+    def fail(*_args, **_kwargs):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(db_module.os, "chmod", fail)
+    with pytest.raises(db_module.InsecureDataError, match="readable by other users"):
+        Database(path).migrate()
