@@ -48,9 +48,13 @@ Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the 
 - [x] 3.6 Tauri shell: PyInstaller sidecar, start or attach, tray (Open, Pause, Resume, Quit), NSIS installer
 - [x] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md` (U1 to U15 fixed, verdict "ready"; contract gaps for M4 accepted)
 
+## M4 progress
+
 - [x] 4.1 `opendot service install|uninstall|status` (`service.py`): launchd user agent, Task Scheduler at-logon task, systemd user unit; no sudo or admin. `opendot serve` now also runs the always-on loop in a background thread (`always_on.py`), so one service gives the API, the UI and the loop (`--no-background` turns the loop off)
 - [x] 4.2 keep-awake (`keep_awake.py`): off by default, "only while plugged in", per-OS lock (SetThreadExecutionState, `caffeinate -i -w`, `systemd-inhibit --what=idle`), read from `SettingsStore("keep_awake")`, re-evaluated every 15 s, no model calls
 - [x] 4.3 catch-up after sleep or downtime (`catch_up.py`): late reminders via `JobRunner`, one run per recurring check, each connector syncs once, one outbox note ("While your computer was asleep: ...")
+- [x] 4.6 `opendot doctor` (`--ci`, `--json`; `doctor.py`): database and migrations, keychain, access token, daemon, service, ChatGPT sign-in, connectors, disk, backups, restore drill, headless secrets file. `--ci` exits 0 on a fresh temporary database and skips the checks that need your setup
+- [x] 4.7 `deploy/`: server guide (systemd user unit and Docker, both 127.0.0.1 only), Tailscale guide, headless secrets (systemd-creds, Docker secret), SSH-forward ChatGPT sign-in, section 11 caveat; `daemon/tests/test_deploy_files.py` checks the Docker files. Gaps recorded in `docs/decisions.md` (no keychain in Docker for ChatGPT tokens; Host header behind `tailscale serve`)
 
 ## Notes for M3 and M4
 

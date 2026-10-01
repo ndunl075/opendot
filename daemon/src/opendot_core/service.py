@@ -388,6 +388,18 @@ class ServiceManager:
 # --- CLI ------------------------------------------------------------------------------------
 
 
+def status(manager: ServiceManager | None = None) -> dict[str, Any]:
+    """The shape ``opendot doctor`` reads: {"installed": bool, "running": bool, "detail": str}."""
+    import sys
+
+    current = (manager or ServiceManager(normalize_system(sys.platform))).status()
+    return {
+        "installed": current.state != "not_installed",
+        "running": current.state == "running",
+        "detail": current.render(),
+    }
+
+
 def register(subparsers: Any) -> None:
     service = subparsers.add_parser("service", help="install OpenDot as a per-user background service (no sudo or admin)")
     service.add_argument("action", choices=["install", "uninstall", "status"])

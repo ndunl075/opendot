@@ -221,3 +221,15 @@ def test_cli_service_commands_use_the_manager(tmp_path: Path, capsys: pytest.Cap
     args = build_parser().parse_args(["service", "install"])
     assert service.run_service(args, manager=manager("linux", tmp_path, failing)) == 1
     assert "no bus" in capsys.readouterr().err
+
+
+def test_module_status_has_the_shape_doctor_reads() -> None:
+    from opendot_core import doctor, service
+
+    class Fake:
+        def status(self):
+            return service.ServiceStatus(state="installed", detail="task OpenDot")
+
+    shaped = service.status(Fake())  # type: ignore[arg-type]
+    assert shaped == {"installed": True, "running": False, "detail": "installed (not running): task OpenDot"}
+    assert callable(getattr(service, "status")) and doctor._default_service_status.__doc__
