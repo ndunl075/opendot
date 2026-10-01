@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import type { ApprovalItem, ApprovalDecisionResult, ApprovalAlwaysAllowRequest } from "../../api/types.gen";
 import { Badge, Button, Card, Dialog, ErrorState, Select, Textarea } from "../../design/components";
 import { useMutation } from "../shared";
+import { ReviewerNote } from "../ReviewerNote";
 
 export function ApprovalCard({ approval, onDecision }: { approval: ApprovalItem; onDecision: (result: ApprovalDecisionResult) => void }) {
   const [mode, setMode] = useState<"edit" | "allow" | null>(null);
@@ -21,8 +22,8 @@ export function ApprovalCard({ approval, onDecision }: { approval: ApprovalItem;
   return <Card className="approval-card screen-stack" aria-label={`Approval: ${approval.title}`}>
     <div className="section-heading"><h3><ShieldCheck size={18} aria-hidden="true" />{approval.title}</h3><Badge tone={current.status === "pending" ? "warning" : "neutral"}>{current.status === "pending" ? "Needs your approval" : current.status}</Badge></div>
     <p className="muted">{approval.action}</p>
-    {/* The daemon appends its reviewer note to preview; preserve the complete text. */}
-    <div className="approval-preview" aria-label="Action preview and reviewer note">{approval.preview}</div>
+    <div className="approval-preview" aria-label="Action preview">{current.preview}</div>
+    <ReviewerNote review_note={current.review_note} review_verdict={current.review_verdict} />
     {approval.rule_suggestion && <p className="muted">{approval.rule_suggestion}</p>}
     {result && <p role="status">{result.result_summary ?? (result.executed ? "Action executed." : "Decision saved. The action has not been reported as executed.")}</p>}
     {result?.created_rule_id && <Link to={`/rules#${encodeURIComponent(result.created_rule_id)}`}>View created rule</Link>}

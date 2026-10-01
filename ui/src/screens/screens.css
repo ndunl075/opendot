@@ -43,6 +43,9 @@
 .chat-message .usage-stamp { margin-top: var(--space-4); }
 .approval-card { margin-top: var(--space-5); padding: var(--space-5); border-color: var(--color-border-strong); }
 .approval-preview { font-size: var(--text-sm); padding-left: var(--space-4); border-left: 3px solid var(--color-accent); }
+.reviewer-note { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.reviewer-note p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.reviewer-note--block { border-color: var(--color-danger); border-left-width: 4px; background: var(--color-danger-soft); }
 .tool-record { font-size: var(--text-sm); margin-top: var(--space-3); }
 .chat-composer { display: grid; gap: var(--space-3); border-top: 1px solid var(--color-border); padding-top: var(--space-5); }
 .chat-composer > .button { justify-self: end; }

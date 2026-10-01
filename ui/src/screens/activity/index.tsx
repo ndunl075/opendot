@@ -1,6 +1,16 @@
+import { useCallback } from "react";
 import { api } from "../../api/client";
 import { Badge, Button, Card, EmptyState, ErrorState } from "../../design/components";
 import { Resource, ScreenHeading, useMutation, useResource } from "../shared";
+import { ReviewerNote } from "../ReviewerNote";
+
+function ApprovalReview({ id }: { id: string }) {
+  const load = useCallback(() => api.call("approval_get", { params: { approval_id: id } }), [id]);
+  const resource = useResource(load);
+  return <Resource resource={resource}>{approval => approval.review_note || approval.review_verdict
+    ? <ReviewerNote review_note={approval.review_note} review_verdict={approval.review_verdict} />
+    : <p className="muted">No reviewer note recorded</p>}</Resource>;
+}
 
 const loadActivity = () => api.call("activity_list", { body: { limit: 50 } });
 export default function ActivityScreen() {
@@ -23,7 +33,7 @@ export default function ActivityScreen() {
         <div className="actions">{item.rule_id ? <a href={`/rules#${encodeURIComponent(item.rule_id)}`}>Rule: {item.rule_name ?? item.rule_id}</a> : <span className="muted">No rule recorded</span>}
           {item.memory_ids?.map(id => <a key={id} href={`/memory#${encodeURIComponent(id)}`}>Memory {id}</a>)}
         </div>
-        {item.reviewer_note ? <details><summary>Reviewer note</summary><p>{item.reviewer_note}</p></details> : <p className="muted">No reviewer note recorded</p>}
+        {item.approval_id ? <ApprovalReview key={item.approval_id} id={item.approval_id} /> : item.reviewer_note ? <details><summary>Reviewer note</summary><p>{item.reviewer_note}</p></details> : <p className="muted">No reviewer note recorded</p>}
         {!item.memory_ids?.length && <p className="muted">No memories recorded</p>}
       </Card></li>)}</ol>
       {data.next_cursor && <Button variant="secondary" loading={mutation.pending} onClick={() => void older()}>Load older activity</Button>}

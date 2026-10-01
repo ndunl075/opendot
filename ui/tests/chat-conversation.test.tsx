@@ -35,10 +35,12 @@ it("sends over the typed stream and renders deltas, approval, and final usage", 
   expect(screen.getByText("I can help.")).toBeInTheDocument();
   expect(screen.getByText("Credits not reported")).toBeInTheDocument();
   act(() => {
-    socket.event({ ...base, type: "approval_required", seq: 3, approval: { id: "a", title: "Draft reply", action: "gmail.create_draft", created_at: "2026-09-30", status: "pending", payload: { body: "Hello" }, preview: "Reviewer: Draft only." } });
+    socket.event({ ...base, type: "approval_required", seq: 3, approval: { id: "a", title: "Draft reply", action: "gmail.create_draft", created_at: "2026-09-30", status: "pending", payload: { body: "Hello" }, preview: "Draft only.", review_note: "Check the recipient.", review_verdict: "concern" } });
     socket.event({ ...base, type: "completed", seq: 4, text: "I can help.", usage: { model: "catalog-model", effort: "low", credits: 0.2 } });
   });
   expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Reviewer note" })).toHaveTextContent("Check the recipient.");
+  expect(screen.getByText("Review: concern")).toBeInTheDocument();
   expect(screen.getByText("catalog-model")).toBeInTheDocument();
   expect(screen.getByText("0.2 credits")).toBeInTheDocument();
   expect(screen.getByText("Using ChatGPT plan")).toBeInTheDocument();

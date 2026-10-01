@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "../src/api/client";
@@ -6,12 +6,25 @@ import type { ApprovalItem, PausedEvent } from "../src/api/types.gen";
 import { ApprovalCard } from "../src/screens/chat/ApprovalCard";
 import { PausedBanner } from "../src/screens/chat/PausedBanner";
 
-const approval: ApprovalItem = { id: "approval-1", conversation_id: "c", title: "Draft a reply", action: "gmail_draft", status: "pending", created_at: "2026-09-30T12:00:00Z", payload: { body: "Hello" }, preview: "A draft only.\nReviewer (allow): This does not send email." };
+const approval: ApprovalItem = { id: "approval-1", conversation_id: "c", title: "Draft a reply", action: "gmail_draft", status: "pending", created_at: "2026-09-30T12:00:00Z", payload: { body: "Hello" }, preview: "A draft only.", review_note: "This does not send email.", review_verdict: "ok" };
 function card() { render(<MemoryRouter><ApprovalCard approval={approval} onDecision={vi.fn()} /></MemoryRouter>); }
 describe("approval decisions", () => {
+  it.each([["ok", "success"], ["concern", "warning"], ["block", "danger"]] as const)("shows the dedicated %s review separately from the preview", (verdict, tone) => {
+    render(<MemoryRouter><ApprovalCard approval={{ ...approval, review_verdict: verdict, preview: "Reviewer (ok): literal preview text" }} onDecision={vi.fn()} /></MemoryRouter>);
+    const review = screen.getByRole("region", { name: "Reviewer note" });
+    expect(within(review).getByText(`Review: ${verdict}`)).toHaveClass(`badge--${tone}`);
+    expect(review).toHaveTextContent("This does not send email.");
+    expect(review).not.toHaveTextContent("literal preview text");
+    expect(screen.getByLabelText("Action preview")).toHaveTextContent("Reviewer (ok): literal preview text");
+  });
+  it("does not infer a verdict or reviewer note from preview text", () => {
+    render(<MemoryRouter><ApprovalCard approval={{ ...approval, review_note: null, review_verdict: null, preview: "Reviewer (block): literal preview text" }} onDecision={vi.fn()} /></MemoryRouter>);
+    expect(screen.queryByRole("region", { name: "Reviewer note" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Action preview")).toHaveTextContent("Reviewer (block): literal preview text");
+  });
   it.each([["Approve", "approval_approve", {}], ["Deny", "approval_deny", {}]] as const)("%s calls its endpoint once", async (label, endpoint, body) => {
     const call = vi.spyOn(api, "call").mockResolvedValue({ approval: { ...approval, status: "approved" }, executed: true });
-    card(); expect(screen.getByText(/Reviewer \(allow\)/)).toBeInTheDocument();
+    card(); expect(screen.getByText("This does not send email.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: label }));
     await waitFor(() => expect(call).toHaveBeenCalledWith(endpoint, { params: { approval_id: "approval-1" }, body }));
     expect(call).toHaveBeenCalledTimes(1);
