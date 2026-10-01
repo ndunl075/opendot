@@ -526,3 +526,13 @@ def test_empty_catalog_at_startup_is_reread_on_the_first_request(tmp_path: Path)
     task_id, _ = stack.start_and_run("hello")
     assert stack.loop.task(task_id).state is TaskState.COMPLETED
     assert stack.provider.requests[0].model == "fake-luna"
+
+
+def test_s6_paid_credit_spend_pauses_every_plan_request(tmp_path: Path) -> None:
+    stack = build_stack(tmp_path, script=[tool_turn("memory_search", {"query": "x"}), text_turn("never")])
+    stack.provider.credit_spend_detected = lambda usage: ["credits_used"]  # type: ignore[attr-defined]
+    task_id, events = stack.start_and_run("what do you know")
+    assert stack.loop.task(task_id).state is TaskState.PAUSED_PLAN_LIMIT
+    assert stack.provider.calls == 1 and "credit" in (stack.loop._control("plan_limit") or "")
+    other, _ = stack.start_and_run("hello")
+    assert stack.loop.task(other).state is TaskState.PAUSED_PLAN_LIMIT and stack.provider.calls == 1

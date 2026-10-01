@@ -32,9 +32,15 @@ from ..rules import ToolIntent
 
 AGENT_CLIENT_ID = "agent"
 AGENT_ACTOR = f"mcp:{AGENT_CLIENT_ID}"
-NEVER_OFFERED = frozenset({"action_commit"})
-#: Offered only while the user's Google write opt-in is on and Google granted the write scopes.
-GOOGLE_WRITE_TOOLS = frozenset({"message_draft", "message_send_propose", "calendar_event_propose"})
+#: action_commit: the model can never commit an approval. message_send_propose: sending email is not
+#: part of v0.1 (ARCHITECTURE.md section 10: v0.2), and the Gmail drafts switch never covers it
+#: (security review S11).
+NEVER_OFFERED = frozenset({"action_commit", "message_send_propose"})
+#: Offered only while that app's write opt-in is on and Google granted its write scope (review S9).
+GOOGLE_WRITE_TOOLS: dict[str, str] = {
+    "message_draft": "gmail",
+    "calendar_event_propose": "google_calendar",
+}
 
 
 @dataclass(frozen=True)
@@ -130,9 +136,12 @@ class McpTools:
     def offered(self) -> list[str]:
         from ..connections_google import google_write_allowed
 
-        if google_write_allowed(self.database):
-            return list(self._offered)
-        return [name for name in self._offered if name not in GOOGLE_WRITE_TOOLS]
+        allowed = {app for app in set(GOOGLE_WRITE_TOOLS.values()) if google_write_allowed(self.database, app)}
+        return [name for name in self._offered if GOOGLE_WRITE_TOOLS.get(name, "") in allowed or name not in GOOGLE_WRITE_TOOLS]
+
+    def read_only_tools(self) -> frozenset[str]:
+        """Tools that only read; the only ones used to fill a task's tool group (security review S4)."""
+        return frozenset(name for name in self.offered() if not TOOL_FACTS[name].writes)
 
     def specs(self) -> list[ToolSpec]:
         offered = set(self.offered())

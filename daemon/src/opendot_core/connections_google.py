@@ -34,11 +34,54 @@ PENDING_TTL_SECONDS = 600.0
 GOOGLE_APPS = ("gmail", "google_calendar")
 
 
-def google_write_allowed(database: Database) -> bool:
-    """The user switched Google writes on AND Google granted the write scopes."""
+#: Each Google app is connected, opted into writes and disconnected on its own (review S7, S9):
+#: connecting Gmail never grants or syncs Calendar, and the Gmail drafts switch never enables
+#: Calendar events. One Google grant (one refresh token) carries the scopes of every connected app.
+APP_READ_SCOPES: dict[str, tuple[str, ...]] = {
+    "gmail": ("https://www.googleapis.com/auth/gmail.readonly",),
+    "google_calendar": (
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    ),
+}
+APP_WRITE_SCOPES: dict[str, tuple[str, ...]] = {
+    "gmail": ("https://www.googleapis.com/auth/gmail.compose",),
+    "google_calendar": ("https://www.googleapis.com/auth/calendar.events",),
+}
+assert set(READ_SCOPES) == {s for scopes in APP_READ_SCOPES.values() for s in scopes}
+assert set(WRITE_SCOPES) == {s for scopes in APP_WRITE_SCOPES.values() for s in scopes}
+
+
+def _state(database: Database) -> dict[str, Any]:
     state = SettingsStore(database).get(SETTINGS_KEY, dict, {})
+    if not isinstance(state.get("write_opt_in"), dict):
+        state["write_opt_in"] = {}  # an older all-apps switch is not carried over
+    state.setdefault("apps", [])
+    return state
+
+
+def google_managed(database: Database) -> bool:
+    """True once Google was connected through the UI (per-app state exists). The legacy
+    `opendot google-auth` command, which predates per-app choices, leaves this False."""
+    return "apps" in SettingsStore(database).get(SETTINGS_KEY, dict, {})
+
+
+def google_app_connected(database: Database, app: str) -> bool:
+    """The user connected this app AND Google granted its read scopes."""
+    state = _state(database)
     granted = set(state.get("granted_scopes") or [])
-    return bool(state.get("write_opt_in")) and set(WRITE_SCOPES) <= granted
+    return app in state["apps"] and set(APP_READ_SCOPES[app]) <= granted
+
+
+def google_write_allowed(database: Database, app: str) -> bool:
+    """This app is connected, its write switch is on, AND Google granted its write scopes."""
+    state = _state(database)
+    granted = set(state.get("granted_scopes") or [])
+    return (
+        google_app_connected(database, app)
+        and bool(state["write_opt_in"].get(app))
+        and set(APP_WRITE_SCOPES[app]) <= granted
+    )
 
 
 class GoogleConnectError(ValueError):
@@ -49,6 +92,7 @@ class GoogleConnectError(ValueError):
 class _Pending:
     verifier: str
     scopes: tuple[str, ...]
+    app: str
     redirect_uri: str
     created: float
 
@@ -83,7 +127,7 @@ class GoogleConnector:
     # -- state ------------------------------------------------------------------------------------
 
     def state(self) -> dict[str, Any]:
-        return SettingsStore(self.database).get(SETTINGS_KEY, dict, {})
+        return _state(self.database)
 
     def _save_state(self, **changes: Any) -> dict[str, Any]:
         current = self.state()
@@ -97,24 +141,30 @@ class GoogleConnector:
         except SecretStoreError:
             return False
 
-    def write_allowed(self) -> bool:
-        return google_write_allowed(self.database)
+    def app_connected(self, app: str) -> bool:
+        return google_app_connected(self.database, app)
+
+    def write_allowed(self, app: str) -> bool:
+        return google_write_allowed(self.database, app)
 
     # -- the sign-in flow ------------------------------------------------------------------------
 
-    def start(self, *, include_write: bool | None = None) -> tuple[str, str]:
-        """Return (authorize_url, state). Opens nothing: the UI or desktop shell opens the browser."""
+    def start(self, app: str, *, include_write: bool | None = None) -> tuple[str, str]:
+        """Return (authorize_url, state) for connecting one app. Opens nothing: the UI or desktop shell
+        opens the browser. Asks only for that app's scopes; Google adds them to the existing grant."""
+        if app not in APP_READ_SCOPES:
+            raise GoogleConnectError(f"{app} is not a Google app.")
         if not self.client_configured():
             raise GoogleConnectError("Add your Google OAuth client first (Connections, Set up Google).")
         if include_write is None:
-            include_write = bool(self.state().get("write_opt_in"))
-        scopes = READ_SCOPES + (WRITE_SCOPES if include_write else ())
+            include_write = bool(self.state()["write_opt_in"].get(app))
+        scopes = APP_READ_SCOPES[app] + (APP_WRITE_SCOPES[app] if include_write else ())
         state = secrets.token_urlsafe(24)
         verifier, challenge = pkce_pair()
         redirect_uri = f"{self.base_url}{CALLBACK_PATH}"
         with self._lock:
             self._expire()
-            self._pending[state] = _Pending(verifier, scopes, redirect_uri, self.clock())
+            self._pending[state] = _Pending(verifier, scopes, app, redirect_uri, self.clock())
         url = build_authorization_url(
             client_id=self.secrets.get_required(CLIENT_ID_SECRET),
             redirect_uri=redirect_uri,
@@ -148,23 +198,40 @@ class GoogleConnector:
             raise GoogleConnectError(
                 "Google did not return a refresh token. Remove OpenDot at myaccount.google.com/permissions and try again."
             )
-        granted = sorted(set((token.scope or "").split()) | set(self.state().get("granted_scopes") or []))
-        return self._save_state(granted_scopes=granted, connected=True)
+        current = self.state()
+        granted = sorted(set((token.scope or "").split()) | set(current.get("granted_scopes") or []))
+        apps = list(current["apps"])
+        if set(APP_READ_SCOPES[pending.app]) <= set(granted) and pending.app not in apps:
+            apps.append(pending.app)
+        return self._save_state(granted_scopes=granted, apps=sorted(apps), connected=bool(apps))
 
-    def set_write_opt_in(self, enabled: bool) -> tuple[dict[str, Any], str | None]:
-        """Switch writes on or off. Turning on without the write grant yet returns the URL to get it."""
-        state = self._save_state(write_opt_in=bool(enabled))
-        if enabled and not self.write_allowed():
-            url, _ = self.start(include_write=True)
+    def set_write_opt_in(self, app: str, enabled: bool) -> tuple[dict[str, Any], str | None]:
+        """Switch one app's writes on or off. Turning on without the write grant yet returns the URL
+        to get it (only that app's write scope is asked for)."""
+        if app not in APP_WRITE_SCOPES:
+            raise GoogleConnectError(f"{app} has no write opt-in.")
+        opt_in = dict(self.state()["write_opt_in"])
+        opt_in[app] = bool(enabled)
+        state = self._save_state(write_opt_in=opt_in)
+        if enabled and not self.write_allowed(app):
+            url, _ = self.start(app, include_write=True)
             return state, url
         return state, None
 
-    def disconnect(self) -> None:
-        try:
-            self.secrets.delete(REFRESH_TOKEN_SECRET)
-        except (SecretStoreError, AttributeError):
-            pass
-        self._save_state(connected=False, granted_scopes=[], write_opt_in=False)
+    def disconnect(self, app: str | None = None) -> None:
+        """Disconnect one app (or every Google app). OpenDot stops syncing and offering it at once;
+        the refresh token is deleted when no Google app is left."""
+        current = self.state()
+        apps = [] if app is None else [a for a in current["apps"] if a != app]
+        opt_in = {} if app is None else {k: v for k, v in current["write_opt_in"].items() if k != app}
+        if not apps:
+            try:
+                self.secrets.delete(REFRESH_TOKEN_SECRET)
+            except (SecretStoreError, AttributeError):
+                pass
+            self._save_state(connected=False, granted_scopes=[], apps=[], write_opt_in={})
+            return
+        self._save_state(apps=apps, write_opt_in=opt_in)
 
     def _expire(self) -> None:
         now = self.clock()
@@ -172,4 +239,14 @@ class GoogleConnector:
             del self._pending[key]
 
 
-__all__ = ["CALLBACK_PATH", "GOOGLE_APPS", "GoogleConnectError", "GoogleConnector", "google_write_allowed"]
+__all__ = [
+    "APP_READ_SCOPES",
+    "APP_WRITE_SCOPES",
+    "CALLBACK_PATH",
+    "GOOGLE_APPS",
+    "GoogleConnectError",
+    "GoogleConnector",
+    "google_app_connected",
+    "google_managed",
+    "google_write_allowed",
+]

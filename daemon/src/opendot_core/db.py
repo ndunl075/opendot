@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
@@ -20,6 +22,28 @@ class MigrationConflict(RuntimeError):
     """
 
 
+class InsecureDataError(PermissionError):
+    """OpenDot's data would stay readable by other local users and could not be made private."""
+
+
+def _restrict(path: Path, mode: int) -> None:
+    """Make ``path`` owner-only (POSIX). If that fails while others can still read it, refuse to go
+    on rather than keep personal data readable (security review S3)."""
+    if os.name != "posix":
+        return
+    current = stat.S_IMODE(path.stat().st_mode)
+    if current == mode:
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError as error:
+        if current & 0o077:
+            raise InsecureDataError(
+                f"{path} is readable by other users and OpenDot could not make it private "
+                f"({error.strerror}). Fix its owner or permissions (chmod {mode:o} {path})."
+            ) from error
+
+
 def _migration_version(filename: str) -> int:
     return int(filename.split("_", maxsplit=1)[0])
 
@@ -32,8 +56,16 @@ class Database:
 
     def connect(self) -> sqlite3.Connection:
         """Open a connection configured for durable local use."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        parent = self.path.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+            _restrict(parent, 0o700)
+        elif "opendot" in parent.name.lower():
+            # OpenDot's own data folder (for example one the desktop app created before the daemon's
+            # umask applied): owner-only. A folder the user chose for --db is left as it is.
+            _restrict(parent, 0o700)
         connection = sqlite3.connect(self.path)
+        self.secure_files()
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
@@ -42,6 +74,14 @@ class Database:
         sqlite_vec.load(connection)
         connection.enable_load_extension(False)
         return connection
+
+    def secure_files(self) -> None:
+        """Owner-only permissions for the database and its WAL/SHM files (POSIX; Windows profiles
+        are already per-user). Other local users must not read conversations, memories or synced mail."""
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            candidate = self.path.with_name(self.path.name + suffix)
+            if candidate.exists():
+                _restrict(candidate, 0o600)
 
     def migrate(self) -> int:
         """Apply each packaged SQL migration exactly once and return the schema version."""

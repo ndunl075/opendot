@@ -1,10 +1,10 @@
 # OpenDot status
 
-Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the same day). Next: M4 (always-on, connectors, v0.1 release candidate).
+Milestone: **M4 (always-on, connectors) — DONE. v0.1 release candidate ready** (2026-10-01; M0 to M3 done 2026-09-30). What is left before a public v0.1 is under **Needs you**.
 
 ## Test-count baseline (recorded at the start of M0, from Alfred at commit 4ec3589)
 
-- Collected after M0: 722; after M1: 921; after M2: 1189; after M3: 1210 daemon tests (1278 after M4 tasks 4.1 to 4.3) plus 177 UI unit and 12 end-to-end tests (minimum stays 650)
+- Collected after M0: 722; after M1: 921; after M2: 1189; after M3: 1210; after M4: 1453 daemon tests (1447 run on Windows, 6 POSIX-only) plus 196 UI unit and 14 end-to-end tests (minimum stays 650)
 - Collected tests at baseline: **777**
 - Tests inside the deletable files listed in ARCHITECTURE.md §5: **127**
 - Minimum collected count from now on (baseline − deletable): **650**
@@ -56,17 +56,25 @@ Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the 
 - [x] 4.6 `opendot doctor` (`--ci`, `--json`; `doctor.py`): database and migrations, keychain, access token, daemon, service, ChatGPT sign-in, connectors, disk, backups, restore drill, headless secrets file. `--ci` exits 0 on a fresh temporary database and skips the checks that need your setup
 - [x] 4.7 `deploy/`: server guide (systemd user unit and Docker, both 127.0.0.1 only), Tailscale guide, headless secrets (systemd-creds, Docker secret), SSH-forward ChatGPT sign-in, section 11 caveat; `daemon/tests/test_deploy_files.py` checks the Docker files. Gaps recorded in `docs/decisions.md` (no keychain in Docker for ChatGPT tokens; Host header behind `tailscale serve`)
 - [x] 4.5 built-in routines (`routines/`): morning brief, inbox triage, weekly review. Settings in `SettingsStore`, off by default, run from the always-on loop, quiet hours respected, one optional cheap/low pass through the agent loop (budgets, plan-limit pause and kill switch apply), plain-text fallback, `opendot routines list|run|enable|disable`. 28 new tests (1242 daemon tests pass). Not wired yet: a GitHub pull-request callable for the weekly review (needs task 4.4's connector).
-- [x] M4 endpoints (branch m4/endpoints-companion): version, onboarding, ChatGPT sign-in, companion (tasks, reset, rename, avatar), conversations (migration 0023), activity, memory (search, correct, forget) and connections (list, sync, disconnect) are served by route modules in `api/routes/`
+- [x] 4.4 connectors into the agent: OpenDot's MCP tools are the agent's real tools, each declaring whether it writes and whether it reaches other people (`agent/mcp_tools.py`). Gmail, Calendar and GitHub connect from the UI: your own Google OAuth client, read-only by default and per app, with a write opt-in per app. GitHub uses a personal access token. Sync now and disconnect are real.
+- [x] Every contract endpoint the UI uses is real (route modules in `api/routes/`: rules, usage, settings, providers, backup, onboarding, ChatGPT sign-in, companion, conversations, activity, memory, connections). Reminders, routine results and catch-up notes reach the UI ("From your companion").
+- [x] 4.8 security review of all of v0.1 into `docs/reviews/security-v0.1.md`: S1 to S13 fixed over five verification rounds; Sol's verdict "ready". Browser sign-in is now `opendot open` (one-time code); UIs hold only session tokens.
+- [x] CI: a UI job (lint, tests, build, Playwright e2e) and `opendot doctor --ci` on every OS.
 
-## Notes for M3 and M4
+## Notes for whoever continues (Claude or Codex)
 
 - `agent/runtime.py` `build_agent_runtime` is the production assembly of the agent loop and the API. M3 task 3.5 serves `runtime.app` on 127.0.0.1. The browser WebSocket authenticates with the subprotocols `["opendot", "opendot.bearer.<token>"]` from a local origin.
-- `opendot run` still builds no agent (M0 review F1). It gets real connector tools in M4 task 4.4. That task should also declare, for each tool, whether it reaches other people (the M2 review's residual risk).
-- Codex's Windows sandbox stopped launching commands during the M2 review, so Sol reviews now receive the diff inside the prompt. If Sol needs to run commands again, restart the Codex CLI or the machine first.
+- The always-on daemon is `opendot serve` (service via `opendot service install`): UI, API, agent with real tools, and the background loop in one process. `opendot run` remains for the older Telegram setup; do not run both at once.
+- Codex on this machine runs with `-c 'windows.sandbox="unelevated"'` (the default elevated sandbox cannot start processes); see docs/decisions.md for the exact `codex exec` command.
 
 ## Needs you
 
-0. **Code signing (before any public release):** the Windows installer (`desktop/src-tauri/target/release/bundle/nsis/OpenDot_0.1.0_x64-setup.exe`) is unsigned, and macOS needs signing and notarization. Both need paid certificates and your accounts.
+**v0.1 release candidate:** these are what stand between this release candidate and a public v0.1.
 
-1. **Live ChatGPT sign-in** (needs your Plus or Pro account and a browser): the `chatgpt_plan` provider has only been tested against a fake OAuth server and synthetic streaming fixtures. After signing in once, real recorded fixtures should replace the synthetic ones in `daemon/tests/providers/fixtures/chatgpt_plan/`. The `function_call` / `function_call_output` input items are unverified until then.
-2. **Run `opendot measure`** after signing in (a few minutes). It writes `docs/measurements.md` (caching, reasoning effort, structured output, model catalog incl. Astra, WebSocket cost, credit-spend check). Set a weekly OpenDot limit in ChatGPT Settings, Usage, and keep credit use off first.
+1. **Google OAuth setup:** create your own Google OAuth client ("Desktop app", in your own Google Cloud project) and connect Gmail and Calendar from Connections in the app (the screen walks you through it). Optionally save a GitHub personal access token there too.
+2. **A few days of real use:** sign in with ChatGPT (onboarding), run `opendot service install` so it stays on, use chat, approvals, reminders and the routines, and note anything rough.
+3. **The publish decision:** whether and when to make the repository public and tag `v0.1.0` (ARCHITECTURE.md section 0 says only you decide this).
+4. **Code signing (before any public release):** the Windows installer (`desktop/src-tauri/target/release/bundle/nsis/OpenDot_0.1.0_x64-setup.exe`) is unsigned, and macOS needs signing and notarization. Both need paid certificates and your accounts.
+
+5. **Live ChatGPT sign-in** (needs your Plus or Pro account and a browser): the `chatgpt_plan` provider has only been tested against a fake OAuth server and synthetic streaming fixtures. After signing in once, real recorded fixtures should replace the synthetic ones in `daemon/tests/providers/fixtures/chatgpt_plan/`. The `function_call` / `function_call_output` input items are unverified until then.
+6. **Run `opendot measure`** after signing in (a few minutes). It writes `docs/measurements.md` (caching, reasoning effort, structured output, model catalog incl. Astra, WebSocket cost, credit-spend check). Set a weekly OpenDot limit in ChatGPT Settings, Usage, and keep credit use off first.

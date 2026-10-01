@@ -63,9 +63,65 @@ fn daemon_running() -> bool {
     }
 }
 
+fn hmac_hex(token: &str, label: &[u8], value: &str) -> Option<String> {
+    use hmac::{Hmac, Mac};
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes()).ok()?;
+    mac.update(label);
+    mac.update(value.as_bytes());
+    Some(mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Get a session token without ever sending the access token (security review S1, S10): the daemon
+/// proves it knows the token (HMAC of our fresh nonce), then we answer its single-use challenge with
+/// an HMAC of our own. A program that grabbed the port gets nothing it can use.
+fn open_session(token: &str) -> Result<String, String> {
+    if token.is_empty() {
+        return Err("no access token".into());
+    }
+    let mut raw = [0u8; 32];
+    getrandom::getrandom(&mut raw).map_err(|e| e.to_string())?;
+    let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).build();
+    let body: serde_json::Value = agent
+        .get(&format!("{}/v1/session/challenge?nonce={nonce}", base_url()))
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    let proof = body.get("proof").and_then(|v| v.as_str()).unwrap_or("");
+    let challenge = body.get("challenge").and_then(|v| v.as_str()).unwrap_or("");
+    let expected = hmac_hex(token, b"opendot-identity:", &nonce).ok_or("hmac failed")?;
+    if challenge.is_empty() || !same(&expected, proof) {
+        return Err(format!("the program on port {PORT} could not prove it is OpenDot; not signing in"));
+    }
+    let mac = hmac_hex(token, b"opendot-session:", challenge).ok_or("hmac failed")?;
+    let answer: serde_json::Value = agent
+        .post(&format!("{}/v1/session", base_url()))
+        .send_json(json!({ "challenge": challenge, "mac": mac, "kind": "session" }))
+        .map_err(|e| format!("could not start a session: {e}"))?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    answer
+        .get("session_token")
+        .and_then(|v| v.as_str())
+        .filter(|v| v.starts_with("ods_"))
+        .map(str::to_owned)
+        .ok_or_else(|| "the daemon returned no session token".into())
+}
+
 fn sidecar_command(app: &AppHandle) -> Result<tauri_plugin_shell::process::Command, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        // Owner-only before the daemon writes anything there (security review S3).
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
     let db = data_dir.join("opendot.db");
     Ok(app
         .shell()
@@ -163,8 +219,12 @@ pub fn run() {
                 eprintln!("{error}");
                 String::new()
             });
-            // The token goes only to the app's own origin: initialization scripts run on every
-            // top-level navigation, so the script checks where it is before writing anything.
+            // Only a session token (dies with the daemon) reaches the webview and the tray, and the
+            // access token itself never goes over the wire (security review S1, S8, S10).
+            let token = open_session(&token).unwrap_or_else(|error| {
+                eprintln!("{error}");
+                String::new()
+            });
             let init = format!(
                 "if ({origins}.includes(window.location.origin)) {{ window.__OPENDOT__ = Object.freeze({config}); }}",
                 origins = json!(APP_ORIGINS),

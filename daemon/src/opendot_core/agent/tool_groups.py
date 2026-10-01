@@ -534,18 +534,24 @@ def is_casual_conversation(request: str, *, recent_topic_text: str = "") -> bool
     return True
 
 
-def choose_task_tool_group(message: str, available: list[str] | tuple[str, ...]) -> list[str]:
+def choose_task_tool_group(
+    message: str, available: list[str] | tuple[str, ...], read_only: frozenset[str] | set[str] | None = None
+) -> list[str]:
     """The tool group for a whole task (section 8.2 rule 4), chosen once and never changed.
 
     When the executor offers at most ``MAX_TOOLS_PER_GROUP`` tools they are all offered. Otherwise
-    the tools ``select_tool_group`` picks for the request come first, then the rest in
-    ``_TOOL_PRIORITY`` order, capped at the group size. Returned sorted by name, so the stable
-    prompt prefix (which lists the schemas) is byte-identical for the same group.
+    the tools ``select_tool_group`` picks for the request come first. Remaining slots are filled in
+    ``_TOOL_PRIORITY`` order, but when the executor declares its ``read_only`` tools, only from those:
+    a tool that changes something is offered only when the request asked for it, so content the agent
+    reads (an email, a calendar title) cannot steer it into a write nobody asked for (v0.1 security
+    review S4). Returned sorted by name, so the stable prompt prefix is byte-identical per group.
     """
     offered = sorted(set(available))
-    if len(offered) <= MAX_TOOLS_PER_GROUP:
-        return offered
+    if read_only is None and len(offered) <= MAX_TOOLS_PER_GROUP:
+        return offered  # an executor that declares nothing (tests, the scenario harness)
     wanted = select_tool_group(message)
     rank = {name: index for index, name in enumerate(_TOOL_PRIORITY)}
-    ordered = sorted(offered, key=lambda name: (name not in wanted, rank.get(name, len(rank)), name))
-    return sorted(ordered[:MAX_TOOLS_PER_GROUP])
+    chosen = sorted((name for name in offered if name in wanted), key=lambda name: (rank.get(name, len(rank)), name))
+    fillers = [name for name in offered if name not in wanted and (read_only is None or name in read_only)]
+    fillers.sort(key=lambda name: (rank.get(name, len(rank)), name))
+    return sorted((chosen + fillers)[:MAX_TOOLS_PER_GROUP])

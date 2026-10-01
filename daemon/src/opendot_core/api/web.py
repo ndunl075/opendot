@@ -3,12 +3,17 @@
 - Binds to 127.0.0.1 only; every request must also *address* a loopback host (the Host header),
   which stops DNS-rebinding pages from talking to the daemon through a name they control.
 - ``/v1/*`` is the API app from ``api/server.py``: bearer token on every route, the chat
-  WebSocket authenticates with its subprotocol. The API never accepts the session cookie, so a
+  WebSocket authenticates with its subprotocol. The API never accepts cookies at all, so a
   cross-site form can never act for the user.
-- A browser signs in once at ``/login`` by pasting the token (``opendot api-token show``). That
-  sets an HttpOnly, SameSite=Strict session cookie, and only then is ``index.html`` served, with
-  the token in ``<meta name="opendot-api-token">`` for the UI's API client. Without the cookie a
-  local process gets the login page, never the token.
+- A browser signs in with ``opendot open``: the CLI proves it holds the access token without sending
+  it (challenge and HMAC), gets a single-use code that expires in two minutes, prints it in the
+  terminal and opens ``/login`` (the code is never in a URL or a process's arguments; review S12).
+  The user types the code; the page trades it for a session token that lives only in the daemon's
+  memory, expires after seven days, dies when the daemon restarts and is revoked at /logout, and keeps
+  only that in this origin's localStorage. No page ever
+  asks for the access token (a fake page on a reclaimed port could capture it; review S10), and the
+  daemon never puts a token in a cookie (cookies are shared by every port on 127.0.0.1).
+  ``index.html`` is public and holds no secrets.
 - Built assets (``/assets/...``) are public: they are the same for everyone and hold no secrets.
 - The desktop shell (Tauri) serves its own bundled copy of the UI and passes the token to it
   directly, so API responses allow CORS for the Tauri origins only.
@@ -26,7 +31,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -34,31 +39,76 @@ from ..connections_google import CALLBACK_PATH
 from .contract import ENDPOINTS
 from .models import ErrorResponse
 
-SESSION_COOKIE = "opendot_session"
-TOKEN_META = "opendot-api-token"
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "https://tauri.localhost")
-_META_PLACEHOLDER = re.compile(r'<meta\s+name="opendot-api-token"[^>]*>', re.IGNORECASE)
+
+TOKEN_STORAGE_KEY = "opendot.token"
+"""Where the web UI keeps its session token (never the long-lived access token): the browser's localStorage for exactly this origin
+(scheme, host and port), which no other local port can read. Never a cookie: cookies are shared by
+every port on 127.0.0.1, so any local process listening on another port would receive one
+(v0.1 security review S2)."""
+
+_PAGE_HEADERS = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+    "X-Frame-Options": "DENY",
+}
 
 LOGIN_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenDot: sign in</title>
 <style>
-:root {{ color-scheme: light dark; font-family: system-ui, sans-serif; }}
-body {{ display: grid; place-items: center; min-height: 100vh; margin: 0; }}
-form {{ display: grid; gap: .75rem; width: min(24rem, 90vw); }}
-input, button {{ font: inherit; padding: .6rem .75rem; border-radius: .5rem; border: 1px solid #8886; }}
-button {{ cursor: pointer; }}
-.error {{ color: #c0392b; }}
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { display: grid; place-items: center; min-height: 100vh; margin: 0; }
+form { display: grid; gap: .75rem; width: min(26rem, 90vw); }
+input, button { font: inherit; padding: .6rem .75rem; border-radius: .5rem; border: 1px solid #8886; }
+input { letter-spacing: .12em; text-transform: uppercase; }
+button { cursor: pointer; }
+.error { color: #c0392b; min-height: 1.2em; }
 </style></head>
-<body><form method="post" action="/login">
+<body><form id="login">
 <h1>OpenDot</h1>
-<label for="token">Access token</label>
-<input id="token" name="token" type="password" autocomplete="off" required autofocus>
-<p>Run <code>opendot api-token show</code> on this computer to see it.</p>
-{error}
-<button type="submit">Open OpenDot</button>
-</form></body></html>
+<p>Run <code>opendot open</code> on this computer, then type the code it shows.</p>
+<label for="code">Sign-in code</label>
+<input id="code" name="code" autocomplete="one-time-code" placeholder="ABCD-EFGH-JKLM" required autofocus>
+<p class="error" id="error" role="alert"></p>
+<button type="submit">Sign in</button>
+<p>OpenDot never asks for its access token in a web page.</p>
+</form>
+<script>
+document.getElementById("login").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = document.getElementById("error");
+  error.textContent = "";
+  try {
+    const response = await fetch("/v1/session", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login_code: document.getElementById("code").value }),
+    });
+    if (!response.ok) { error.textContent = "That code is wrong, expired or already used."; return; }
+    const body = await response.json();
+    localStorage.setItem("opendot.token", body.session_token);
+    location.replace("/");
+  } catch (e) {
+    error.textContent = "OpenDot is not answering. Is it running?";
+  }
+});
+</script></body></html>
+"""
+
+LOGOUT_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OpenDot</title></head>
+<body><script>
+(async () => {
+  const token = localStorage.getItem("opendot.token");
+  localStorage.removeItem("opendot.token");
+  if (token) {
+    try { await fetch("/v1/session/revoke", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch (e) {}
+  }
+  location.replace("/login");
+})();
+</script></body></html>
 """
 
 
@@ -165,10 +215,14 @@ def _authorized(scope: Scope, api_app: Starlette) -> bool:
     token = getattr(api_app.state, "api_token", None)
     if not token:
         return False
+    sessions = getattr(api_app.state, "sessions", None)
     for key, value in scope.get("headers", []):
         if key == b"authorization":
             prefix, _, rest = value.partition(b" ")
-            return prefix.lower() == b"bearer" and secrets.compare_digest(rest.strip(), token.encode())
+            supplied = rest.strip()
+            if prefix.lower() != b"bearer" or not supplied:
+                return False
+            return secrets.compare_digest(supplied, token.encode()) or (sessions is not None and sessions.valid(supplied))
     return False
 
 
@@ -179,38 +233,19 @@ def create_web_app(api_app: Starlette, *, token: str, ui_dist: Path | None) -> A
     api_app.state.api_token = token
     index_path = ui_dist / "index.html" if ui_dist is not None else None
 
-    def signed_in(request: Request) -> bool:
-        cookie = request.cookies.get(SESSION_COOKIE)
-        return bool(cookie) and secrets.compare_digest(cookie, token)
-
-    async def login(request: Request) -> Response:
-        if request.method == "POST":
-            form = await request.form()
-            supplied = str(form.get("token", ""))
-            if supplied and secrets.compare_digest(supplied, token):
-                response = RedirectResponse(url="/", status_code=303)
-                response.set_cookie(
-                    SESSION_COOKIE, supplied, httponly=True, samesite="strict", max_age=60 * 60 * 24 * 30, path="/"
-                )
-                return response
-            return HTMLResponse(LOGIN_PAGE.format(error='<p class="error">That token is not right.</p>'), 401)
-        return HTMLResponse(LOGIN_PAGE.format(error=""))
+    async def login(_: Request) -> Response:
+        # The page trades a one-time code typed from `opendot open` for a session token and keeps only
+        # that in this origin's localStorage; no page ever asks for the access token.
+        return HTMLResponse(LOGIN_PAGE, headers=_PAGE_HEADERS)
 
     async def logout(_: Request) -> Response:
-        response = RedirectResponse(url="/login", status_code=303)
-        response.delete_cookie(SESSION_COOKIE, path="/")
-        return response
+        return HTMLResponse(LOGOUT_PAGE, headers=_PAGE_HEADERS)
 
-    async def spa(request: Request) -> Response:
-        if not signed_in(request):
-            return RedirectResponse(url="/login", status_code=303)
+    async def spa(_: Request) -> Response:
+        # Public: the built UI holds no secrets. Without a stored token it sends the user to /login.
         if index_path is None or not index_path.is_file():
             return HTMLResponse("<p>The UI is not built. Run <code>pnpm -C ui build</code>.</p>", 503)
         page = index_path.read_text(encoding="utf-8")
-        meta = f'<meta name="{TOKEN_META}" content="{html.escape(token, quote=True)}">'
-        page = _META_PLACEHOLDER.sub(meta, page, count=1) if _META_PLACEHOLDER.search(page) else page.replace(
-            "</head>", f"{meta}</head>", 1
-        )
         return HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
     async def asset(request: Request) -> Response:
@@ -250,8 +285,8 @@ def create_web_app(api_app: Starlette, *, token: str, ui_dist: Path | None) -> A
 
     routes = [
         Route(CALLBACK_PATH, google_callback, methods=["GET"]),
-        Route("/login", login, methods=["GET", "POST"]),
-        Route("/logout", logout, methods=["POST"]),
+        Route("/login", login, methods=["GET"]),
+        Route("/logout", logout, methods=["GET", "POST"]),
         Route("/assets/{path:path}", asset),
         Route("/{path:path}", _static_or_spa(ui_dist, serve_file, spa)),
     ]
@@ -280,4 +315,4 @@ def _static_or_spa(ui_dist: Path | None, serve_file, spa):  # noqa: ANN001, ANN2
     return handle
 
 
-__all__ = ["SESSION_COOKIE", "TAURI_ORIGINS", "TOKEN_META", "create_web_app"]
+__all__ = ["TAURI_ORIGINS", "TOKEN_STORAGE_KEY", "create_web_app"]

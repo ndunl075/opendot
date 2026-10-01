@@ -265,3 +265,14 @@ section 1. Newest last.
   revocation are injected through `ApiContext.extras` (`connector_syncers`, `connector_disconnectors`); with no syncer
   registered, sync answers 409 `sync_unavailable`. Disconnect deletes the app's `sync_state` and `connector_records`
   rows, and with "forget everything learned from this app" tombstones every memory whose source event came from it.
+- 2026-10-01 (M4, security review): Signing in replaces the M3 cookie flow above. The UI and the desktop
+  app hold only session tokens: in daemon memory, expire after seven days, die on every restart,
+  revoked at /logout. The access token never travels: a client proves it holds it by answering a
+  single-use challenge with an HMAC, after the daemon proves itself with an HMAC of the client's nonce
+  (`/v1/session/challenge`, `/v1/session`). Browsers sign in only through `opendot open`, which prints a
+  single-use two-minute code (60 bits, lockout after ten wrong guesses) to type into `/login`. No page
+  ever asks for the access token, and no credential is put in a URL or a cookie. Reason: v0.1 security
+  review S1, S2, S8, S10, S12 (another local process can take port 8765 when the daemon is down).
+- 2026-10-01 (M4, security review): The agent never sends email in v0.1 (`message_send_propose` is not
+  offered and `gmail_message_send` approvals are refused by its executor); Google connections, scopes,
+  syncs and write switches are per app. Reason: S7, S9, S11.

@@ -29,7 +29,12 @@ def allow_google_writes(path: Path) -> None:
     from opendot_core.settings_store import SettingsStore
 
     SettingsStore(Database(path)).set(
-        "google_connection", {"write_opt_in": True, "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES]}
+        "google_connection",
+        {
+            "apps": ["gmail", "google_calendar"],
+            "write_opt_in": {"gmail": True, "google_calendar": True},
+            "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES],
+        },
     )
 
 
@@ -54,15 +59,36 @@ def test_every_mcp_tool_is_declared_and_action_commit_is_never_offered(db_path: 
 
 def test_sending_is_declared_as_reaching_people_and_always_asks(db_path: Path) -> None:
     allow_google_writes(db_path)
-    tools = McpTools(db_path)
     rules = RuleEngine(Database(db_path))
-    intent = tools.intent("message_send_propose", {"to": "a@b.test", "subject": "s", "body": "b"})
-    assert intent.reaches_people and intent.target == "a@b.test"
+    assert TOOL_FACTS["message_send_propose"].reaches_people
+    # v0.1 never offers sending email at all, even with the Gmail drafts switch on (review S11).
+    assert "message_send_propose" not in {spec.name for spec in McpTools(db_path).specs()}
+    with pytest.raises(KeyError):
+        McpTools(db_path).intent("message_send_propose", {"to": "a@b.test", "subject": "s", "body": "b"})
+    from opendot_core.rules import ToolIntent
+
+    intent = ToolIntent(tool="message_send_propose", action="send", target="a@b.test", sensitivity="personal",
+                        reaches_people=True)
     rules.add_rule(tool="message_send_propose", action="send", target="a@b.test", behavior="auto")  # beats the default
     decision = rules.decide(intent)
     assert decision.behavior is Behavior.ASK and decision.locked
-    assert tools.intent("message_draft", {"to": "x@y.test"}).reaches_people is False
 
+
+def test_s11_the_agent_never_executes_an_email_send(db_path: Path) -> None:
+    from opendot_core.agent.executor import ApprovalExecutor
+    from opendot_core.api.escrow import TokenEscrow
+    from opendot_core.policy import ApprovalService, PolicyError
+
+    approvals = ApprovalService(Database(db_path))
+    approval = approvals.propose(actor="owner", action_type="gmail_message_send", preview={"to": "a@b.test"})
+    issued = approvals.approve(approval.id, actor="owner")
+    escrow = TokenEscrow()
+    escrow.put(approval.id, issued.token)
+    calls: list[str] = []
+    executor = ApprovalExecutor(approvals, escrow, actor="owner", execute=lambda *a, **k: calls.append("sent"))
+    with pytest.raises(PolicyError, match="not something the agent can do"):
+        executor.run_approved(approval.id)
+    assert calls == []
 
 def test_unknown_tools_fail_closed(db_path: Path) -> None:
     with pytest.raises(KeyError):
@@ -115,3 +141,54 @@ def test_the_runtime_runs_a_real_tool_end_to_end(tmp_path: Path, db_path: Path) 
     assert "mornings" in tools.run("memory_search", {"query": "mornings"}, task_id="x", call_id="y")
     sent = provider.requests[0]
     assert len(sent.tools) <= 8 and all(tool.name != "action_commit" for tool in sent.tools)
+
+
+def test_s4_unrequested_write_tools_are_never_offered(db_path: Path) -> None:
+    from opendot_core.agent.tool_groups import choose_task_tool_group
+
+    tools = McpTools(db_path)
+    available = [spec.name for spec in tools.specs()]
+    read_only = tools.read_only_tools()
+    assert "task_schedule" not in read_only and "agenda_get" in read_only
+    group = choose_task_tool_group("what's on my calendar today?", available, read_only)
+    writes = {name for name in group if TOOL_FACTS[name].writes}
+    assert writes == set(), f"unrequested write tools offered: {writes}"
+    asked = choose_task_tool_group("remind me to stretch at 5", available, read_only)
+    assert "reminder_set" in asked  # a write the user asked for is still offered
+
+
+def test_s9_each_google_app_write_switch_offers_only_its_own_tools(db_path: Path) -> None:
+    from opendot_core.google_oauth import READ_SCOPES, WRITE_SCOPES
+    from opendot_core.settings_store import SettingsStore
+
+    SettingsStore(Database(db_path)).set(
+        "google_connection",
+        {
+            "apps": ["gmail", "google_calendar"],
+            "write_opt_in": {"gmail": True},
+            "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES],
+        },
+    )
+    names = {spec.name for spec in McpTools(db_path).specs()}
+    assert "message_draft" in names
+    assert "calendar_event_propose" not in names and "message_send_propose" not in names
+
+
+def test_s4_the_production_wrapper_keeps_unrequested_writes_out(tmp_path: Path, db_path: Path) -> None:
+    """The runtime wraps McpTools in ApprovalGatedTools; the read-only list must survive that."""
+    provider = ScriptedProvider([text_turn("ok")])
+    registry = ProviderRegistry(ProviderSettings(enabled={"chatgpt_plan"}))
+    registry.register(provider)
+    tools = McpTools(db_path)
+    runtime = build_agent_runtime(Database(db_path), registry, tools, api_token="t" * 32, actor=tools.actor)
+    assert runtime.tools.read_only_tools() == tools.read_only_tools()
+    task_id = runtime.loop.start_task("what's on my calendar today?")
+    group = runtime.loop.task(task_id).tool_group
+    assert group and not [name for name in group if TOOL_FACTS[name].writes]
+
+
+def test_s4_small_declared_sets_are_filtered_too() -> None:
+    from opendot_core.agent.tool_groups import choose_task_tool_group
+
+    group = choose_task_tool_group("hello there", ["agenda_get", "task_schedule"], frozenset({"agenda_get"}))
+    assert group == ["agenda_get"]

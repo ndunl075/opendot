@@ -19,9 +19,10 @@ service with other people ([README.md](README.md) caveat).
    tailscale serve status
    ```
    It prints your address, like `https://my-server.tailnet-name.ts.net`.
-4. On another device (signed in to Tailscale) open that address. The login page asks for the access
-   token; get it on the server with `opendot api-token show` (keychain) or by reading your token file
-   (see [secrets-and-signin.md](secrets-and-signin.md)).
+4. On another device (signed in to Tailscale) open that address. The login page asks for a one-time
+   sign-in code, never the access token: on the server run `opendot open --no-browser` (over SSH) and
+   type the code it prints within two minutes. With a token file instead of a keychain, add
+   `--token-file <path>` (see [secrets-and-signin.md](secrets-and-signin.md)).
 5. Stop sharing at any time with `sudo tailscale serve reset`.
 
 ## Why this is safe, and what to check

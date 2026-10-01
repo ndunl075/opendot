@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,8 +36,42 @@ def register(subparsers: Any) -> None:
         help="serve only the API and UI; skip the always-on loop (due jobs, reminders, syncs, keep-awake)",
     )
     serve.add_argument("--print-ready", action="store_true", help="print one JSON line when listening (for the desktop shell)")
+    opener = subparsers.add_parser("open", help="open OpenDot in your browser and show a one-time sign-in code")
+    opener.add_argument("--port", type=int, default=DEFAULT_PORT)
+    opener.add_argument("--no-browser", action="store_true", help="print the address instead of opening the browser")
+    opener.add_argument("--token-file", help="read the access token from this file instead of the OS keychain")
     token = subparsers.add_parser("api-token", help="show or rotate the UI/API access token")
     token.add_argument("action", choices=["show", "rotate"])
+
+
+class InsecureTokenFile(SystemExit):
+    """The token file could be read by someone other than its owner."""
+
+
+def read_token_file(path: Path) -> str:
+    """Read a headless token file, refusing one other local users could read or swap (POSIX).
+
+    The file is opened once (never following a symlink) and the owner and mode are checked on that
+    same open file, so nothing can replace it between the check and the read (review S5). On Windows
+    the file inherits the user profile's ACLs; doctor warns about headless secrets files."""
+    if os.name == "posix":
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise InsecureTokenFile(
+                    f"{path} must be a regular file owned by you and readable only by you (chmod 600 {path}); "
+                    "refusing to use it."
+                )
+            with os.fdopen(os.dup(fd), "r", encoding="utf-8") as handle:
+                token = handle.read().strip()
+        finally:
+            os.close(fd)
+    else:
+        token = path.read_text(encoding="utf-8").strip()
+    if len(token) < 32:
+        raise InsecureTokenFile(f"{path} does not hold a full access token (run `opendot api-token rotate`).")
+    return token
 
 
 def load_or_create_token(store: SecretStore) -> str:
@@ -63,6 +98,35 @@ def default_ui_dist() -> Path | None:
         if candidate.is_dir():
             return candidate
     return None
+
+
+def run_open(args: argparse.Namespace, *, store: SecretStore | None = None, out: Any = None, client: Any = None) -> int:
+    """Sign the browser in without ever pasting the access token into a page (review S10)."""
+    import webbrowser
+
+    from .session_client import NotOurDaemon, exchange
+
+    out = out or sys.stdout
+    if getattr(args, "token_file", None):
+        token = read_token_file(Path(args.token_file))
+    else:
+        token = load_or_create_token(store or SystemKeyringSecretStore())
+    base = f"http://{HOST}:{args.port}"
+    try:
+        code = exchange(base, token, kind="login_code", client=client)
+    except NotOurDaemon as error:
+        out.write(f"Refusing to sign in: {error}.\n")
+        return 2
+    except Exception as error:  # daemon not running, network error
+        out.write(f"OpenDot is not answering at {base} ({type(error).__name__}). Start it with `opendot serve`.\n")
+        return 1
+    url = f"{base}/login"  # never carries the code: launch arguments can be visible to other users (S12)
+    out.write(f"Your sign-in code: {code}  (type it into the OpenDot page; it works once, for two minutes)\n")
+    if args.no_browser:
+        out.write(f"Open {url}\n")
+    else:
+        webbrowser.open(url)
+    return 0
 
 
 def run_token(args: argparse.Namespace, *, store: SecretStore | None = None, out: Any = None) -> int:
@@ -111,8 +175,11 @@ def build_serve_app(  # noqa: ANN201
     extras["secret_store"] = secrets
     extras["connector_syncers"] = build_syncers(database, secrets)
 
-    def disconnect_google() -> None:  # Gmail and Calendar share one Google grant
-        extras["google_connector"].disconnect()
+    def disconnect_gmail() -> None:
+        extras["google_connector"].disconnect("gmail")
+
+    def disconnect_calendar() -> None:
+        extras["google_connector"].disconnect("google_calendar")
 
     def disconnect_github() -> None:
         try:
@@ -121,8 +188,8 @@ def build_serve_app(  # noqa: ANN201
             pass
 
     extras["connector_disconnectors"] = {
-        "gmail": disconnect_google,
-        "google_calendar": disconnect_google,
+        "gmail": disconnect_gmail,
+        "google_calendar": disconnect_calendar,
         "github": disconnect_github,
     }
     runtime.app.state.context.extras["google_connector"] = GoogleConnector(
@@ -166,7 +233,7 @@ def run_serve(args: argparse.Namespace, database: Database, *, worker: Any = Non
         redirect_output(args.log_file)
 
     if args.token_file:
-        token = Path(args.token_file).read_text(encoding="utf-8").strip()
+        token = read_token_file(Path(args.token_file))
     else:
         token = load_or_create_token(SystemKeyringSecretStore())
     ui_dist = Path(args.ui_dist) if args.ui_dist else default_ui_dist()
@@ -182,7 +249,7 @@ def run_serve(args: argparse.Namespace, database: Database, *, worker: Any = Non
 
         server.startup = startup  # type: ignore[method-assign]
     else:
-        print(f"OpenDot is running at http://{HOST}:{args.port} (sign in with `opendot api-token show`)")
+        print(f"OpenDot is running at http://{HOST}:{args.port} (run `opendot open` to open it in your browser)")
     if worker is None and not getattr(args, "no_background", False):
         from ..always_on import AlwaysOnWorker
 

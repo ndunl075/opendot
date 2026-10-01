@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 APPS: tuple[str, ...] = get_args(ConnectionApp)
 GOOGLE_APPS = ("gmail", "google_calendar")
 _LABELS = {"gmail": "Gmail", "google_calendar": "Google Calendar", "github": "GitHub"}
-_SCOPE_WORD = {"gmail": "gmail", "google_calendar": "calendar"}
 _PLACEHOLDER_ACCOUNTS = {"", "self", "primary", "default"}
 GOOGLE_CLIENT_SECRET = "google-oauth-client-id"
 
@@ -58,8 +57,16 @@ def _google_available(ctx: Any) -> bool:
 
 
 def _granted_apps(ctx: Any) -> set[str]:
-    scopes = [str(s).lower() for s in _google_state(ctx).get("granted_scopes") or []]
-    return {app for app, word in _SCOPE_WORD.items() if any(word in scope for scope in scopes)}
+    """Google apps the user connected one by one (review S7), not every app the grant happens to cover."""
+    from ...connections_google import google_app_connected
+
+    return {app for app in GOOGLE_APPS if google_app_connected(ctx.database, app)}
+
+
+def _write_allowed(ctx: Any, app: str) -> bool:
+    from ...connections_google import google_write_allowed
+
+    return google_write_allowed(ctx.database, app)
 
 
 def connection_for(ctx: Any, app: str) -> Connection:
@@ -67,7 +74,8 @@ def connection_for(ctx: Any, app: str) -> Connection:
     health = next((h for h in connector_health(ctx.database) if h.connector == app), None)
     google = app in GOOGLE_APPS
     state = _google_state(ctx) if google else {}
-    opted_in = bool(state.get("write_opt_in")) if google else False
+    opt_in = state.get("write_opt_in") if google else None
+    opted_in = bool(opt_in.get(app)) if isinstance(opt_in, dict) else False
     label = _LABELS[app]
     account = health.account if health is not None else ""
     if health is None:
@@ -85,7 +93,7 @@ def connection_for(ctx: Any, app: str) -> Connection:
         health=health.state if health is not None else "never_synced",
         last_synced_at=health.last_success_at if health is not None else None,
         health_detail=detail,
-        read_only=not opted_in,
+        read_only=not (google and _write_allowed(ctx, app)),
         write_opt_in=opted_in,
         write_opt_in_available=google and _google_available(ctx),
         memory_item_count=memory_count(ctx.database, app),
@@ -135,15 +143,11 @@ def _disconnect(ctx: Any, app: str, forget_learned: bool) -> int:
                     result={"app": app, "forget_learned": forget_learned, "forgotten_count": forgotten},
                 ),
             )
-    settings = settings_for(ctx)
-    if settings is not None and app in _SCOPE_WORD:
-        state = settings.get("google_connection", dict, {})
-        if state.get("granted_scopes"):
-            remaining = [s for s in state["granted_scopes"] if _SCOPE_WORD[app] not in str(s).lower()]
-            state = {**state, "granted_scopes": remaining}
-            if not remaining:
-                state["write_opt_in"] = False
-            settings.set("google_connection", state)
+    if app in GOOGLE_APPS and not callable(disconnector):
+        from ...connections_google import GoogleConnector
+
+        # No injected disconnector (tests): still stop treating this app as connected.
+        GoogleConnector(ctx.database, ctx.extras.get("secret_store") or SystemKeyringSecretStore()).disconnect(app)
     return forgotten
 
 

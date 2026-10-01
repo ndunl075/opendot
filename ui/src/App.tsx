@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, BookOpen, Cable, ChevronRight, Gauge, Info, Menu, MessageSquare, PanelTop, Settings, ShieldCheck, SlidersHorizontal, Sprout, X, type LucideIcon } from "lucide-react";
+import { Activity, BookOpen, Cable, ChevronRight, Gauge, Info, LogOut, Menu, MessageSquare, PanelTop, Settings, ShieldCheck, SlidersHorizontal, Sprout, X, type LucideIcon } from "lucide-react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError } from "./api/client";
+import { isWebApp, signOut } from "./api/connection";
 import { Avatar } from "./design/avatar";
 import { Card, EmptyState, ErrorState, IconButton, Select, Skeleton } from "./design/components";
 import { useTheme, type ThemePreference } from "./design/theme";
@@ -94,6 +95,7 @@ export function App() {
         </NavLink>)}</nav>
         <div className="sidebar-bottom"><div className="companion-preview"><Avatar seed="opendot-first-fold" size={42} label="OpenDot companion avatar preview" /><div><strong>A thoughtful companion</strong><span>Asks before it acts</span></div></div>
           <NavLink to="/about" className={({ isActive }) => `nav-item ${isActive ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}><Info size={19} strokeWidth={1.6} aria-hidden="true" /><span>About</span></NavLink>
+          {isWebApp() && <button type="button" className="nav-item" onClick={() => signOut()}><LogOut size={19} strokeWidth={1.6} aria-hidden="true" /><span>Sign out</span></button>}
         </div>
       </div>
     </aside>

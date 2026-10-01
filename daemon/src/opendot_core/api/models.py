@@ -90,8 +90,9 @@ class ChatGPTStatus(ApiModel):
     eligible: bool
     ineligible_reason: str | None = None
     account_label: str | None = None
-    credits_enabled: bool = False
-    """True only if the account allows paid credit use; OpenDot asks the user to keep it off."""
+    credits_enabled: bool | None = None
+    """True if the account allows paid credit use, False if it does not, None when OpenDot cannot
+    tell (the sign-in flow does not report it). The UI asks the user to confirm it is off either way."""
     manage_usage_url: str
     error: str | None = None
 

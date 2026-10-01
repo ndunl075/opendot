@@ -10,10 +10,9 @@ import pytest
 from starlette.testclient import TestClient
 
 from opendot_core.api.serve_cli import NoTools, build_serve_app
-from opendot_core.connections_google import GoogleConnectError, GoogleConnector
+from opendot_core.connections_google import APP_READ_SCOPES, APP_WRITE_SCOPES, GoogleConnectError, GoogleConnector
 from opendot_core.db import Database
 from opendot_core.eval.fake_provider import ScriptedProvider
-from opendot_core.google_oauth import READ_SCOPES, WRITE_SCOPES
 from opendot_core.providers.registry import ProviderRegistry, ProviderSettings
 from opendot_core.secret_store import SecretStoreError
 
@@ -96,12 +95,13 @@ def test_connect_starts_read_only_with_pkce_and_finishes_through_the_callback(se
     client.put("/v1/connections/google/client", headers=AUTH, json=CLIENT)
     started = client.post("/v1/connections/start", headers=AUTH, json={"app": "gmail"}).json()
     query = parse_qs(urlparse(started["authorize_url"]).query)
-    assert query["scope"][0].split() == list(READ_SCOPES)  # read-only by default
+    # Read-only, and only Gmail's scope: connecting Gmail never asks for Calendar (review S7).
+    assert query["scope"][0].split() == list(APP_READ_SCOPES["gmail"])
     assert query["code_challenge_method"] == ["S256"]
     assert query["redirect_uri"] == [f"{BASE}/oauth/google/callback"]
     assert query["include_granted_scopes"] == ["true"]
 
-    google = FakeGoogle(READ_SCOPES)
+    google = FakeGoogle(APP_READ_SCOPES["gmail"])
     _connector(runtime).transport = google.transport()
     done = client.get(f"/oauth/google/callback?state={started['state']}&code=the-code")
     assert done.status_code == 200 and "connected" in done.text
@@ -109,6 +109,7 @@ def test_connect_starts_read_only_with_pkce_and_finishes_through_the_callback(se
     assert secrets.values["google-oauth-refresh-token"] == "1//fake-refresh"
     assert "1//fake-refresh" not in done.text
 
+    assert _connector(runtime).app_connected("gmail") and not _connector(runtime).app_connected("google_calendar")
     replay = client.get(f"/oauth/google/callback?state={started['state']}&code=the-code")
     assert replay.status_code == 400  # the state is single-use
     assert client.get("/oauth/google/callback?state=forged&code=x").status_code == 400
@@ -118,18 +119,40 @@ def test_write_opt_in_asks_google_for_write_scopes_then_allows_writes(setup) -> 
     client, runtime, _ = setup
     client.put("/v1/connections/google/client", headers=AUTH, json=CLIENT)
     connector = _connector(runtime)
-    assert connector.write_allowed() is False
+    for app in ("gmail", "google_calendar"):  # connect both apps, read-only
+        _, state = connector.start(app)
+        connector.transport = FakeGoogle(APP_READ_SCOPES[app]).transport()
+        connector.complete(state=state, code="c")
+    assert connector.write_allowed("gmail") is False
     opted = client.put("/v1/connections/gmail/write-opt-in", headers=AUTH, json={"enabled": True}).json()
     assert opted["write_opt_in"] is True and opted["authorize_url"]
     query = parse_qs(urlparse(opted["authorize_url"]).query)
-    assert set(WRITE_SCOPES) <= set(query["scope"][0].split())
-    assert connector.write_allowed() is False  # not until Google grants it
-    connector.transport = FakeGoogle(READ_SCOPES + WRITE_SCOPES).transport()
+    asked = set(query["scope"][0].split())
+    assert set(APP_WRITE_SCOPES["gmail"]) <= asked
+    assert not set(APP_WRITE_SCOPES["google_calendar"]) & asked  # only Gmail's write scope (review S9)
+    assert connector.write_allowed("gmail") is False  # not until Google grants it
+    connector.transport = FakeGoogle(APP_READ_SCOPES["gmail"] + APP_WRITE_SCOPES["gmail"]).transport()
     client.get(f"/oauth/google/callback?state={query['state'][0]}&code=c2")
-    assert connector.write_allowed() is True
+    assert connector.write_allowed("gmail") is True
+    assert connector.write_allowed("google_calendar") is False  # its own switch is still off
     off = client.put("/v1/connections/gmail/write-opt-in", headers=AUTH, json={"enabled": False}).json()
-    assert off["write_opt_in"] is False and connector.write_allowed() is False
+    assert off["write_opt_in"] is False and connector.write_allowed("gmail") is False
     assert client.put("/v1/connections/github/write-opt-in", headers=AUTH, json={"enabled": True}).status_code == 404
+
+
+def test_disconnecting_one_google_app_keeps_the_other(setup) -> None:
+    client, runtime, secrets = setup
+    client.put("/v1/connections/google/client", headers=AUTH, json=CLIENT)
+    connector = _connector(runtime)
+    for app in ("gmail", "google_calendar"):
+        _, state = connector.start(app)
+        connector.transport = FakeGoogle(APP_READ_SCOPES[app]).transport()
+        connector.complete(state=state, code="c")
+    connector.disconnect("gmail")
+    assert not connector.app_connected("gmail") and connector.app_connected("google_calendar")
+    assert secrets.values["google-oauth-refresh-token"] == "1//fake-refresh"
+    connector.disconnect("google_calendar")
+    assert "google-oauth-refresh-token" not in secrets.values  # nothing left to use the grant
 
 
 def test_github_connects_with_a_token_kept_in_the_keychain(setup) -> None:
@@ -160,7 +183,7 @@ def test_pending_sign_ins_expire(tmp_path: Path) -> None:
     secrets.store("google-oauth-client-secret", "GOCSPX-secretvalue")
     now = [0.0]
     connector = GoogleConnector(Database(tmp_path / "x.db"), secrets, clock=lambda: now[0])
-    _, state = connector.start()
+    _, state = connector.start("gmail")
     now[0] = 601.0
     with pytest.raises(GoogleConnectError, match="expired"):
         connector.complete(state=state, code="c")
@@ -183,3 +206,12 @@ def test_serve_registers_real_syncs_and_disconnects(setup, monkeypatch) -> None:
     secrets.store("google-oauth-refresh-token", "1//r")
     extras["connector_disconnectors"]["gmail"]()
     assert "google-oauth-refresh-token" not in secrets.values
+
+
+def test_weekly_review_gets_pull_requests_only_with_a_github_token() -> None:
+    from opendot_core.connector_sync import pull_request_report
+
+    secrets = MemorySecrets()
+    assert pull_request_report(secrets) is None
+    secrets.store("github-issue-token", "github_pat_x")
+    assert callable(pull_request_report(secrets))

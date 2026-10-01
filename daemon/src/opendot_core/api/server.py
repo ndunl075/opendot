@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import hashlib
+import hmac
 import json
 import secrets
 import threading
@@ -123,12 +125,135 @@ def origin_allowed(origin: str | None) -> bool:
     return scheme in ("http", "https") and host in ALLOWED_ORIGIN_HOSTS
 
 
+SOCKET_RECHECK_SECONDS = 15.0
+
+
+def _socket_credential(ws: Any) -> bytes:
+    """The credential a WebSocket connected with (Authorization header or the bearer subprotocol)."""
+    header = ws.headers.get("authorization", "")
+    prefix, _, rest = header.partition(" ")
+    if prefix.lower() == "bearer" and rest.strip():
+        return rest.strip().encode()
+    return _ws_protocol_token(ws.headers.get("sec-websocket-protocol", "").encode())
+
+
 def _ws_protocol_token(value: bytes) -> bytes:
     for item in value.split(b","):
         item = item.strip()
         if item.startswith(WS_TOKEN_PREFIX.encode()):
             return item[len(WS_TOKEN_PREFIX) :]
     return b""
+
+
+CHALLENGE_PATH = "/v1/session/challenge"
+SESSION_PATH = "/v1/session"
+IDENTITY_LABEL = b"opendot-identity:"
+SESSION_LABEL = b"opendot-session:"
+CHALLENGE_TTL_SECONDS = 120.0
+LOGIN_CODE_TTL_SECONDS = 120.0
+SESSION_TTL_SECONDS = 7 * 24 * 3600.0
+LOGIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I: typed by hand from a terminal
+REVOKE_PATH = "/v1/session/revoke"
+
+
+def new_login_code() -> str:
+    """Twelve characters from a 32-letter alphabet (60 bits), grouped for typing: ABCD-EFGH-JKLM."""
+    raw = "".join(secrets.choice(LOGIN_CODE_ALPHABET) for _ in range(12))
+    return f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}"
+
+
+def normalize_login_code(value: str) -> str:
+    raw = "".join(ch for ch in value.upper() if ch.isalnum())
+    return f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}" if len(raw) == 12 else ""
+
+
+def identity_proof(token: str, nonce: str) -> str:
+    """HMAC-SHA256 of the client's nonce, keyed with the access token. Only the real daemon (which
+    knows the token) can produce it; the proof reveals nothing about the token (review S1)."""
+    return hmac.new(token.encode(), IDENTITY_LABEL + nonce.encode(), hashlib.sha256).hexdigest()
+
+
+def session_mac(token: str, challenge: str) -> str:
+    """The client's answer to the daemon's challenge: proves it holds the access token without ever
+    sending it, so nothing listening on the port can capture it (review S1, S10)."""
+    return hmac.new(token.encode(), SESSION_LABEL + challenge.encode(), hashlib.sha256).hexdigest()
+
+
+class _OneTimeSecrets:
+    """Single-use random values that expire (challenges, login codes), kept in memory as hashes."""
+
+    def __init__(
+        self, ttl: float, prefix: str, clock: Any = time.monotonic, limit: int = 64, generator: Any = None
+    ) -> None:
+        self._ttl, self._prefix, self._clock, self._limit = ttl, prefix, clock, limit
+        self._generator = generator
+        self._items: collections.OrderedDict[bytes, float] = collections.OrderedDict()
+        self._lock = threading.Lock()
+
+    def issue(self) -> str:
+        value = self._generator() if self._generator else self._prefix + secrets.token_urlsafe(32)
+        with self._lock:
+            self._items[hashlib.sha256(value.encode()).digest()] = self._clock()
+            while len(self._items) > self._limit:
+                self._items.popitem(last=False)
+        return value
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+
+    def take(self, value: str) -> bool:
+        """True once, for an issued value that has not expired; it is gone afterwards."""
+        digest = hashlib.sha256(value.encode()).digest()
+        with self._lock:
+            issued = self._items.pop(digest, None)
+        return issued is not None and self._clock() - issued <= self._ttl
+
+
+class SessionTokens:
+    """Short-lived credentials for the UI and the desktop shell (security review S1, S8).
+
+    Minted by POST /v1/session only for a client that proved it holds the access token without
+    sending it (challenge and HMAC), or that presents a single-use login code made that same way by
+    `opendot open`. They live in this process's memory only, so every daemon restart invalidates
+    them: a process that takes over the port after the daemon stops can only capture a token that is
+    already dead. Stored as hashes."""
+
+    def __init__(self, limit: int = 64, ttl: float = SESSION_TTL_SECONDS, clock: Any = time.monotonic) -> None:
+        self._hashes: collections.OrderedDict[bytes, float] = collections.OrderedDict()
+        self._limit = limit
+        self._ttl = ttl
+        self._clock = clock
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _hash(token: bytes) -> bytes:
+        return hashlib.sha256(token).digest()
+
+    def mint(self) -> str:
+        token = "ods_" + secrets.token_urlsafe(32)
+        with self._lock:
+            self._hashes[self._hash(token.encode())] = self._clock()
+            while len(self._hashes) > self._limit:
+                self._hashes.popitem(last=False)
+        return token
+
+    def revoke(self, supplied: bytes) -> None:
+        with self._lock:
+            self._hashes.pop(self._hash(supplied), None)
+
+    def valid(self, supplied: bytes) -> bool:
+        if not supplied.startswith(b"ods_"):
+            return False
+        digest = self._hash(supplied)
+        now = self._clock()
+        with self._lock:
+            for known, issued in list(self._hashes.items()):
+                if now - issued > self._ttl:
+                    del self._hashes[known]  # expired (review S12)
+                elif secrets.compare_digest(digest, known):
+                    return True
+        return False
 
 
 class BearerAuth:
@@ -138,12 +263,18 @@ class BearerAuth:
     token as an offered subprotocol, and also checks the Origin header.
     """
 
-    def __init__(self, app: ASGIApp, token: str) -> None:
+    def __init__(self, app: ASGIApp, token: str, sessions: SessionTokens | None = None) -> None:
         self.app = app
         self._token = token.encode()
+        self._sessions = sessions
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        if scope["type"] == "http" and scope.get("path") in (CHALLENGE_PATH, SESSION_PATH):
+            # Self-authenticating: the challenge proves who we are; the session endpoint checks an
+            # HMAC answer or a single-use login code. Neither ever receives the access token.
             await self.app(scope, receive, send)
             return
         supplied = b""
@@ -158,7 +289,9 @@ class BearerAuth:
             elif key == b"origin":
                 origin = value.decode("latin-1")
         allowed_origin = scope["type"] != "websocket" or origin_allowed(origin)
-        if supplied and allowed_origin and secrets.compare_digest(supplied, self._token):
+        long_lived = bool(supplied) and secrets.compare_digest(supplied, self._token)
+        accepted = long_lived or (bool(supplied) and self._sessions is not None and self._sessions.valid(supplied))
+        if accepted and allowed_origin:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "websocket":
@@ -407,6 +540,9 @@ def create_app(
     if not token:
         raise ValueError("an API token is required")
     hub = ChatHub(loop, approvals)
+    sessions = SessionTokens()
+    challenges = _OneTimeSecrets(CHALLENGE_TTL_SECONDS, "odc_")
+    login_codes = _OneTimeSecrets(LOGIN_CODE_TTL_SECONDS, "", generator=new_login_code)
     started = time.monotonic()
     created_at = datetime.now(UTC)
 
@@ -453,6 +589,44 @@ def create_app(
         task_id = loop.task_for_approval(approval_id)
         if task_id is not None:
             hub.run_in_background(task_id)
+
+    async def challenge(request: Request) -> Response:
+        nonce = request.query_params.get("nonce", "")
+        if not (32 <= len(nonce) <= 128) or not all(ch in "0123456789abcdef" for ch in nonce):
+            return _error(400, "invalid_nonce", "Send a fresh random hex nonce (32 to 128 hex digits).")
+        return JSONResponse(
+            {"daemon": "opendot", "proof": identity_proof(token, nonce), "challenge": challenges.issue()}
+        )
+
+    async def session(request: Request) -> Response:
+        try:
+            body = json.loads(await request.body() or b"{}")
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        code = body.get("login_code")
+        if isinstance(code, str) and code:
+            # No lockout (review S13: a lockout lets any local process block the owner). A code has
+            # 60 bits, works once and lives two minutes, so guessing one is hopeless.
+            normalized = normalize_login_code(code)
+            if not normalized or not login_codes.take(normalized):
+                return _error(401, "invalid_login_code", "That code is wrong, expired or already used. Run `opendot open` again.")
+            return JSONResponse({"session_token": sessions.mint()})
+        answer, mac = body.get("challenge"), body.get("mac")
+        if not (isinstance(answer, str) and isinstance(mac, str)) or not challenges.take(answer):
+            return _error(401, "invalid_challenge", "Ask for a fresh challenge first.")
+        if not secrets.compare_digest(mac, session_mac(token, answer)):
+            return _error(401, "unauthorized", "Wrong answer to the challenge.")
+        if body.get("kind") == "login_code":
+            return JSONResponse({"login_code": login_codes.issue()})
+        return JSONResponse({"session_token": sessions.mint()})
+
+    async def revoke(request: Request) -> Response:
+        prefix, _, value = request.headers.get("authorization", "").partition(" ")
+        if prefix.lower() == "bearer" and value.strip().startswith("ods_"):
+            sessions.revoke(value.strip().encode())
+        return JSONResponse({"revoked": True})
 
     async def health(_: Request) -> Response:
         body = HealthResponse(
@@ -579,18 +753,45 @@ def create_app(
 
     async def chat_stream(ws: WebSocket) -> None:
         offered = [item.strip() for item in ws.headers.get("sec-websocket-protocol", "").split(",") if item.strip()]
+        credential = _socket_credential(ws)
+
+        def still_allowed() -> bool:
+            """A session can expire or be revoked while the socket is open (review S12)."""
+            return secrets.compare_digest(credential, token.encode()) or sessions.valid(credential)
+
         await ws.accept(subprotocol=WS_SUBPROTOCOL if WS_SUBPROTOCOL in offered else None)
         sub = _Subscriber(asyncio.get_running_loop())
         hub.subscribe(sub)
 
+        async def close_unauthorized() -> None:
+            try:
+                await ws.close(code=1008)
+            except RuntimeError:
+                pass
+
         async def pump() -> None:
             while True:
-                await ws.send_json(await sub.queue.get())
+                event = await sub.queue.get()
+                if not still_allowed():
+                    await close_unauthorized()
+                    return
+                await ws.send_json(event)
+
+        async def watchdog() -> None:
+            while True:
+                await asyncio.sleep(SOCKET_RECHECK_SECONDS)
+                if not still_allowed():
+                    await close_unauthorized()
+                    return
 
         pump_task = asyncio.create_task(pump())
+        watchdog_task = asyncio.create_task(watchdog())
         try:
             while True:
                 raw = await ws.receive_text()
+                if not still_allowed():
+                    await close_unauthorized()
+                    break
                 try:
                     frame = _CLIENT_FRAME.validate_json(raw)
                 except ValidationError:
@@ -605,15 +806,19 @@ def create_app(
                     for missed in hub.replay(frame.conversation_id, frame.after_seq):
                         sub.queue.put_nowait(missed)
                 # ping frames need no reply; the socket itself is the keep-alive
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             pump_task.cancel()
+            watchdog_task.cancel()
             hub.unsubscribe(sub)
 
     v = f"/{API_VERSION}"
     routes: list[Route | WebSocketRoute] = [
         Route(f"{v}/health", health, methods=["GET"]),
+        Route(CHALLENGE_PATH, challenge, methods=["GET"]),
+        Route(SESSION_PATH, session, methods=["POST"]),
+        Route(REVOKE_PATH, revoke, methods=["POST"]),
         Route(f"{v}/chat/messages", chat_send, methods=["POST"]),
         Route(f"{v}/approvals", approvals_list, methods=["GET"]),
         Route(f"{v}/approvals/{{approval_id}}", approval_get, methods=["GET"]),
@@ -643,7 +848,8 @@ def create_app(
             raise ValueError(f"route registered twice: {key}")
         taken.add(key)
         routes.append(extra)
-    app = Starlette(routes=routes, middleware=[Middleware(BearerAuth, token=token)])
+    app = Starlette(routes=routes, middleware=[Middleware(BearerAuth, token=token, sessions=sessions)])
+    app.state.sessions = sessions
     app.state.context = context
     app.state.hub = hub
     app.state.token_escrow = token_escrow

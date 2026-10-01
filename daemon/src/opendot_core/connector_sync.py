@@ -22,7 +22,15 @@ GITHUB_TOKEN_SECRET = "github-issue-token"
 CALENDAR_DAYS = 14
 
 
+def _require(database: Database, app: str) -> None:
+    from .connections_google import GoogleConnectError, google_app_connected, google_managed
+
+    if google_managed(database) and not google_app_connected(database, app):
+        raise GoogleConnectError(f"{app} is not connected.")
+
+
 def sync_gmail(database: Database, secrets: SecretStore) -> Any:
+    _require(database, "gmail")
     client = GmailClient(current_access_token(secrets))
     try:
         return GmailSync(database, client).sync()
@@ -31,6 +39,7 @@ def sync_gmail(database: Database, secrets: SecretStore) -> Any:
 
 
 def sync_calendar(database: Database, secrets: SecretStore) -> Any:
+    _require(database, "google_calendar")
     start, _ = default_sync_window()
     client = GoogleCalendarClient(current_access_token(secrets))
     try:
@@ -49,6 +58,28 @@ def sync_github(database: Database, secrets: SecretStore) -> Any:
         client.close()
 
 
+def pull_request_report(secrets: SecretStore | None = None) -> Callable[[], Any] | None:
+    """For the weekly review: the open pull requests from GitHub (read-only), or None when no GitHub
+    token is saved. Errors propagate; the review leaves the section out when this fails."""
+    from .pull_requests import PullRequestService
+    from .secret_store import SecretStoreError, SystemKeyringSecretStore
+
+    store = secrets or SystemKeyringSecretStore()
+    try:
+        store.get_required(GITHUB_TOKEN_SECRET)
+    except SecretStoreError:
+        return None
+
+    def report() -> Any:
+        client = GitHubClient(store.get_required(GITHUB_TOKEN_SECRET))
+        try:
+            return PullRequestService(client).get()
+        finally:
+            client.close()
+
+    return report
+
+
 def build_syncers(database: Database, secrets: SecretStore) -> dict[str, Callable[[], Any]]:
     """``{connection id: run one sync}`` for ``ApiContext.extras["connector_syncers"]``."""
     return {
@@ -58,4 +89,4 @@ def build_syncers(database: Database, secrets: SecretStore) -> dict[str, Callabl
     }
 
 
-__all__ = ["build_syncers", "sync_calendar", "sync_github", "sync_gmail"]
+__all__ = ["build_syncers", "pull_request_report", "sync_calendar", "sync_github", "sync_gmail"]

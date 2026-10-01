@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 from contextlib import contextmanager
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -89,10 +90,17 @@ def database_from_args(args: argparse.Namespace) -> Database:
 def _routines_hook(database: Database):  # noqa: ANN202
     """The built-in routines (M4 task 4.5), run once per loop cycle. Each is off until the user enables it,
     and the agent loop for its optional model pass is only built the first time one needs it."""
+    from .connector_sync import pull_request_report
     from .routines import RoutineScheduler
     from .routines.runtime import build_routine_loop
 
-    return RoutineScheduler(database, loop_factory=lambda: build_routine_loop(database)).run_due
+    try:
+        pull_requests = pull_request_report()
+    except Exception:  # no usable keychain: the weekly review simply leaves pull requests out
+        pull_requests = None
+    return RoutineScheduler(
+        database, loop_factory=lambda: build_routine_loop(database), pull_requests=pull_requests
+    ).run_due
 
 
 @contextmanager
@@ -857,6 +865,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if os.name == "posix":
+        # Everything OpenDot writes (database, WAL, logs, backups, token files) is owner-only.
+        os.umask(0o077)
     args = build_parser().parse_args(argv)
     api_contract_exit = api_contract_dispatch(args)
     if api_contract_exit is not None:
@@ -882,6 +893,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .api import serve_cli
 
         return serve_cli.run_token(args)
+    if args.command == "open":
+        from .api import serve_cli
+
+        return serve_cli.run_open(args)
     database = database_from_args(args)
     if args.command == "serve":
         from .api import serve_cli
@@ -1669,7 +1684,17 @@ def _composio_status(database: Database, secret_name: str) -> ComposioStatus:
         client.close()
 
 
+def _google_app_wanted(database: Database, app: str) -> bool:
+    """Sync a Google app only if the user connected it (review S7). The legacy `google-auth` setup,
+    which predates per-app choices, keeps syncing both."""
+    from .connections_google import google_app_connected, google_managed
+
+    return not google_managed(database) or google_app_connected(database, app)
+
+
 def _calendar_sync_once(database: Database, calendar_id: str) -> None:
+    if not _google_app_wanted(database, "google_calendar"):
+        return
     client = GoogleCalendarClient(_google_access_token())
     try:
         # The bounds are ignored by Google when a valid incremental cursor is
@@ -1766,6 +1791,8 @@ def _github_sync_once(database: Database, secret_name: str) -> None:
 
 
 def _gmail_sync_once(database: Database, limit: int = DEFAULT_UNREAD_LIMIT) -> None:
+    if not _google_app_wanted(database, "gmail"):
+        return
     client = GmailClient(_google_access_token())
     try:
         GmailSync(database, client, limit=limit).sync()
