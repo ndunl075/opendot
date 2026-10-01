@@ -423,6 +423,9 @@ class Connection(ApiModel):
     """Gmail drafts / Calendar events switch. Only meaningful for gmail and google_calendar."""
     write_opt_in_available: bool = False
     memory_item_count: int = 0
+    authorize_url: str | None = None
+    """Set after switching the write opt-in on when Google has not granted write access yet: open it
+    in the system browser to grant it."""
 
 
 class ConnectionList(ApiModel):
@@ -437,6 +440,28 @@ class ConnectionStart(ApiModel):
     app: ConnectionApp
     authorize_url: str
     state: str
+
+
+class GoogleClientRequest(ApiModel):
+    """The user's own Google OAuth client ("Desktop app" type). Stored only in the OS keychain."""
+
+    client_id: str = Field(min_length=1)
+    client_secret: str = Field(min_length=1)
+
+
+class GoogleClientStatus(ApiModel):
+    configured: bool
+    """Never carries the id or secret back."""
+    setup_steps: list[str] = Field(default_factory=list)
+
+
+class GithubTokenRequest(ApiModel):
+    token: str = Field(min_length=1)
+    """A fine-grained personal access token. Stored only in the OS keychain."""
+
+
+class GithubTokenStatus(ApiModel):
+    configured: bool
 
 
 class ConnectionWriteOptInRequest(ApiModel):

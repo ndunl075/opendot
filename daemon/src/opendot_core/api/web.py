@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import re
 import secrets
@@ -29,6 +30,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainT
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ..connections_google import CALLBACK_PATH
 from .contract import ENDPOINTS
 from .models import ErrorResponse
 
@@ -58,6 +60,14 @@ button {{ cursor: pointer; }}
 <button type="submit">Open OpenDot</button>
 </form></body></html>
 """
+
+
+def _callback_page(message: str) -> str:
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OpenDot</title>'
+        '<style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}'
+        "</style></head><body><p>" + html.escape(message) + "</p></body></html>"
+    )
 
 
 def _host_is_loopback(host_header: str | None) -> bool:
@@ -215,7 +225,31 @@ def create_web_app(api_app: Starlette, *, token: str, ui_dist: Path | None) -> A
             return PlainTextResponse("Not found", 404)
         return FileResponse(target)
 
+    async def google_callback(request: Request) -> Response:
+        """Google's redirect after sign-in. No bearer token (it is a browser redirect): it is guarded
+        by the one-time state and PKCE in GoogleConnector, and by the loopback Host check."""
+        from ..connections_google import GoogleConnectError
+        from .routes.connect import google_connector
+
+        context = getattr(api_app.state, "context", None)
+        if context is None or context.database is None:
+            return HTMLResponse(_callback_page("OpenDot is not ready to connect Google."), 503)
+        params = request.query_params
+        try:
+            await asyncio.to_thread(
+                google_connector(context).complete,
+                state=params.get("state"),
+                code=params.get("code"),
+                error=params.get("error"),
+            )
+        except GoogleConnectError as error:
+            return HTMLResponse(_callback_page(str(error)), 400)
+        except Exception:  # never echo token-endpoint details into a browser page
+            return HTMLResponse(_callback_page("Google sign-in failed. Try again from OpenDot."), 502)
+        return HTMLResponse(_callback_page("Google is connected. You can close this tab and go back to OpenDot."))
+
     routes = [
+        Route(CALLBACK_PATH, google_callback, methods=["GET"]),
         Route("/login", login, methods=["GET", "POST"]),
         Route("/logout", logout, methods=["POST"]),
         Route("/assets/{path:path}", asset),

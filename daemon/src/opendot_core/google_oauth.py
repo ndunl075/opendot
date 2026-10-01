@@ -8,6 +8,8 @@ Google for a "Desktop app" OAuth client.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import secrets
 import threading
 import webbrowser
@@ -23,22 +25,22 @@ from .secret_store import SecretStore
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
-# calendar.events covers the read sync and the approval-gated event write;
-# gmail.readonly covers the unread-inbox sync; gmail.compose covers the
-# approval-gated draft write. gmail.compose's own grant may be broader than
-# what OpenDot exercises -- the real boundary is that GmailClient's code
-# never calls a send endpoint, only drafts.create, regardless of what the
-# token could technically do. All three scopes come from one consent
-# screen, so Calendar and Gmail share a single refresh token.
-DEFAULT_SCOPES = (
-    "https://www.googleapis.com/auth/calendar.events",
-    # Required to discover the subscribed calendars whose events are merged
-    # in Google Calendar's UI. Without it, "primary is clear" can be mistaken
-    # for "your calendar is clear" while shared/selected calendars are absent.
-    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+# Read-only by default (ARCHITECTURE.md section 14, M4 task 4.4): the Gmail inbox sync and the
+# Calendar sync need only these. The calendar list scope lets "primary is clear" not be mistaken
+# for "your calendar is clear" when shared calendars exist.
+READ_SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
 )
+# Asked for only when the user switches on Gmail drafts / Calendar events (the write opt-in), as an
+# incremental grant. gmail.compose's grant may be broader than what OpenDot exercises: GmailClient
+# never calls a send endpoint, only drafts.create, and every write still needs the user's approval.
+WRITE_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/calendar.events",
+)
+DEFAULT_SCOPES = READ_SCOPES
 
 
 class GoogleOAuthError(RuntimeError):
@@ -59,7 +61,22 @@ class CallbackResult(BaseModel):
     state: str | None = None
 
 
-def build_authorization_url(*, client_id: str, redirect_uri: str, scopes: tuple[str, ...], state: str) -> str:
+def pkce_pair() -> tuple[str, str]:
+    """(verifier, S256 challenge) for the authorization-code flow (RFC 7636)."""
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode()
+    return verifier, challenge
+
+
+def build_authorization_url(
+    *,
+    client_id: str,
+    redirect_uri: str,
+    scopes: tuple[str, ...],
+    state: str,
+    code_challenge: str | None = None,
+    login_hint: str | None = None,
+) -> str:
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -69,7 +86,14 @@ def build_authorization_url(*, client_id: str, redirect_uri: str, scopes: tuple[
         "access_type": "offline",
         "prompt": "consent",
         "state": state,
+        # Incremental authorization: turning the write opt-in on later adds scopes to the same grant.
+        "include_granted_scopes": "true",
     }
+    if code_challenge:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
+    if login_hint:
+        params["login_hint"] = login_hint
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"
 
 
@@ -140,16 +164,17 @@ class GoogleOAuthClient:
     def close(self) -> None:
         self._client.close()
 
-    def exchange_code(self, code: str, *, redirect_uri: str) -> TokenResponse:
-        return self._post(
-            {
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-            }
-        )
+    def exchange_code(self, code: str, *, redirect_uri: str, code_verifier: str | None = None) -> TokenResponse:
+        data = {
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+        if code_verifier:
+            data["code_verifier"] = code_verifier
+        return self._post(data)
 
     def refresh_access_token(
         self, refresh_token: str, *, scopes: tuple[str, ...] = ()

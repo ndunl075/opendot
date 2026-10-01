@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "configured": {
+      "title": "Configured",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "configured"
+  ],
+  "title": "GithubTokenStatus",
+  "type": "object"
+}
