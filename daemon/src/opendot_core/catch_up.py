@@ -29,7 +29,7 @@ from .destinations import destination_from_payload
 from .outbox import Outbox
 
 DEFAULT_SLACK_SECONDS = 60.0  # headroom over the loop interval for a slow cycle
-UI_DESTINATION = "ui:owner"  # no channel worker delivers this; the UI shows it from the outbox
+UI_DESTINATION = "ui:owner"  # delivered into the "From your companion" conversation (companion_inbox.py)
 _BRIEF_KINDS = {"morning_brief", "telegram_morning_brief"}
 _REMINDER_KINDS = {"reminder", "telegram_reminder", "nag"}
 _TASK_KINDS = {"agent_task"}
