@@ -1,6 +1,9 @@
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
+
+import pytest
 
 from opendot_core.agent.bridge import AgentBridge, AgentRunResult
 from opendot_core.agent.caps import UsageCaps
@@ -8,6 +11,7 @@ from opendot_core.agent.direct import direct_answer
 from opendot_core.agent.style import MAX_BUBBLE_CHARS as TELEGRAM_MAX_MESSAGE_CHARS
 from opendot_core.connector_records import ConnectorRecordStore
 from opendot_core.db import Database
+from opendot_core.memory_graph import MemoryGraph
 from opendot_core.outbox import Outbox
 from opendot_core.telegram import TelegramGateway, TelegramPair, TelegramUpdate
 
@@ -392,8 +396,6 @@ def test_a_many_bubble_answer_is_reassembled_in_order_for_the_next_turn(
 
 
 def test_confirmed_memory_is_prefetched_but_candidates_are_quarantined(tmp_path: Path) -> None:
-    from opendot_core.memory_graph import MemoryGraph
-
     database_path = tmp_path / "opendot.db"
     graph = MemoryGraph(Database(database_path))
     confirmed = graph.remember("The user prefers concise status updates.")
@@ -413,6 +415,26 @@ def test_confirmed_memory_is_prefetched_but_candidates_are_quarantined(tmp_path:
     assert "prefers concise status updates" in prompt
     assert "pirate voice" not in prompt
     assert "ongoing private text conversation" in prompt
+
+
+def test_memory_id_that_looks_like_a_card_number_survives_redaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for the flake: ~1 in 800 random UUIDs matched the credit-card
+    redaction pattern, so the prompt lacked the memory id. Pin such an id."""
+
+
+    card_like_id = "81443400-9132-4199-8c43-2a6931b3ef5b"
+    monkeypatch.setattr("opendot_core.memory_graph.uuid4", lambda: UUID(card_like_id))
+    database_path = tmp_path / "opendot.db"
+    confirmed = MemoryGraph(Database(database_path)).remember("The user prefers concise status updates.")
+    assert confirmed.id == card_like_id
+    _defer(database_path, _update(61, "how should you write status updates?"))
+    agent = FakeAgent(AgentRunResult(text="ok", ok=True))
+
+    AgentBridge(Database(database_path), agent).run_once()
+
+    assert card_like_id in agent.prompts[0]
 
 
 def test_running_twice_answers_once(tmp_path: Path) -> None:

@@ -216,6 +216,13 @@ _REDACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+# OpenDot's own record ids are random UUIDs. Their digit runs and hyphens can
+# look like a card number (about 1 in 800 ids), which scrubbed ids out of the
+# prompt so the model could not cite them (for example in memory_correct).
+# A UUID is not a secret, so it is left out of the scrub.
+_UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
+
+
 class Redactor:
     """Best-effort pattern scrub for secrets/PII before text leaves the process.
 
@@ -228,10 +235,20 @@ class Redactor:
     """
 
     def redact(self, text: str) -> str:
-        redacted = text
+        parts: list[str] = []
+        position = 0
+        for uuid_match in _UUID.finditer(text):
+            parts.append(self._scrub(text[position : uuid_match.start()]))
+            parts.append(uuid_match.group())
+            position = uuid_match.end()
+        parts.append(self._scrub(text[position:]))
+        return "".join(parts)
+
+    @staticmethod
+    def _scrub(text: str) -> str:
         for label, pattern in _REDACTION_PATTERNS:
-            redacted = pattern.sub(f"[REDACTED:{label}]", redacted)
-        return redacted
+            text = pattern.sub(f"[REDACTED:{label}]", text)
+        return text
 
 
 class CloudPricing(BaseModel):
