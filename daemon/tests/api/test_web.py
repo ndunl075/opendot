@@ -120,17 +120,40 @@ def test_one_time_login_codes_from_opendot_open(tmp_path: Path, dist: Path) -> N
     assert client.post("/v1/session", json={"login_code": code}).status_code == 401  # works once
 
 
-def test_guessing_login_codes_locks_them_out(tmp_path: Path, dist: Path) -> None:
-    from opendot_core.api.server import MAX_FAILED_CODES, session_mac
+def test_wrong_guesses_never_block_the_owner(tmp_path: Path, dist: Path) -> None:
+    """Security review S13: no lockout, so another local process cannot stop the owner signing in."""
+    from opendot_core.api.server import session_mac
 
     client, _ = _client(tmp_path, dist)
     challenge = client.get("/v1/session/challenge?nonce=" + "ef" * 16).json()["challenge"]
     code = client.post(
         "/v1/session", json={"challenge": challenge, "mac": session_mac(TOKEN, challenge), "kind": "login_code"}
     ).json()["login_code"]
-    for _ in range(MAX_FAILED_CODES):
+    for _ in range(50):
         assert client.post("/v1/session", json={"login_code": "AAAA-BBBB-CCCC"}).status_code == 401
-    assert client.post("/v1/session", json={"login_code": code}).status_code == 429  # the real one is dead too
+    assert client.post("/v1/session", json={"login_code": code}).status_code == 200
+
+
+def test_an_open_websocket_closes_when_its_session_is_revoked(tmp_path: Path, dist: Path) -> None:
+    """Security review S12: access ends for an established socket too, not only for new requests."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from opendot_core.api.server import WS_SUBPROTOCOL, WS_TOKEN_PREFIX, session_mac
+
+    client, _ = _client(tmp_path, dist)
+    challenge = client.get("/v1/session/challenge?nonce=" + "bb" * 16).json()["challenge"]
+    session = client.post("/v1/session", json={"challenge": challenge, "mac": session_mac(TOKEN, challenge)}).json()[
+        "session_token"
+    ]
+    with client.websocket_connect(
+        "/v1/chat/stream", subprotocols=[WS_SUBPROTOCOL, WS_TOKEN_PREFIX + session],
+        headers={"Origin": BASE, "Host": "127.0.0.1:8765"},
+    ) as ws:
+        assert client.post("/v1/session/revoke", headers={"Authorization": f"Bearer {session}"}).status_code == 200
+        ws.send_json({"type": "send", "text": "hi"})
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_json()
+        assert closed.value.code == 1008
 
 
 def test_sessions_expire_and_can_be_revoked() -> None:

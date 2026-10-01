@@ -125,6 +125,18 @@ def origin_allowed(origin: str | None) -> bool:
     return scheme in ("http", "https") and host in ALLOWED_ORIGIN_HOSTS
 
 
+SOCKET_RECHECK_SECONDS = 15.0
+
+
+def _socket_credential(ws: Any) -> bytes:
+    """The credential a WebSocket connected with (Authorization header or the bearer subprotocol)."""
+    header = ws.headers.get("authorization", "")
+    prefix, _, rest = header.partition(" ")
+    if prefix.lower() == "bearer" and rest.strip():
+        return rest.strip().encode()
+    return _ws_protocol_token(ws.headers.get("sec-websocket-protocol", "").encode())
+
+
 def _ws_protocol_token(value: bytes) -> bytes:
     for item in value.split(b","):
         item = item.strip()
@@ -141,7 +153,6 @@ CHALLENGE_TTL_SECONDS = 120.0
 LOGIN_CODE_TTL_SECONDS = 120.0
 SESSION_TTL_SECONDS = 7 * 24 * 3600.0
 LOGIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I: typed by hand from a terminal
-MAX_FAILED_CODES = 10
 REVOKE_PATH = "/v1/session/revoke"
 
 
@@ -532,7 +543,6 @@ def create_app(
     sessions = SessionTokens()
     challenges = _OneTimeSecrets(CHALLENGE_TTL_SECONDS, "odc_")
     login_codes = _OneTimeSecrets(LOGIN_CODE_TTL_SECONDS, "", generator=new_login_code)
-    failures = {"count": 0}
     started = time.monotonic()
     created_at = datetime.now(UTC)
 
@@ -597,15 +607,11 @@ def create_app(
             body = {}
         code = body.get("login_code")
         if isinstance(code, str) and code:
+            # No lockout (review S13: a lockout lets any local process block the owner). A code has
+            # 60 bits, works once and lives two minutes, so guessing one is hopeless.
             normalized = normalize_login_code(code)
-            if failures["count"] >= MAX_FAILED_CODES:
-                return _error(429, "too_many_attempts", "Too many wrong codes. Run `opendot open` again.")
             if not normalized or not login_codes.take(normalized):
-                failures["count"] += 1
-                if failures["count"] >= MAX_FAILED_CODES:
-                    login_codes.clear()  # guessing: every outstanding code stops working
                 return _error(401, "invalid_login_code", "That code is wrong, expired or already used. Run `opendot open` again.")
-            failures["count"] = 0
             return JSONResponse({"session_token": sessions.mint()})
         answer, mac = body.get("challenge"), body.get("mac")
         if not (isinstance(answer, str) and isinstance(mac, str)) or not challenges.take(answer):
@@ -613,7 +619,6 @@ def create_app(
         if not secrets.compare_digest(mac, session_mac(token, answer)):
             return _error(401, "unauthorized", "Wrong answer to the challenge.")
         if body.get("kind") == "login_code":
-            failures["count"] = 0  # a fresh code from the real owner resets the guessing budget
             return JSONResponse({"login_code": login_codes.issue()})
         return JSONResponse({"session_token": sessions.mint()})
 
@@ -748,18 +753,45 @@ def create_app(
 
     async def chat_stream(ws: WebSocket) -> None:
         offered = [item.strip() for item in ws.headers.get("sec-websocket-protocol", "").split(",") if item.strip()]
+        credential = _socket_credential(ws)
+
+        def still_allowed() -> bool:
+            """A session can expire or be revoked while the socket is open (review S12)."""
+            return secrets.compare_digest(credential, token.encode()) or sessions.valid(credential)
+
         await ws.accept(subprotocol=WS_SUBPROTOCOL if WS_SUBPROTOCOL in offered else None)
         sub = _Subscriber(asyncio.get_running_loop())
         hub.subscribe(sub)
 
+        async def close_unauthorized() -> None:
+            try:
+                await ws.close(code=1008)
+            except RuntimeError:
+                pass
+
         async def pump() -> None:
             while True:
-                await ws.send_json(await sub.queue.get())
+                event = await sub.queue.get()
+                if not still_allowed():
+                    await close_unauthorized()
+                    return
+                await ws.send_json(event)
+
+        async def watchdog() -> None:
+            while True:
+                await asyncio.sleep(SOCKET_RECHECK_SECONDS)
+                if not still_allowed():
+                    await close_unauthorized()
+                    return
 
         pump_task = asyncio.create_task(pump())
+        watchdog_task = asyncio.create_task(watchdog())
         try:
             while True:
                 raw = await ws.receive_text()
+                if not still_allowed():
+                    await close_unauthorized()
+                    break
                 try:
                     frame = _CLIENT_FRAME.validate_json(raw)
                 except ValidationError:
@@ -774,10 +806,11 @@ def create_app(
                     for missed in hub.replay(frame.conversation_id, frame.after_seq):
                         sub.queue.put_nowait(missed)
                 # ping frames need no reply; the socket itself is the keep-alive
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             pump_task.cancel()
+            watchdog_task.cancel()
             hub.unsubscribe(sub)
 
     v = f"/{API_VERSION}"
