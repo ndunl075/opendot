@@ -16,6 +16,10 @@ fixes.patch
 habits.patch
 deploy/couchdb/data/
 deploy/couchdb/config/
+ui/node_modules/
+ui/dist/
+ui/test-results/
+ui/playwright-report/
 .alfred/backup-verify.log
 
 # desktop (M3)
