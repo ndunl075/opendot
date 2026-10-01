@@ -6,8 +6,32 @@ declare global {
 }
 
 export function getApiToken(): string | undefined {
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="opendot-api-token"]');
-  return window.__OPENDOT__?.token ?? (meta?.content || (import.meta.env.DEV ? import.meta.env.VITE_OPENDOT_TOKEN : undefined) || undefined);
+  const desktopToken = window.__OPENDOT__?.token;
+  if (desktopToken) return desktopToken;
+  try {
+    const webToken = window.localStorage.getItem("opendot.token");
+    if (webToken) return webToken;
+  } catch {
+    // Storage can be unavailable in private or restricted browser contexts.
+  }
+  return import.meta.env.DEV ? import.meta.env.VITE_OPENDOT_TOKEN || undefined : undefined;
+}
+
+export function isWebApp(): boolean {
+  return !window.__OPENDOT__;
+}
+
+/** The Vite mock server intentionally accepts unauthenticated development requests. */
+export function requiresWebLogin(): boolean {
+  return isWebApp() && !import.meta.env.DEV;
+}
+
+export function redirectToLogin(location: Pick<Location, "assign"> = window.location): void {
+  location.assign("/login");
+}
+
+export function signOut(location: Pick<Location, "assign"> = window.location): void {
+  if (isWebApp()) location.assign("/logout");
 }
 
 /** Empty means same origin (including Vite's development proxy). */

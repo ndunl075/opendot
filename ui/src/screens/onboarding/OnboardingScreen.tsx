@@ -24,15 +24,18 @@ function CompanionSetup({ state, onSave, pending }: { state: OnboardingState; on
 function UsageAcknowledgement({ state, onAcknowledge, onCheck, pending }: { state: OnboardingState; onAcknowledge: () => void; onCheck: () => void; pending: boolean }) {
   const [weekly, setWeekly] = useState(false);
   const [creditsOff, setCreditsOff] = useState(false);
+  const creditsEnabled = state.chatgpt.credits_enabled === true;
+  const creditsUnknown = state.chatgpt.credits_enabled === null;
   return <div className="form-stack"><h2>Keep usage in your hands</h2>
     <Badge tone="accent">Using ChatGPT plan</Badge>
     <p>In ChatGPT Settings, Usage, set a weekly limit for OpenDot and keep credit use off. ChatGPT credits cost real money. OpenDot does not turn them on or switch to a paid provider.</p>
-    {state.chatgpt.credits_enabled && <p className="notice" role="alert">Your account reports credit use is on. Turn it off in ChatGPT Settings before continuing.</p>}
+    {creditsEnabled && <p className="notice" role="alert">Your account reports credit use is on. Turn it off in ChatGPT Settings before continuing.</p>}
+    {creditsUnknown && <p className="notice" role="alert">OpenDot can't check this setting. In ChatGPT Settings, Usage, make sure credit use is off.</p>}
     {safeExternalUrl(state.chatgpt.manage_usage_url) && <a href={safeExternalUrl(state.chatgpt.manage_usage_url)} target="_blank" rel="noreferrer">Manage usage</a>}
     <Checkbox label="I set a weekly OpenDot limit" checked={weekly} onChange={event => setWeekly(event.target.checked)} />
-    <Checkbox label="I kept ChatGPT credit use off" disabled={state.chatgpt.credits_enabled || pending} checked={!state.chatgpt.credits_enabled && creditsOff} onChange={event => setCreditsOff(event.target.checked)} />
-    <Button variant="secondary" loading={pending} onClick={() => { setCreditsOff(false); onCheck(); }}>Check again</Button>
-    <Button loading={pending} disabled={!weekly || !creditsOff || state.chatgpt.credits_enabled} onClick={onAcknowledge}>Acknowledge usage settings</Button>
+    <Checkbox label="I kept ChatGPT credit use off" disabled={creditsEnabled || pending} checked={!creditsEnabled && creditsOff} onChange={event => setCreditsOff(event.target.checked)} />
+    {creditsEnabled && <Button variant="secondary" loading={pending} onClick={() => { setCreditsOff(false); onCheck(); }}>Check again</Button>}
+    <Button loading={pending} disabled={!weekly || !creditsOff || creditsEnabled} onClick={onAcknowledge}>Acknowledge usage settings</Button>
   </div>;
 }
 
@@ -75,7 +78,7 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
     if (result) setData(result);
   }
   async function acknowledge() {
-    if (data?.chatgpt.credits_enabled) return;
+    if (data?.chatgpt.credits_enabled === true) return;
     const result = await mutation.run(() => api.call("onboarding_acknowledge", { body: { weekly_limit_set: true, credits_off: true } }));
     if (result) setData(result);
   }

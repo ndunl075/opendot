@@ -1,5 +1,5 @@
 import type { EndpointName, EndpointTable } from "./endpoints.gen";
-import { apiUrl, getApiToken } from "./connection";
+import { apiUrl, getApiToken, redirectToLogin, requiresWebLogin } from "./connection";
 export { getApiToken } from "./connection";
 
 type PathParams = Record<string, string | number>;
@@ -36,12 +36,16 @@ function endpointPath(path: string, params: PathParams = {}): string {
   });
 }
 
-export function createApi(getToken = getApiToken, fetchImpl: typeof fetch = fetch) {
+export function createApi(getToken = getApiToken, fetchImpl: typeof fetch = fetch, onLoginRequired = redirectToLogin) {
   async function call<Name extends EndpointName>(name: Name, options: CallOptions<Name> = {}): Promise<EndpointTable[Name]["response"]> {
     const endpoint = endpointTable[name];
     let url = apiUrl(endpointPath(endpoint.path, options.params));
     const headers = new Headers({ Accept: "application/json" });
     const token = getToken();
+    if (!token && requiresWebLogin()) {
+      onLoginRequired();
+      throw new ApiError(401, "unauthorized", "Sign in required");
+    }
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     const init: RequestInit = { method: endpoint.method, headers };
@@ -60,6 +64,7 @@ export function createApi(getToken = getApiToken, fetchImpl: typeof fetch = fetc
     const response = await fetchImpl(url, init);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ code: "http_error", message: response.statusText })) as { code?: string; message?: string };
+      if (response.status === 401 && requiresWebLogin()) onLoginRequired();
       throw new ApiError(response.status, error.code ?? "http_error", error.message ?? response.statusText);
     }
     return response.json() as Promise<EndpointTable[Name]["response"]>;

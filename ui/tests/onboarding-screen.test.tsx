@@ -59,6 +59,20 @@ describe("Onboarding screen", () => {
     await waitFor(() => expect(call).toHaveBeenCalledWith("onboarding_acknowledge", { body: { weekly_limit_set: true, credits_off: true } }));
   });
 
+  it("requires an explicit credit-use acknowledgement when ChatGPT cannot report the setting", async () => {
+    const ready: OnboardingState = { ...initial, current_step: "weekly_limit", chatgpt: { ...initial.chatgpt, state: "signed_in", eligible: true, plan: "eligible_plus", credits_enabled: null } };
+    const call = vi.spyOn(api, "call").mockResolvedValue(ready);
+    render(<OnboardingScreen />);
+    expect(await screen.findByText("OpenDot can't check this setting. In ChatGPT Settings, Usage, make sure credit use is off.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Check again" })).not.toBeInTheDocument();
+    const acknowledgement = screen.getByRole("button", { name: "Acknowledge usage settings" });
+    fireEvent.click(screen.getByRole("checkbox", { name: "I set a weekly OpenDot limit" }));
+    expect(acknowledgement).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "I kept ChatGPT credit use off" }));
+    fireEvent.click(acknowledgement);
+    await waitFor(() => expect(call).toHaveBeenCalledWith("onboarding_acknowledge", { body: { weekly_limit_set: true, credits_off: true } }));
+  });
+
   it("explains an unavailable onboarding endpoint", async () => {
     vi.spyOn(api, "call").mockRejectedValue(new ApiError(501, "not_implemented", "Unavailable"));
     render(<OnboardingScreen />);
