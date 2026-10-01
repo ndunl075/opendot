@@ -201,6 +201,33 @@
     },
     {
       "method": "POST",
+      "name": "plan_limit_resume",
+      "path": "/v1/companion/resume-plan-limit",
+      "request": null,
+      "request_in": null,
+      "response": "PlanLimitResumeResult",
+      "summary": "The user raised their ChatGPT limit (or it reset): clear the plan-limit pause"
+    },
+    {
+      "method": "POST",
+      "name": "task_continue",
+      "path": "/v1/tasks/{task_id}/continue",
+      "request": null,
+      "request_in": null,
+      "response": "TaskActionResult",
+      "summary": "Continue anyway: let a task that hit its credit budget go on"
+    },
+    {
+      "method": "POST",
+      "name": "task_approve_top_tier",
+      "path": "/v1/tasks/{task_id}/approve-top-tier",
+      "request": null,
+      "request_in": null,
+      "response": "TaskActionResult",
+      "summary": "Allow this task to use the top-tier model"
+    },
+    {
+      "method": "POST",
       "name": "companion_reset",
       "path": "/v1/companion/reset",
       "request": "CompanionResetRequest",
@@ -537,6 +564,7 @@
     "schemas/OnboardingAcknowledgeRequest.json",
     "schemas/OnboardingState.json",
     "schemas/PausedEvent.json",
+    "schemas/PlanLimitResumeResult.json",
     "schemas/ProviderApiKeyRequest.json",
     "schemas/ProviderEnabledRequest.json",
     "schemas/ProviderKeyStatus.json",
@@ -551,6 +579,7 @@
     "schemas/Settings.json",
     "schemas/SettingsUpdateRequest.json",
     "schemas/StreamEvent.json",
+    "schemas/TaskActionResult.json",
     "schemas/TextDeltaEvent.json",
     "schemas/ToolCallEvent.json",
     "schemas/UsageBudgets.json",

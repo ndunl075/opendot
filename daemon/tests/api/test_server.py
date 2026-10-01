@@ -253,7 +253,7 @@ def test_kill_switch_endpoints(client: TestClient, parts) -> None:
 def test_approval_required_event_and_listing(client: TestClient) -> None:
     approval_id, event = request_approval(client)
     assert event["approval"]["status"] == "pending"
-    assert "looks fine" in event["approval"]["preview"]
+    assert event["approval"]["review_note"] == "looks fine" and event["approval"]["review_verdict"] == "ok"
     listed = client.get("/v1/approvals").json()["approvals"]
     assert [a["id"] for a in listed] == [approval_id]
     assert client.get(f"/v1/approvals/{approval_id}").json()["payload"]["to"] == "a@example.com"

@@ -77,7 +77,10 @@ def _handler(endpoint: Endpoint):
 
 
 async def _chat_socket(websocket: WebSocket) -> None:
-    await websocket.accept()
+    # Select the "opendot" subprotocol like the real daemon does; browsers reject a handshake that
+    # offered subprotocols and got none back.
+    offered = websocket.scope.get("subprotocols", [])
+    await websocket.accept(subprotocol="opendot" if "opendot" in offered else None)
     try:
         while True:
             text = await websocket.receive_text()

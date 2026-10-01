@@ -96,3 +96,10 @@ def test_check_exits_zero_and_lists_endpoints(capsys: pytest.CaptureFixture[str]
 
 def test_cli_check_flag() -> None:
     assert main(["mock-server", "--check"]) == 0
+
+
+def test_mock_chat_socket_selects_the_opendot_subprotocol() -> None:
+    from opendot_core.api.mock_server import create_app
+
+    with TestClient(create_app()).websocket_connect("/v1/chat/stream", subprotocols=["opendot", "opendot.bearer.x"]) as ws:
+        assert ws.accepted_subprotocol == "opendot"

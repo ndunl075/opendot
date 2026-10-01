@@ -1,6 +1,6 @@
 /* This file is generated from contract/. Do not edit. */
 
-import type { ActivityList, ActivityQuery, ApprovalAlwaysAllowRequest, ApprovalApproveRequest, ApprovalDecisionResult, ApprovalDenyRequest, ApprovalEditRequest, ApprovalItem, ApprovalList, ApprovalRequiredEvent, BackupCreateRequest, BackupInfo, BackupRestoreRequest, BackupRestoreResult, BackupStatus, ChatGPTSignInStart, ChatGPTSignInStartRequest, ChatGPTStatus, ChatSendAccepted, ChatSendRequest, ClientPingFrame, ClientResumeFrame, ClientSendFrame, CompanionAvatarRequest, CompanionPauseRequest, CompanionProfile, CompanionRenameRequest, CompanionResetRequest, CompanionSetupRequest, CompanionTaskList, CompletedEvent, Connection, ConnectionDisconnectRequest, ConnectionDisconnectResult, ConnectionList, ConnectionStart, ConnectionStartRequest, ConnectionWriteOptInRequest, Conversation, ConversationList, ErrorEvent, FeatureSwitchList, FeatureSwitchSetRequest, FeatureSwitchState, HealthResponse, MemoryCorrectRequest, MemoryCorrectResult, MemoryForgetRequest, MemoryForgetResult, MemorySearchQuery, MemorySearchResult, MessageStartedEvent, OkResponse, OnboardingAcknowledgeRequest, OnboardingState, PausedEvent, ProviderApiKeyRequest, ProviderEnabledRequest, ProviderKeyStatus, ProviderOptIn, ProviderSpend, ProviderSpendCapRequest, ProviderSpendList, Rule, RuleCreateRequest, RuleList, RuleUpdateRequest, Settings, SettingsUpdateRequest, TextDeltaEvent, ToolCallEvent, UsageBudgets, UsageQuery, UsageSummary, VersionResponse } from "./types.gen";
+import type { ActivityList, ActivityQuery, ApprovalAlwaysAllowRequest, ApprovalApproveRequest, ApprovalDecisionResult, ApprovalDenyRequest, ApprovalEditRequest, ApprovalItem, ApprovalList, ApprovalRequiredEvent, BackupCreateRequest, BackupInfo, BackupRestoreRequest, BackupRestoreResult, BackupStatus, ChatGPTSignInStart, ChatGPTSignInStartRequest, ChatGPTStatus, ChatSendAccepted, ChatSendRequest, ClientPingFrame, ClientResumeFrame, ClientSendFrame, CompanionAvatarRequest, CompanionPauseRequest, CompanionProfile, CompanionRenameRequest, CompanionResetRequest, CompanionSetupRequest, CompanionTaskList, CompletedEvent, Connection, ConnectionDisconnectRequest, ConnectionDisconnectResult, ConnectionList, ConnectionStart, ConnectionStartRequest, ConnectionWriteOptInRequest, Conversation, ConversationList, ErrorEvent, FeatureSwitchList, FeatureSwitchSetRequest, FeatureSwitchState, HealthResponse, MemoryCorrectRequest, MemoryCorrectResult, MemoryForgetRequest, MemoryForgetResult, MemorySearchQuery, MemorySearchResult, MessageStartedEvent, OkResponse, OnboardingAcknowledgeRequest, OnboardingState, PausedEvent, PlanLimitResumeResult, ProviderApiKeyRequest, ProviderEnabledRequest, ProviderKeyStatus, ProviderOptIn, ProviderSpend, ProviderSpendCapRequest, ProviderSpendList, Rule, RuleCreateRequest, RuleList, RuleUpdateRequest, Settings, SettingsUpdateRequest, TaskActionResult, TextDeltaEvent, ToolCallEvent, UsageBudgets, UsageQuery, UsageSummary, VersionResponse } from "./types.gen";
 
 export interface EndpointTable {
   "activity_list": { method: "GET"; path: "/v1/activity"; request: ActivityQuery; response: ActivityList; requestIn: "query" };
@@ -41,6 +41,7 @@ export interface EndpointTable {
   "onboarding_companion": { method: "POST"; path: "/v1/onboarding/companion"; request: CompanionSetupRequest; response: OnboardingState; requestIn: "body" };
   "onboarding_complete": { method: "POST"; path: "/v1/onboarding/complete"; request: never; response: OnboardingState; requestIn: null };
   "onboarding_get": { method: "GET"; path: "/v1/onboarding"; request: never; response: OnboardingState; requestIn: null };
+  "plan_limit_resume": { method: "POST"; path: "/v1/companion/resume-plan-limit"; request: never; response: PlanLimitResumeResult; requestIn: null };
   "provider_api_key_remove": { method: "DELETE"; path: "/v1/providers/{provider}/api-key"; request: never; response: ProviderKeyStatus; requestIn: null };
   "provider_api_key_save": { method: "PUT"; path: "/v1/providers/{provider}/api-key"; request: ProviderApiKeyRequest; response: ProviderKeyStatus; requestIn: "body" };
   "provider_enabled_set": { method: "PUT"; path: "/v1/providers/{provider}/enabled"; request: ProviderEnabledRequest; response: ProviderOptIn; requestIn: "body" };
@@ -52,6 +53,8 @@ export interface EndpointTable {
   "settings_update": { method: "PUT"; path: "/v1/settings"; request: SettingsUpdateRequest; response: Settings; requestIn: "body" };
   "spend_cap_set": { method: "PUT"; path: "/v1/providers/{provider}/spend-cap"; request: ProviderSpendCapRequest; response: ProviderSpend; requestIn: "body" };
   "spend_get": { method: "GET"; path: "/v1/providers/spend"; request: never; response: ProviderSpendList; requestIn: null };
+  "task_approve_top_tier": { method: "POST"; path: "/v1/tasks/{task_id}/approve-top-tier"; request: never; response: TaskActionResult; requestIn: null };
+  "task_continue": { method: "POST"; path: "/v1/tasks/{task_id}/continue"; request: never; response: TaskActionResult; requestIn: null };
   "usage_budgets_get": { method: "GET"; path: "/v1/usage/budgets"; request: never; response: UsageBudgets; requestIn: null };
   "usage_budgets_set": { method: "PUT"; path: "/v1/usage/budgets"; request: UsageBudgets; response: UsageBudgets; requestIn: "body" };
   "usage_get": { method: "GET"; path: "/v1/usage"; request: UsageQuery; response: UsageSummary; requestIn: "query" };
@@ -97,6 +100,7 @@ export const endpointTable = {
   "onboarding_companion": { method: "POST", path: "/v1/onboarding/companion", requestIn: "body" },
   "onboarding_complete": { method: "POST", path: "/v1/onboarding/complete", requestIn: null },
   "onboarding_get": { method: "GET", path: "/v1/onboarding", requestIn: null },
+  "plan_limit_resume": { method: "POST", path: "/v1/companion/resume-plan-limit", requestIn: null },
   "provider_api_key_remove": { method: "DELETE", path: "/v1/providers/{provider}/api-key", requestIn: null },
   "provider_api_key_save": { method: "PUT", path: "/v1/providers/{provider}/api-key", requestIn: "body" },
   "provider_enabled_set": { method: "PUT", path: "/v1/providers/{provider}/enabled", requestIn: "body" },
@@ -108,6 +112,8 @@ export const endpointTable = {
   "settings_update": { method: "PUT", path: "/v1/settings", requestIn: "body" },
   "spend_cap_set": { method: "PUT", path: "/v1/providers/{provider}/spend-cap", requestIn: "body" },
   "spend_get": { method: "GET", path: "/v1/providers/spend", requestIn: null },
+  "task_approve_top_tier": { method: "POST", path: "/v1/tasks/{task_id}/approve-top-tier", requestIn: null },
+  "task_continue": { method: "POST", path: "/v1/tasks/{task_id}/continue", requestIn: null },
   "usage_budgets_get": { method: "GET", path: "/v1/usage/budgets", requestIn: null },
   "usage_budgets_set": { method: "PUT", path: "/v1/usage/budgets", requestIn: "body" },
   "usage_get": { method: "GET", path: "/v1/usage", requestIn: "query" },

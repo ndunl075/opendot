@@ -123,6 +123,20 @@ class OnboardingAcknowledgeRequest(ApiModel):
 # --- companion profile -----------------------------------------------------------------------
 
 
+class TaskActionResult(ApiModel):
+    """The outcome of a user decision on a paused task (continue anyway, allow the top tier)."""
+
+    task_id: str
+    state: str
+    """The task's state after the decision, as the agent loop reports it."""
+    message: str = ""
+
+
+class PlanLimitResumeResult(ApiModel):
+    resumed_task_ids: list[str] = Field(default_factory=list)
+    """Tasks that were paused by the plan usage limit and are running again."""
+
+
 class CompanionProfile(ApiModel):
     name: str
     avatar_seed: str
@@ -247,6 +261,9 @@ class ApprovalItem(ApiModel):
     rule_suggestion: str | None = None
     conversation_id: str | None = None
     decided_at: datetime | None = None
+    review_note: str | None = None
+    """The reviewer's note for this action (section 10: every ``ask`` action gets a reviewer pass)."""
+    review_verdict: Literal["ok", "concern", "block"] | None = None
 
 
 class ApprovalList(ApiModel):

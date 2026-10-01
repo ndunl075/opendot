@@ -65,6 +65,35 @@
           "title": "Preview",
           "type": "string"
         },
+        "review_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Note"
+        },
+        "review_verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "ok",
+                "concern",
+                "block"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Verdict"
+        },
         "rule_suggestion": {
           "anyOf": [
             {

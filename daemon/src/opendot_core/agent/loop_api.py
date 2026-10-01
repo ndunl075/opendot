@@ -111,8 +111,14 @@ class AgentLoopProtocol(Protocol):
         """The user allowed a task that hit its budget to continue."""
         ...
 
-    def resume_after_plan_limit(self) -> None:
-        """The user raised their ChatGPT limit (or waited); clear the plan-request pause."""
+    def resume_after_plan_limit(self) -> list[str]:
+        """The user raised their ChatGPT limit (or waited); clear the plan-request pause.
+
+        Returns the tasks that were paused by the limit, so the caller can run them again."""
+        ...
+
+    def approval_review(self, approval_id: str) -> tuple[str, str] | None:
+        """The reviewer's (note, verdict) for an approval the loop created, if any."""
         ...
 
     def task_for_approval(self, approval_id: str) -> str | None:

@@ -76,6 +76,8 @@ export namespace ApprovalDecisionResultSchema {
   export type ExpiresAt = string | null;
   export type Id = string;
   export type Preview = string;
+  export type ReviewNote = string | null;
+  export type ReviewVerdict = ('ok' | 'concern' | 'block') | null;
   export type RuleSuggestion = string | null;
   export type Status = 'pending' | 'approved' | 'edited' | 'denied' | 'expired';
   export type Title = string;
@@ -98,6 +100,8 @@ export namespace ApprovalDecisionResultSchema {
     id: Id;
     payload: Payload;
     preview: Preview;
+    review_note?: ReviewNote;
+    review_verdict?: ReviewVerdict;
     rule_suggestion?: RuleSuggestion;
     status: Status;
     title: Title;
@@ -138,6 +142,8 @@ export namespace ApprovalItemSchema {
   export type ExpiresAt = string | null;
   export type Id = string;
   export type Preview = string;
+  export type ReviewNote = string | null;
+  export type ReviewVerdict = ('ok' | 'concern' | 'block') | null;
   export type RuleSuggestion = string | null;
   export type Status = 'pending' | 'approved' | 'edited' | 'denied' | 'expired';
   export type Title = string;
@@ -151,6 +157,8 @@ export namespace ApprovalItemSchema {
     id: Id;
     payload: Payload;
     preview: Preview;
+    review_note?: ReviewNote;
+    review_verdict?: ReviewVerdict;
     rule_suggestion?: RuleSuggestion;
     status: Status;
     title: Title;
@@ -169,6 +177,8 @@ export namespace ApprovalListSchema {
   export type ExpiresAt = string | null;
   export type Id = string;
   export type Preview = string;
+  export type ReviewNote = string | null;
+  export type ReviewVerdict = ('ok' | 'concern' | 'block') | null;
   export type RuleSuggestion = string | null;
   export type Status = 'pending' | 'approved' | 'edited' | 'denied' | 'expired';
   export type Title = string;
@@ -186,6 +196,8 @@ export namespace ApprovalListSchema {
     id: Id;
     payload: Payload;
     preview: Preview;
+    review_note?: ReviewNote;
+    review_verdict?: ReviewVerdict;
     rule_suggestion?: RuleSuggestion;
     status: Status;
     title: Title;
@@ -204,6 +216,8 @@ export namespace ApprovalRequiredEventSchema {
   export type ExpiresAt = string | null;
   export type Id = string;
   export type Preview = string;
+  export type ReviewNote = string | null;
+  export type ReviewVerdict = ('ok' | 'concern' | 'block') | null;
   export type RuleSuggestion = string | null;
   export type Status = 'pending' | 'approved' | 'edited' | 'denied' | 'expired';
   export type Title = string;
@@ -228,6 +242,8 @@ export namespace ApprovalRequiredEventSchema {
     id: Id;
     payload: Payload;
     preview: Preview;
+    review_note?: ReviewNote;
+    review_verdict?: ReviewVerdict;
     rule_suggestion?: RuleSuggestion;
     status: Status;
     title: Title;
@@ -1054,6 +1070,7 @@ export namespace PausedEventSchema {
   export type Reason = 'user' | 'task_budget' | 'daily_budget' | 'rate_limited' | 'anomaly' | 'top_tier_approval';
   export type ResumeAt = string | null;
   export type Seq = number;
+  export type TaskId = string | null;
   export type Type = 'paused';
 
   export interface PausedEvent {
@@ -1063,10 +1080,20 @@ export namespace PausedEventSchema {
     reason: Reason;
     resume_at?: ResumeAt;
     seq: Seq;
+    task_id?: TaskId;
     type?: Type;
   }
 }
 export type PausedEvent = PausedEventSchema.PausedEvent;
+
+export namespace PlanLimitResumeResultSchema {
+  export type ResumedTaskIds = string[];
+
+  export interface PlanLimitResumeResult {
+    resumed_task_ids?: ResumedTaskIds;
+  }
+}
+export type PlanLimitResumeResult = PlanLimitResumeResultSchema.PlanLimitResumeResult;
 
 export namespace ProviderApiKeyRequestSchema {
   export type ApiKey = string;
@@ -1382,6 +1409,8 @@ export namespace StreamEventSchema {
   export type ExpiresAt = string | null;
   export type Id = string;
   export type Preview = string;
+  export type ReviewNote = string | null;
+  export type ReviewVerdict = ('ok' | 'concern' | 'block') | null;
   export type RuleSuggestion = string | null;
   export type Status1 = 'pending' | 'approved' | 'edited' | 'denied' | 'expired';
   export type Title = string;
@@ -1413,6 +1442,7 @@ export namespace StreamEventSchema {
   export type Reason = 'user' | 'task_budget' | 'daily_budget' | 'rate_limited' | 'anomaly' | 'top_tier_approval';
   export type ResumeAt = string | null;
   export type Seq6 = number;
+  export type TaskId = string | null;
   export type Type6 = 'paused';
 
   export interface MessageStartedEvent {
@@ -1457,6 +1487,8 @@ export namespace StreamEventSchema {
     id: Id;
     payload: Payload;
     preview: Preview;
+    review_note?: ReviewNote;
+    review_verdict?: ReviewVerdict;
     rule_suggestion?: RuleSuggestion;
     status: Status1;
     title: Title;
@@ -1496,10 +1528,27 @@ export namespace StreamEventSchema {
     reason: Reason;
     resume_at?: ResumeAt;
     seq: Seq6;
+    task_id?: TaskId;
     type?: Type6;
   }
 }
 export type StreamEvent = StreamEventSchema.StreamEvent;
+
+export namespace TaskActionResultSchema {
+  export type Message = string;
+  export type State = string;
+  export type TaskId = string;
+
+  /**
+   * The outcome of a user decision on a paused task (continue anyway, allow the top tier).
+   */
+  export interface TaskActionResult {
+    message?: Message;
+    state: State;
+    task_id: TaskId;
+  }
+}
+export type TaskActionResult = TaskActionResultSchema.TaskActionResult;
 
 export namespace TextDeltaEventSchema {
   export type ConversationId = string;

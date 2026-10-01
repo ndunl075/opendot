@@ -59,6 +59,8 @@ class PausedEvent(_Event):
     message: str
     resume_at: str | None = None
     """ISO timestamp when the pause lifts on its own, when known."""
+    task_id: str | None = None
+    """The paused task, for "continue anyway" (task_budget) and "allow top tier" (top_tier_approval)."""
 
 
 StreamEvent = Annotated[

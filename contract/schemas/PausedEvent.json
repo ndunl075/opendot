@@ -42,6 +42,18 @@
       "title": "Seq",
       "type": "integer"
     },
+    "task_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    },
     "type": {
       "const": "paused",
       "default": "paused",

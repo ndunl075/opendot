@@ -297,7 +297,7 @@ class AgentLoop:
         self._row(task_id)
         self.meter.allow_task_overrun(task_id)
 
-    def resume_after_plan_limit(self) -> None:
+    def resume_after_plan_limit(self) -> list[str]:
         # The plan provider keeps its own persisted pause (M1); clear both, or the next request
         # would be refused again before it is sent.
         try:
@@ -308,6 +308,24 @@ class AgentLoop:
         if callable(resume):
             resume()
         self._set_control("plan_limit", None)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM agent_tasks WHERE state = ? ORDER BY created_at, id", (TaskState.PAUSED_PLAN_LIMIT.value,)
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
+    def approval_review(self, approval_id: str) -> tuple[str, str] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT output_json FROM agent_steps WHERE approval_id = ? ORDER BY id DESC LIMIT 1", (approval_id,)
+            ).fetchone()
+        if row is None or not row["output_json"]:
+            return None
+        review = json.loads(row["output_json"]).get("review")
+        if not isinstance(review, dict):
+            return None
+        reasons = review.get("reasons") or []
+        return ("; ".join(str(r) for r in reasons) or "No concerns found.", str(review.get("verdict", "ok")))
 
     def pause(self, reason: str = "user") -> None:
         self._set_control("kill_switch", reason)

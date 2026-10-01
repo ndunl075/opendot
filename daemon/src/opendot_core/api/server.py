@@ -57,6 +57,8 @@ from .models import (
     CompanionProfile,
     ErrorResponse,
     HealthResponse,
+    PlanLimitResumeResult,
+    TaskActionResult,
     UsageStamp,
 )
 
@@ -236,7 +238,7 @@ class ChatHub:
             if announce:
                 self._publish(conv, msg, {"type": "message_started"})
             for event in self.loop.run(task_id):
-                for payload in self._map(event):
+                for payload in self._map(event, task_id):
                     self._publish(conv, msg, payload)
         except Exception as error:  # the stream must tell the client, not die silently
             self._publish(
@@ -258,7 +260,7 @@ class ChatHub:
 
     # -- LoopEvent -> contract StreamEvent ---------------------------------------
 
-    def _map(self, event: LoopEvent) -> list[dict[str, Any]]:
+    def _map(self, event: LoopEvent, task_id: str | None = None) -> list[dict[str, Any]]:
         if isinstance(event, TextEvent):
             return [{"type": "text_delta", "text": event.text}]
         if isinstance(event, ToolEvent):
@@ -274,7 +276,7 @@ class ChatHub:
             return [{"type": "approval_required", "approval": self._approval_item(event).model_dump(mode="json")}]
         if isinstance(event, LoopPausedEvent):
             reason = pause_reason(event.state, event.reason, self.loop.paused())
-            return [{"type": "paused", "reason": reason, "message": event.reason}]
+            return [{"type": "paused", "reason": reason, "message": event.reason, "task_id": task_id}]
         if isinstance(event, DoneEvent):
             if event.state in (TaskState.COMPLETED, TaskState.HANDED_OFF):
                 usage = UsageStamp(
@@ -289,27 +291,34 @@ class ChatHub:
             if event.state == TaskState.FAILED:
                 return [{"type": "error", "code": "task_failed", "message": event.text or "The task failed."}]
             reason = pause_reason(event.state, event.text, self.loop.paused())
-            return [{"type": "paused", "reason": reason, "message": event.text or event.state.value}]
+            return [{"type": "paused", "reason": reason, "message": event.text or event.state.value, "task_id": task_id}]
         return []
 
     def _approval_item(self, event: ApprovalEvent) -> ApprovalItem:
         approval = self.approvals.get(event.approval_id)
         if approval is not None:
-            item = approval_to_item(approval)
+            item = approval_to_item(approval, self.loop)
         else:
             item = ApprovalItem(
                 id=event.approval_id, status="pending", action=event.action_type, title=event.action_type,
                 preview="", payload={}, created_at=datetime.now(UTC),
             )
         if event.review:
-            note = f"Reviewer ({event.review_verdict}): {event.review}"
-            item = item.model_copy(update={"preview": f"{item.preview}\n{note}"})
+            verdict = event.review_verdict if event.review_verdict in ("ok", "concern", "block") else None
+            item = item.model_copy(update={"review_note": event.review, "review_verdict": verdict})
         return item
 
 
-def approval_to_item(approval: Approval) -> ApprovalItem:
+def approval_to_item(approval: Approval, loop: Any = None) -> ApprovalItem:
     payload = {str(k): v if isinstance(v, str) else json.dumps(v, sort_keys=True) for k, v in approval.preview.items()}
+    review = None
+    lookup = getattr(loop, "approval_review", None)
+    if callable(lookup):
+        review = lookup(approval.id)
+    note, verdict = review if review else (None, None)
     return ApprovalItem(
+        review_note=note,
+        review_verdict=verdict if verdict in ("ok", "concern", "block") else None,
         id=approval.id,
         status=_APPROVAL_STATUS.get(approval.state, "pending"),
         action=approval.action_type,
@@ -401,14 +410,14 @@ def create_app(
         return JSONResponse(accepted.model_dump(mode="json"), status_code=202)
 
     async def approvals_list(_: Request) -> Response:
-        items = [approval_to_item(a) for a in await asyncio.to_thread(approvals.list_pending)]
+        items = [approval_to_item(a, loop) for a in await asyncio.to_thread(approvals.list_pending)]
         return JSONResponse(ApprovalList(approvals=items).model_dump(mode="json"))
 
     async def approval_get(request: Request) -> Response:
         approval = await asyncio.to_thread(approvals.get, request.path_params["approval_id"])
         if approval is None:
             return _error(404, "not_found", "No such approval.")
-        return JSONResponse(approval_to_item(approval).model_dump(mode="json"))
+        return JSONResponse(approval_to_item(approval, loop).model_dump(mode="json"))
 
     async def approval_approve(request: Request) -> Response:
         approval_id = request.path_params["approval_id"]
@@ -420,7 +429,7 @@ def create_app(
         except PolicyError as error:
             return policy_error(error)
         rerun(approval_id)
-        result = ApprovalDecisionResult(approval=approval_to_item(approval), executed=False)
+        result = ApprovalDecisionResult(approval=approval_to_item(approval, loop), executed=False)
         return JSONResponse(result.model_dump(mode="json"))
 
     async def approval_deny(request: Request) -> Response:
@@ -433,7 +442,7 @@ def create_app(
         except PolicyError as error:
             return policy_error(error)
         rerun(approval_id)
-        result = ApprovalDecisionResult(approval=approval_to_item(approval), executed=False)
+        result = ApprovalDecisionResult(approval=approval_to_item(approval, loop), executed=False)
         return JSONResponse(result.model_dump(mode="json"))
 
     async def approval_always_allow(request: Request) -> Response:
@@ -456,7 +465,7 @@ def create_app(
             note = f"Approved, but no rule was created: {error}"
         rerun(approval_id)
         result = ApprovalDecisionResult(
-            approval=approval_to_item(approval), executed=False, result_summary=note, created_rule_id=created_rule_id
+            approval=approval_to_item(approval, loop), executed=False, result_summary=note, created_rule_id=created_rule_id
         )
         return JSONResponse(result.model_dump(mode="json"))
 
@@ -473,6 +482,35 @@ def create_app(
             return bad_request(error)
         await asyncio.to_thread(loop.pause, body.reason or "user")
         return JSONResponse(profile().model_dump(mode="json"))
+
+    async def task_action(request: Request, action: str) -> Response:
+        task_id = request.path_params["task_id"]
+        try:
+            await asyncio.to_thread(loop.task, task_id)
+        except KeyError:
+            return _error(404, "not_found", "No such task.")
+        if action == "continue":
+            await asyncio.to_thread(loop.continue_anyway, task_id)
+            message = "Continuing past the task budget, as you asked."
+        else:
+            await asyncio.to_thread(loop.approve_top_tier, task_id)
+            message = "This task may now use the top-tier model."
+        hub.run_in_background(task_id)
+        record = await asyncio.to_thread(loop.task, task_id)
+        result = TaskActionResult(task_id=task_id, state=record.state.value, message=message)
+        return JSONResponse(result.model_dump(mode="json"))
+
+    async def task_continue(request: Request) -> Response:
+        return await task_action(request, "continue")
+
+    async def task_approve_top_tier(request: Request) -> Response:
+        return await task_action(request, "top_tier")
+
+    async def plan_limit_resume(_: Request) -> Response:
+        task_ids = await asyncio.to_thread(loop.resume_after_plan_limit)
+        for task_id in task_ids or []:
+            hub.run_in_background(task_id)
+        return JSONResponse(PlanLimitResumeResult(resumed_task_ids=list(task_ids or [])).model_dump(mode="json"))
 
     async def companion_resume(_: Request) -> Response:
         await asyncio.to_thread(loop.unpause)
@@ -525,6 +563,9 @@ def create_app(
         Route(f"{v}/companion", companion_get, methods=["GET"]),
         Route(f"{v}/companion/pause", companion_pause, methods=["POST"]),
         Route(f"{v}/companion/resume", companion_resume, methods=["POST"]),
+        Route(f"{v}/companion/resume-plan-limit", plan_limit_resume, methods=["POST"]),
+        Route(f"{v}/tasks/{{task_id}}/continue", task_continue, methods=["POST"]),
+        Route(f"{v}/tasks/{{task_id}}/approve-top-tier", task_approve_top_tier, methods=["POST"]),
         WebSocketRoute(CHAT_STREAM_PATH, chat_stream),
     ]
     app = Starlette(routes=routes, middleware=[Middleware(BearerAuth, token=token)])
