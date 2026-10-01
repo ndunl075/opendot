@@ -1,0 +1,17 @@
+{
+  "name": "opendot-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.34.6",
+  "scripts": {
+    "build:ui": "pnpm -C ../ui install --frozen-lockfile && pnpm -C ../ui build",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
+    "build": "pnpm build:ui && pnpm build:sidecar && pnpm build:icons && tauri build",
+    "dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1"
+  }
+}

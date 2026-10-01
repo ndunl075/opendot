@@ -17,3 +17,10 @@ habits.patch
 deploy/couchdb/data/
 deploy/couchdb/config/
 .alfred/backup-verify.log
+
+# desktop (M3)
+desktop/node_modules/
+desktop/.sidecar-build/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+desktop/src-tauri/gen/
