@@ -10,7 +10,9 @@
 .screen-heading .muted { font-size: var(--text-lg); }
 .actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
 .muted { color: var(--color-text-muted); }
-.connection-steps { padding-left: var(--space-6); display: grid; gap: var(--space-3); }
+.connection-steps { padding-left: var(--space-6); display: grid; gap: var(--space-2); }
+.connection-disclosure > summary { cursor: pointer; font-weight: var(--weight-medium); }
+.connection-disclosure[open] > summary { margin-bottom: var(--space-4); }
 .connection-token-form { border-top: 1px solid var(--color-border); padding-top: var(--space-6); }
 .notice { padding: var(--space-5); background: var(--color-warning-soft); color: var(--color-warning); border: 1px solid currentColor; border-radius: var(--radius-md); }
 .notice h3, .notice p { margin-bottom: var(--space-2); }

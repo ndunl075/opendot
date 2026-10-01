@@ -29,10 +29,11 @@ for (const surface of ["connections", "onboarding"] as const) {
     await context.route("https://example.test/google-consent/**", route => route.fulfill({ contentType: "text/html", body: "<title>Mock Google consent</title><h1>Mock Google consent</h1>" }));
     await page.goto(`/${surface}`);
     await expect(page.getByRole("heading", { name: "Set up Google" })).toBeVisible();
-    await expect(page.getByRole("listitem").filter({ hasText: "Create a Desktop app OAuth client." })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open Google Cloud Console" })).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(page.getByRole("listitem").filter({ hasText: 'Create an OAuth client, type "Desktop app", then click "Download JSON"' })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Create a project" })).toHaveAttribute("rel", "noopener noreferrer");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("google-setup.png"), fullPage: true });
+    await page.getByText("Paste the ID and secret instead", { exact: true }).click();
     await page.getByLabel("Google client ID").fill("demo.apps.googleusercontent.com");
     await page.getByLabel("Google client secret").fill("synthetic-client-secret");
     await page.getByRole("button", { name: "Save Google client" }).click();
