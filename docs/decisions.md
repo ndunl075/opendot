@@ -250,3 +250,18 @@ section 1. Newest last.
   empty brief or a quiet week). The weekly review reads local tables (tasks, reminder jobs, synced calendar
   events, the usage meter) and takes pull requests from an optional callable, because the GitHub transport
   is a connector concern (task 4.4); without it the review omits pull requests.
+- 2026-10-01 (M4): The ChatGPT plan scope is only granted to Plus and Pro but does not say which, and the contract's
+  `PlanEligibility` has no "eligible, tier unknown" value while the UI blocks onboarding unless it is `eligible_plus`
+  or `eligible_pro`. So a signed-in account that granted the plan scope reports `eligible_plus` with the label "Using
+  ChatGPT plan" (no tier name). `credits_enabled` is false unless the provider exposes a `credits_enabled` attribute
+  (it does not yet). A plan-limit pause is reported as `signed_in` with an `error` note, since the contract has no
+  paused state.
+- 2026-10-01 (M4): Conversations are persisted by `ChatHub` through a `ConversationRecorder` (migration 0023): the user
+  message when a task starts, the assistant reply (final text, usage stamp, tool calls, approval card) as events are
+  published. Assistant message ids are `<user message id>_a`. Companion Reset deletes conversations, agent tasks and
+  steps, cancels scheduled agent tasks and rejects pending approvals, appends a `companion_reset` audit record, and never
+  touches `tool_runs`; memory is cleared only when `forget_memory` is true.
+- 2026-10-01 (M4): Connection ids are the app names (`gmail`, `google_calendar`, `github`). Syncing and credential
+  revocation are injected through `ApiContext.extras` (`connector_syncers`, `connector_disconnectors`); with no syncer
+  registered, sync answers 409 `sync_unavailable`. Disconnect deletes the app's `sync_state` and `connector_records`
+  rows, and with "forget everything learned from this app" tombstones every memory whose source event came from it.

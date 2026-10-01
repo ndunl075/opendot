@@ -100,10 +100,12 @@ def build_serve_app(  # noqa: ANN201
         from ..agent.mcp_tools import McpTools
 
         tools = McpTools(database.path)
-    runtime = build_agent_runtime(database, registry, tools, api_token=token, actor=getattr(tools, "actor", "owner"))
+    secrets = secret_store or SystemKeyringSecretStore()
+    runtime = build_agent_runtime(
+        database, registry, tools, api_token=token, actor=getattr(tools, "actor", "owner"), secret_store=secrets
+    )
     from ..connections_google import GoogleConnector
 
-    secrets = secret_store or SystemKeyringSecretStore()
     runtime.app.state.context.extras["secret_store"] = secrets
     runtime.app.state.context.extras["google_connector"] = GoogleConnector(
         database, secrets, base_url=f"http://{HOST}:{port}"

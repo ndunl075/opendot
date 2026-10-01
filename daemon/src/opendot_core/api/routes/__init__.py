@@ -43,10 +43,32 @@ def _connect(ctx: ApiContext) -> list[BaseRoute]:
     return connect.routes(ctx)
 
 
-from . import backup_routes, providers_routes, rules_routes, settings_routes, usage_routes  # noqa: E402
+from . import (  # noqa: E402
+    activity,
+    backup_routes,
+    chatgpt,
+    companion,
+    connections,
+    conversations,
+    memory,
+    onboarding,
+    providers_routes,
+    rules_routes,
+    settings_routes,
+    usage_routes,
+    version,
+)
 
 #: Every route module, in mount order. Add yours here (one line per module).
 ROUTE_MODULES: list[RouteModule] = [
+    version.routes,
+    onboarding.routes,
+    chatgpt.routes,
+    companion.routes,
+    conversations.routes,
+    activity.routes,
+    memory.routes,
+    connections.routes,
     _connect,
     rules_routes.routes,
     usage_routes.routes,
