@@ -134,3 +134,32 @@ section 1. Newest last.
 - 2026-09-30 (M3): Package scripts never call `pnpm`, `npm` or `corepack` by name: on this machine
   `cmd.exe` cannot see them. Nested pnpm goes through `npm_execpath`, the Tauri CLI through Node, and
   `uv` is found by path search (`UV`, PATH, per-user install folders).
+- 2026-10-01 (M4): One service process: `opendot serve` runs the API and UI plus a background thread
+  (`always_on.AlwaysOnWorker`) with the `opendot run` runner (due jobs and reminders, outbox delivery,
+  connector syncs), so launchd, Task Scheduler and systemd each start exactly one command. Telegram and
+  Slack stay off (no pairing in the default `run` arguments). Connectors without stored credentials are
+  skipped quietly instead of logging an error every cycle; syncs run in the runner's background worker so a
+  slow sync never delays a due reminder. `--no-background` serves only the API. Do not run `opendot run`
+  next to the service: they would both deliver.
+- 2026-10-01 (M4): Service definitions run `python -m opendot_core.cli --db <app-data>/opendot.db serve` (the
+  frozen sidecar itself when `sys.frozen`), using the same `org.opendot.desktop` app-data folder as the
+  desktop app so both share one database. Logs: macOS `~/Library/Logs/OpenDot/daemon.log` and Linux
+  `<app-data>/logs/daemon.log` through the OS service manager; Windows through `serve --log-file` (Task
+  Scheduler cannot redirect output). Restart on failure: launchd `KeepAlive.SuccessfulExit=false`, systemd
+  `Restart=on-failure`, Task Scheduler `RestartOnFailure` (1 minute, 999 tries). The Windows task is created
+  for the current user with `LeastPrivilege` and runs on battery. Reason: no admin or sudo anywhere. The
+  definitions are pure functions; the install shells out through an injected runner. Windows `status`
+  parses the English `Status:` line of `schtasks /Query`.
+- 2026-10-01 (M4): Keep-awake holds the lock only from the always-on thread (the Windows execution-state flag
+  belongs to the calling thread) and re-reads the setting every 15 seconds. "Only while plugged in" treats an
+  unknown power state as battery. A machine with no battery counts as plugged in. The Linux helper is
+  `systemd-inhibit --what=idle ... tail --pid=<daemon>` and is stopped by killing its process group.
+- 2026-10-01 (M4): Wake detection is a wall-clock gap larger than the loop interval plus 60 seconds of slack
+  for a slow cycle; on start the reference is the last runner heartbeat, so a restart after downtime counts
+  too (a fresh install does not). Catch-up never delivers anything itself: `JobRunner` still marks late
+  deliveries. A recurring job (daily reminder, daily agent task, morning brief) whose next occurrences were
+  also missed is moved to its latest missed occurrence before `run_due`, so it runs once and the older runs
+  are counted as skipped. Annual dates and nags already run once and reschedule. Every connector then syncs
+  once (`mark_connectors_due`). The single note goes to the first destination of the late jobs, or to
+  `ui:owner` when there is none (no channel worker delivers that; the UI reads it from the outbox, M4 UI work).
+  No note when nothing was missed.

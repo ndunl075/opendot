@@ -831,6 +831,10 @@ def build_parser() -> argparse.ArgumentParser:
     from .api import serve_cli
 
     serve_cli.register(subcommands)
+
+    from . import service as service_cli
+
+    service_cli.register(subcommands)
     return parser
 
 
@@ -847,6 +851,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .eval import cli as eval_cli
 
         return eval_cli.run(args)
+    if args.command == "service":
+        from . import service as service_cli
+
+        return service_cli.run_service(args)
     if args.command == "api-token":
         from .api import serve_cli
 
