@@ -9,11 +9,12 @@ const healthy = { id: "gmail-1", app: "gmail" as const, health: "ok" as const, a
 afterEach(() => vi.useRealTimers());
 
 describe("Shared connection setup", () => {
-  it("shows numbered daemon steps and clears the masked, write-only client secret after saving", async () => {
+  it("shows linked numbered steps and clears the masked, write-only client secret after saving", async () => {
     const call = vi.spyOn(api, "call").mockImplementation(async name => name === "google_client_get" ? setup : name === "google_client_set" ? { configured: true } : { connections: [] });
     render(<ConnectionPicker />);
-    expect(await screen.findByText(setup.setup_steps[0])).toBeVisible();
-    expect(screen.getByText(setup.setup_steps[0]).closest("ol")).not.toBeNull();
+    expect(await screen.findByRole("link", { name: "Create a project" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Create a project" }).closest("ol")).not.toBeNull();
+    fireEvent.click(screen.getByText("Paste the ID and secret instead"));
     const secret = screen.getByLabelText("Google client secret");
     expect(secret).toHaveAttribute("type", "password");
     fireEvent.change(screen.getByLabelText("Google client ID"), { target: { value: "demo.apps.googleusercontent.com" } });
@@ -57,7 +58,9 @@ describe("Shared connection setup", () => {
     });
     render(<ConnectionPicker />);
     fireEvent.click(await screen.findByRole("button", { name: "Connect Gmail" }));
-    expect(await screen.findByLabelText("Google client secret")).toBeVisible();
+    expect(await screen.findByLabelText("Upload the JSON file Google gave you")).toBeVisible();
+    fireEvent.click(screen.getByText("Paste the ID and secret instead"));
+    expect(screen.getByLabelText("Google client secret")).toBeVisible();
     expect(screen.getByText("Set up your Google client first.")).toBeVisible();
   });
 
@@ -87,6 +90,7 @@ describe("Shared connection setup", () => {
     render(<ConnectionPicker />);
     await screen.findByLabelText("Google client ID");
     if (app === "Google") {
+      fireEvent.click(screen.getByText("Paste the ID and secret instead"));
       fireEvent.change(screen.getByLabelText("Google client ID"), { target: { value: "invalid" } });
       fireEvent.change(screen.getByLabelText("Google client secret"), { target: { value: "synthetic-secret" } });
     } else fireEvent.change(screen.getByLabelText("GitHub personal access token"), { target: { value: "synthetic-token" } });

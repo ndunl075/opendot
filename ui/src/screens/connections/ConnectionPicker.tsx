@@ -10,7 +10,7 @@ export const appLabels: Record<ConnectionStartRequest["app"], string> = { gmail:
 const loadGoogle = () => api.call("google_client_get");
 
 /** Starting a connection requests read access only. Write access has its own opt-in. */
-export function ConnectionPicker({ onRefresh }: { onRefresh?: () => void }) {
+export function ConnectionPicker({ onRefresh, githubOptional = false }: { onRefresh?: () => void; githubOptional?: boolean }) {
   const google = useResource(loadGoogle);
   const mutation = useMutation();
   const [started, setStarted] = useState<ConnectionStart>();
@@ -38,14 +38,15 @@ export function ConnectionPicker({ onRefresh }: { onRefresh?: () => void }) {
   return <div className="form-stack">
     <p className="muted">Connecting is optional. OpenDot asks Google for read-only access by default. Creating Gmail drafts or Calendar events is a separate opt-in, and each still needs your approval in OpenDot.</p>
     {google.loading ? <Skeleton label="Checking Google setup" /> : google.error ? <ErrorState error={google.error} onRetry={google.reload} /> : google.data && <>
-      {!google.data.configured ? <GoogleSetup status={google.data} onSave={google.setData} /> : <section className="form-stack" aria-label="Connect Google apps">
+      <GoogleSetup status={google.data} onSave={google.setData} />
+      {google.data.configured && <section className="form-stack" aria-label="Connect Google apps">
         <h3>Connect Google apps</h3><p className="muted">Your Google client is set up. Choose an app, then finish granting read access in your browser.</p>
         <div className="actions"><Button variant="secondary" disabled={mutation.pending} onClick={() => void connect("gmail")}>Connect Gmail</Button><Button variant="secondary" disabled={mutation.pending} onClick={() => void connect("google_calendar")}>Connect Google Calendar</Button></div>
       </section>}
     </>}
     {mutation.error != null && !(mutation.error instanceof ApiError && mutation.error.code === "google_client_missing" && google.data?.configured) && <ErrorState error={mutation.error} />}
     {started && <GoogleAuthorization key={attempt} app={started.app} authorizeUrl={started.authorize_url} onRefresh={onRefresh} onRetry={() => void connect(started.app === "gmail" ? "gmail" : "google_calendar")} />}
-    <GithubSetup onRefresh={onRefresh} />
+    {githubOptional ? <details className="connection-disclosure"><summary>Connect GitHub (optional)</summary><GithubSetup onRefresh={onRefresh} /></details> : <GithubSetup onRefresh={onRefresh} />}
     {onRefresh && <Button variant="ghost" onClick={onRefresh}>Refresh accounts</Button>}
   </div>;
 }

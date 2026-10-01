@@ -69,9 +69,19 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
   }, [polling, pendingSignIn, started, setData]);
 
   async function startSignIn() {
+    // Reserve the tab during the click, before the request loses user activation.
+    let tab: Window | null = null;
+    try { tab = window.open("about:blank", "_blank"); } catch { /* The visible link remains the fallback. */ }
     setExpired(false); setPollError(undefined);
     const result = await mutation.run(() => api.call("chatgpt_start", { body: { open_browser: true } }));
-    if (result) { setStarted(result); setPolling(true); }
+    const url = safeExternalUrl(result?.authorize_url);
+    if (result) { setStarted(result); setPolling(Boolean(url)); }
+    if (tab) {
+      if (url) {
+        try { tab.location.href = url; tab.opener = null; }
+        catch { tab.close(); }
+      } else tab.close();
+    }
   }
   async function saveCompanion(name: string, avatar_seed: string) {
     const result = await mutation.run(() => api.call("onboarding_companion", { body: { name, avatar_seed } }));
@@ -105,12 +115,12 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
           {/* Official OpenAI DevKit assets are not in this repository. Use text only until licensed official assets are supplied. */}
           <Button onClick={() => void startSignIn()} loading={mutation.pending || polling}>Continue with ChatGPT</Button>
           {polling && <p role="status">Waiting for ChatGPT sign-in. Complete the browser step to continue.</p>}
-          {started && safeExternalUrl(started.authorize_url) && <a href={safeExternalUrl(started.authorize_url)} target="_blank" rel="noreferrer">Open ChatGPT sign-in</a>}
+          {started && safeExternalUrl(started.authorize_url) && <a href={safeExternalUrl(started.authorize_url)} target="_blank" rel="noreferrer">Sign-in tab didn't open? Open ChatGPT sign-in</a>}
           {expired && <p role="alert">This sign-in expired. Select Continue with ChatGPT to try again.</p>}
           {data.chatgpt.error && <p role="alert">{data.chatgpt.error}</p>}
         </div>}
         {step === "weekly_limit" && <UsageAcknowledgement state={data} onAcknowledge={() => void acknowledge()} onCheck={() => void checkCredits()} pending={mutation.pending} />}
-        {step === "connections" && <div className="form-stack"><h2>Connect your apps</h2><ConnectionPicker onRefresh={() => void resource.reload()} /><p className="muted">You can add or manage read-only accounts in Connections at any time.</p><Button onClick={() => void finish()} loading={mutation.pending}>Continue to introduction</Button></div>}
+        {step === "connections" && <div className="form-stack"><h2>Connect your apps</h2><ConnectionPicker githubOptional onRefresh={() => void resource.reload()} /><p className="muted">You can add or manage read-only accounts in Connections at any time.</p><div className="actions"><Button onClick={() => void finish()} loading={mutation.pending}>Continue to introduction</Button><Button variant="secondary" disabled={mutation.pending} onClick={() => void finish()}>Skip for now</Button></div></div>}
         {(step === "intro" || step === "done") && <div className="form-stack"><Avatar seed={data.avatar_seed ?? "open-fold-1"} /><h2>Hello, I’m {data.companion_name ?? "your companion"}</h2><p>{data.intro_message ?? "I can help you keep track of work, remember what matters, and ask before taking action. You can pause me at any time."}</p><Button loading={mutation.pending} onClick={() => { if (step === "done" || data.completed_steps.includes("done")) onComplete?.(); else void finish(true); }}>Open chat</Button></div>}
       </>}
       {pollError != null && <ErrorState error={pollError} onRetry={() => { setPollError(undefined); setPolling(true); }} />}
