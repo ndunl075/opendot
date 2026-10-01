@@ -134,3 +134,40 @@ section 1. Newest last.
 - 2026-09-30 (M3): Package scripts never call `pnpm`, `npm` or `corepack` by name: on this machine
   `cmd.exe` cannot see them. Nested pnpm goes through `npm_execpath`, the Tauri CLI through Node, and
   `uv` is found by path search (`UV`, PATH, per-user install folders).
+- 2026-10-01 (M4): Built-in routines (task 4.5) live in `opendot_core/routines/`. Each has a small
+  pydantic settings model stored through `SettingsStore` (`routine_morning_brief`,
+  `routine_inbox_triage`, `routine_weekly_review`) and is OFF until the user enables it and picks when it
+  runs. Reason: a routine delivers things the user did not just ask for, and the time and timezone are
+  the user's choice.
+- 2026-10-01 (M4): Routines are run by a `RoutineScheduler` that the always-on loop calls once per cycle
+  (`OpenDotRunner(routines=...)`), not inside `JobRunner`. Reason: a model pass is slow and must not run
+  inside the job runner's write transaction. Each enabled routine still owns one `jobs` row (kind
+  `routine`, key `routine:<name>`), which `JobRunner` skips. The row holds the schedule, the next run and
+  the routine's state, and gives every delivery a `job_id` so the delivery workers also hold it in quiet
+  hours. A routine that is off and never ran adds no row.
+- 2026-10-01 (M4): A scheduled run needs: enabled, due, and outside quiet hours (stored `quiet_hours`
+  setting, else the environment). A late run is caught up once, never made up for a time before the
+  routine was switched on, and quiet hours defer the run (it stays due) instead of running and holding
+  the message, so no model call is spent during the window. Results go to the outbox, destination
+  `desktop:owner` by default; a manual `opendot routines run <name>` ignores the schedule, the switch and
+  quiet hours but not budgets or the kill switch.
+- 2026-10-01 (M4): The only model passes are `AgentLoop` tasks (`job_type` `summarize` for the brief and
+  weekly review wording, `sort` for triage; both cheap/low), started with an empty tool group
+  (`start_task(..., tool_group=())`). Budgets, the plan-limit pause, the kill switch and the usage meter
+  therefore apply, and routines are read-only at the tool layer: a model reply that asks for a tool is
+  refused by the loop, so triage cannot send, draft, label or delete. A pass that fails or is paused is
+  abandoned (`AgentLoop.abandon`) so a later resume never spends a call on a result nobody waits for, and
+  the plain-code text is delivered instead. After a failure there is no retry: triaged messages count as
+  seen. Reason: no retry loop that could burn credits or spam.
+- 2026-10-01 (M4): Inbox triage runs only when the synced unread Gmail records contain ids not yet
+  triaged (state keeps ids that are still unread). Plain code drops bulk mail, merges threads and
+  duplicates, and ranks by sender importance (people graph: confirmed person 3, calendar-vouched 2),
+  high-signal wording, threads awaiting reply, and mentions of open tasks and close dates. At most 12
+  items go to one pass as numbered `from | subject | snippet` lines (each field one line and capped, the
+  snippet at 200 chars). Message bodies never reach the model, and email text is HTML-escaped inside
+  `<untrusted-data>` tags in the tail, after an instruction that it is data. If none are worth it the
+  model answers `none` and nothing is delivered. Audit rows hold counts and flags, never message text.
+- 2026-10-01 (M4): The brief and weekly review skip the model pass when there is nothing to reword (an
+  empty brief or a quiet week). The weekly review reads local tables (tasks, reminder jobs, synced calendar
+  events, the usage meter) and takes pull requests from an optional callable, because the GitHub transport
+  is a connector concern (task 4.4); without it the review omits pull requests.

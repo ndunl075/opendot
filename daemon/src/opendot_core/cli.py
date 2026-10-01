@@ -86,6 +86,15 @@ def database_from_args(args: argparse.Namespace) -> Database:
     return Database(settings.database_path)
 
 
+def _routines_hook(database: Database):  # noqa: ANN202
+    """The built-in routines (M4 task 4.5), run once per loop cycle. Each is off until the user enables it,
+    and the agent loop for its optional model pass is only built the first time one needs it."""
+    from .routines import RoutineScheduler
+    from .routines.runtime import build_routine_loop
+
+    return RoutineScheduler(database, loop_factory=lambda: build_routine_loop(database)).run_due
+
+
 @contextmanager
 def running_opendot_runner(database: Database, args: argparse.Namespace) -> Iterator[OpenDotRunner]:
     """Build and tear down the exact ``OpenDotRunner`` behind ``opendot run``.
@@ -228,6 +237,7 @@ def running_opendot_runner(database: Database, args: argparse.Namespace) -> Iter
         poll_timeout_seconds=args.poll_timeout,
         idle_sleep_seconds=args.idle_sleep,
         quiet_hours=Settings.from_environment().quiet_hours,
+        routines=_routines_hook(database),
     )
     try:
         if slack_receiver is not None:
@@ -824,6 +834,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     usage_cli.register(subcommands)
 
+    from .routines import cli as routines_cli
+
+    routines_cli.register(subcommands)
+
     from .eval import cli as eval_cli
 
     eval_cli.register(subcommands)
@@ -863,6 +877,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .usage import cli as usage_cli
 
         return usage_cli.run(args, database)
+    if args.command == "routines":
+        from .routines import cli as routines_cli
+
+        return routines_cli.run(args, database)
     if args.command == "status":
         print(json.dumps(database.status()))
         return 0

@@ -55,6 +55,7 @@ class RunOnceReport:
     agent_replies: int = 0
     memories_learned: int = 0
     actions_executed: int = 0
+    routines_run: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -81,6 +82,7 @@ class OpenDotRunner:
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
         quiet_hours: QuietHours | None = None,
+        routines: Callable[[], object] | None = None,
     ) -> None:
         self.database = database
         self.telegram_transport = telegram_transport
@@ -101,6 +103,7 @@ class OpenDotRunner:
         self.sleep = sleep
         self.now = now
         self.quiet_hours = quiet_hours or QuietHours.disabled()
+        self.routines = routines
         self._last_synced: dict[str, float] = {}
         self._next_sync_attempt: dict[str, float] = {}
         self._sync_failures: dict[str, int] = {}
@@ -165,6 +168,14 @@ class OpenDotRunner:
 
         ran, due_jobs = self._safe("run_due", lambda: JobRunner(self.database).run_due(), errors)
         jobs_executed = len(due_jobs) if ran and due_jobs is not None else 0
+
+        # Built-in routines (morning brief, inbox triage, weekly review): plain code unless something new
+        # needs the one cheap model pass; each checks its own switch, schedule and quiet hours.
+        routines_run = 0
+        if self.routines is not None:
+            routines_ok, routine_results = self._safe("routines", self.routines, errors)
+            if routines_ok and isinstance(routine_results, list):
+                routines_run = sum(1 for item in routine_results if getattr(item, "status", "") != "skipped_quiet_hours")
 
         # Flushed here, before the agent runs, so the acknowledgement actually
         # lands while the answer is still being written. Delivering once at
@@ -235,6 +246,7 @@ class OpenDotRunner:
             agent_replies=agent_replies,
             memories_learned=memories_learned,
             actions_executed=actions_executed,
+            routines_run=routines_run,
             errors=errors,
         )
 

@@ -48,6 +48,10 @@ Milestone: **M3 (UI, desktop and web) — DONE** (2026-09-30; M0 to M2 done the 
 - [x] 3.6 Tauri shell: PyInstaller sidecar, start or attach, tray (Open, Pause, Resume, Quit), NSIS installer
 - [x] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md` (U1 to U15 fixed, verdict "ready"; contract gaps for M4 accepted)
 
+## M4 progress
+
+- [x] 4.5 built-in routines (`routines/`): morning brief, inbox triage, weekly review. Settings in `SettingsStore`, off by default, run from the always-on loop, quiet hours respected, one optional cheap/low pass through the agent loop (budgets, plan-limit pause and kill switch apply), plain-text fallback, `opendot routines list|run|enable|disable`. 28 new tests (1242 daemon tests pass). Not wired yet: a GitHub pull-request callable for the weekly review (needs task 4.4's connector).
+
 ## Notes for M3 and M4
 
 - `agent/runtime.py` `build_agent_runtime` is the production assembly of the agent loop and the API. M3 task 3.5 serves `runtime.app` on 127.0.0.1. The browser WebSocket authenticates with the subprotocols `["opendot", "opendot.bearer.<token>"]` from a local origin.

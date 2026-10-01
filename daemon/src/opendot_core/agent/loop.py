@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -237,12 +237,18 @@ class AgentLoop:
         job_type: str = "chat",
         chat_id: int | None = None,
         preapproved_actions: frozenset[str] = frozenset(),
+        tool_group: Sequence[str] | None = None,
     ) -> str:
+        """``tool_group`` fixes the task's tools by name (an empty tuple means no tools at all, which is
+        how read-only background routines run); the default picks the group from the message."""
         if job_type not in _JOB_FOR_TYPE:
             raise ValueError(f"unknown job type {job_type!r}")
         task_id = str(uuid4())
         available = [spec.name for spec in self.tools.specs()]
-        group = choose_task_tool_group(message, available)
+        if tool_group is None:
+            group = choose_task_tool_group(message, available)
+        else:
+            group = sorted(name for name in set(tool_group) if name in available)
         assert len(group) <= MAX_TOOLS_PER_GROUP
         now = self._now()
         with self.database.connect() as connection:
@@ -263,6 +269,13 @@ class AgentLoop:
                     ),
                 )
         return task_id
+
+    def abandon(self, task_id: str, reason: str) -> None:
+        """Fail a task nobody will wait for (a background routine that fell back to plain text), so a later
+        ``resume_all`` or plan-limit resume never spends a model call on a result that has no reader."""
+        row = self._row(task_id)
+        if TaskState(row["state"]) not in _TERMINAL:
+            self._update(task_id, state=TaskState.FAILED.value, detail=reason)
 
     def task(self, task_id: str) -> TaskRecord:
         row = self._row(task_id)
