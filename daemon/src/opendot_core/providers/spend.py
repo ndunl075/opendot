@@ -131,6 +131,10 @@ class SpendTracker:
         self._add(f"{provider}:{self._month()}", cost)
         return cost
 
+    def month(self) -> str:
+        """The UTC calendar month ``spent`` is counted for, as ``YYYY-MM``."""
+        return self._month()
+
     # -- storage ---------------------------------------------------------
     def _month(self) -> str:
         return self._now().strftime("%Y-%m")

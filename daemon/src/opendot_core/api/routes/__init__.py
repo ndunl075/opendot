@@ -37,8 +37,16 @@ class ApiContext:
 
 RouteModule = Callable[[ApiContext], list[BaseRoute]]
 
+from . import backup_routes, providers_routes, rules_routes, settings_routes, usage_routes  # noqa: E402
+
 #: Every route module, in mount order. Add yours here (one line per module).
-ROUTE_MODULES: list[RouteModule] = []
+ROUTE_MODULES: list[RouteModule] = [
+    rules_routes.routes,
+    usage_routes.routes,
+    settings_routes.routes,
+    providers_routes.routes,
+    backup_routes.routes,
+]
 
 
 def build_routes(ctx: ApiContext, modules: list[RouteModule] | None = None) -> list[BaseRoute]:

@@ -134,3 +134,16 @@ section 1. Newest last.
 - 2026-09-30 (M3): Package scripts never call `pnpm`, `npm` or `corepack` by name: on this machine
   `cmd.exe` cannot see them. Nested pnpm goes through `npm_execpath`, the Tauri CLI through Node, and
   `uv` is found by path search (`UV`, PATH, per-user install folders).
+- 2026-10-01 (M4): Rules endpoints map the contract rule onto the engine rule without a migration: `action` is
+  `tool` or `tool.action`; `name` and `enabled` live in the `rule_names` and `rules_disabled` settings and
+  `RuleEngine.decide` skips disabled rules. Built-in defaults and the deny list are both `locked` (403); a user
+  rule that skips asking is capped at "sensitive" data. Reason: the contract has no tool or sensitivity field and
+  the rules table has no name or enabled column; a new column would collide with parallel migrations.
+- 2026-10-01 (M4): Tier overrides are per job type (`Router.job_overrides`, tier plus optional effort), separate
+  from `Router.overrides` (tier to model id). A top-tier override still needs approval unless auto top-tier is on.
+- 2026-10-01 (M4): Restore over HTTP is two calls with the user's approval in between: the first proposes a
+  `database_restore` approval (202, `restored: false`), the user approves it, the repeat call consumes the
+  escrowed one-time token and restores. Backups are encrypted files in `<database folder>/backups` and the AES
+  key is created in the keychain (`backup-encryption-key`) on the first backup.
+- 2026-10-01 (M4): API keys saved from the UI go only to the keychain; the settings and providers endpoints never
+  return one and enabling a provider or feature is always its own call.
