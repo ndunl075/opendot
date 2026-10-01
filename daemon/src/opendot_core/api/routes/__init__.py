@@ -43,8 +43,17 @@ def _connect(ctx: ApiContext) -> list[BaseRoute]:
     return connect.routes(ctx)
 
 
+from . import backup_routes, providers_routes, rules_routes, settings_routes, usage_routes  # noqa: E402
+
 #: Every route module, in mount order. Add yours here (one line per module).
-ROUTE_MODULES: list[RouteModule] = [_connect]
+ROUTE_MODULES: list[RouteModule] = [
+    _connect,
+    rules_routes.routes,
+    usage_routes.routes,
+    settings_routes.routes,
+    providers_routes.routes,
+    backup_routes.routes,
+]
 
 
 def build_routes(ctx: ApiContext, modules: list[RouteModule] | None = None) -> list[BaseRoute]:
