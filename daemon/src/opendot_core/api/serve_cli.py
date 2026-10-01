@@ -105,8 +105,26 @@ def build_serve_app(  # noqa: ANN201
         database, registry, tools, api_token=token, actor=getattr(tools, "actor", "owner"), secret_store=secrets
     )
     from ..connections_google import GoogleConnector
+    from ..connector_sync import GITHUB_TOKEN_SECRET, build_syncers
 
-    runtime.app.state.context.extras["secret_store"] = secrets
+    extras = runtime.app.state.context.extras
+    extras["secret_store"] = secrets
+    extras["connector_syncers"] = build_syncers(database, secrets)
+
+    def disconnect_google() -> None:  # Gmail and Calendar share one Google grant
+        extras["google_connector"].disconnect()
+
+    def disconnect_github() -> None:
+        try:
+            secrets.delete(GITHUB_TOKEN_SECRET)
+        except (SecretStoreError, AttributeError):
+            pass
+
+    extras["connector_disconnectors"] = {
+        "gmail": disconnect_google,
+        "google_calendar": disconnect_google,
+        "github": disconnect_github,
+    }
     runtime.app.state.context.extras["google_connector"] = GoogleConnector(
         database, secrets, base_url=f"http://{HOST}:{port}"
     )

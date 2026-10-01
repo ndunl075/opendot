@@ -164,3 +164,22 @@ def test_pending_sign_ins_expire(tmp_path: Path) -> None:
     now[0] = 601.0
     with pytest.raises(GoogleConnectError, match="expired"):
         connector.complete(state=state, code="c")
+
+
+def test_serve_registers_real_syncs_and_disconnects(setup, monkeypatch) -> None:
+    client, runtime, secrets = setup
+    extras = runtime.app.state.context.extras
+    assert set(extras["connector_syncers"]) == {"gmail", "google_calendar", "github"}
+    calls: list[str] = []
+    import opendot_core.connector_sync as connector_sync
+
+    monkeypatch.setattr(connector_sync, "sync_github", lambda database, store: calls.append("github"))
+    extras["connector_syncers"] = connector_sync.build_syncers(runtime.database, secrets)
+    extras["connector_syncers"]["github"]()
+    assert calls == ["github"]
+    secrets.store("github-issue-token", "github_pat_x")
+    extras["connector_disconnectors"]["github"]()
+    assert "github-issue-token" not in secrets.values
+    secrets.store("google-oauth-refresh-token", "1//r")
+    extras["connector_disconnectors"]["gmail"]()
+    assert "google-oauth-refresh-token" not in secrets.values
