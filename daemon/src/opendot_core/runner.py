@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from threading import Lock, Thread
 from typing import Callable, TypeVar
 
@@ -81,6 +82,7 @@ class OpenDotRunner:
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
         quiet_hours: QuietHours | None = None,
+        wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.database = database
         self.telegram_transport = telegram_transport
@@ -101,6 +103,7 @@ class OpenDotRunner:
         self.sleep = sleep
         self.now = now
         self.quiet_hours = quiet_hours or QuietHours.disabled()
+        self.wall_clock = wall_clock
         self._last_synced: dict[str, float] = {}
         self._next_sync_attempt: dict[str, float] = {}
         self._sync_failures: dict[str, int] = {}
@@ -163,7 +166,7 @@ class OpenDotRunner:
             if actions_ok and action_count is not None:
                 actions_executed = int(action_count)
 
-        ran, due_jobs = self._safe("run_due", lambda: JobRunner(self.database).run_due(), errors)
+        ran, due_jobs = self._safe("run_due", lambda: JobRunner(self.database).run_due(self.wall_clock()), errors)
         jobs_executed = len(due_jobs) if ran and due_jobs is not None else 0
 
         # Flushed here, before the agent runs, so the acknowledgement actually
@@ -237,6 +240,16 @@ class OpenDotRunner:
             actions_executed=actions_executed,
             errors=errors,
         )
+
+    def mark_connectors_due(self) -> None:
+        """Make every connector sync once on the next cycle (catch-up after sleep, once each)."""
+        self._last_synced.clear()
+        self._next_sync_attempt.clear()
+        self._sync_failures.clear()
+
+    def handle_restart_request(self) -> bool:
+        """True when a restart was requested (and the restart command has been run)."""
+        return self._restart_requested()
 
     def _sync_connectors(
         self, connectors: tuple[ConnectorSync, ...], errors: list[str]
