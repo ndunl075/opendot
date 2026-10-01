@@ -206,3 +206,12 @@ def test_serve_registers_real_syncs_and_disconnects(setup, monkeypatch) -> None:
     secrets.store("google-oauth-refresh-token", "1//r")
     extras["connector_disconnectors"]["gmail"]()
     assert "google-oauth-refresh-token" not in secrets.values
+
+
+def test_weekly_review_gets_pull_requests_only_with_a_github_token() -> None:
+    from opendot_core.connector_sync import pull_request_report
+
+    secrets = MemorySecrets()
+    assert pull_request_report(secrets) is None
+    secrets.store("github-issue-token", "github_pat_x")
+    assert callable(pull_request_report(secrets))

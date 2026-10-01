@@ -90,10 +90,17 @@ def database_from_args(args: argparse.Namespace) -> Database:
 def _routines_hook(database: Database):  # noqa: ANN202
     """The built-in routines (M4 task 4.5), run once per loop cycle. Each is off until the user enables it,
     and the agent loop for its optional model pass is only built the first time one needs it."""
+    from .connector_sync import pull_request_report
     from .routines import RoutineScheduler
     from .routines.runtime import build_routine_loop
 
-    return RoutineScheduler(database, loop_factory=lambda: build_routine_loop(database)).run_due
+    try:
+        pull_requests = pull_request_report()
+    except Exception:  # no usable keychain: the weekly review simply leaves pull requests out
+        pull_requests = None
+    return RoutineScheduler(
+        database, loop_factory=lambda: build_routine_loop(database), pull_requests=pull_requests
+    ).run_due
 
 
 @contextmanager

@@ -58,6 +58,28 @@ def sync_github(database: Database, secrets: SecretStore) -> Any:
         client.close()
 
 
+def pull_request_report(secrets: SecretStore | None = None) -> Callable[[], Any] | None:
+    """For the weekly review: the open pull requests from GitHub (read-only), or None when no GitHub
+    token is saved. Errors propagate; the review leaves the section out when this fails."""
+    from .pull_requests import PullRequestService
+    from .secret_store import SecretStoreError, SystemKeyringSecretStore
+
+    store = secrets or SystemKeyringSecretStore()
+    try:
+        store.get_required(GITHUB_TOKEN_SECRET)
+    except SecretStoreError:
+        return None
+
+    def report() -> Any:
+        client = GitHubClient(store.get_required(GITHUB_TOKEN_SECRET))
+        try:
+            return PullRequestService(client).get()
+        finally:
+            client.close()
+
+    return report
+
+
 def build_syncers(database: Database, secrets: SecretStore) -> dict[str, Callable[[], Any]]:
     """``{connection id: run one sync}`` for ``ApiContext.extras["connector_syncers"]``."""
     return {
@@ -67,4 +89,4 @@ def build_syncers(database: Database, secrets: SecretStore) -> dict[str, Callabl
     }
 
 
-__all__ = ["build_syncers", "sync_calendar", "sync_github", "sync_gmail"]
+__all__ = ["build_syncers", "pull_request_report", "sync_calendar", "sync_github", "sync_gmail"]

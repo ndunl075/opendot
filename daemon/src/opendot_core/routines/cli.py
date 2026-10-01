@@ -26,10 +26,17 @@ def register(subparsers: Any) -> None:
 def run(args: argparse.Namespace, database: Database, *, scheduler: RoutineScheduler | None = None, out: Any = None) -> int:
     out = out or sys.stdout
     if scheduler is None:
+        from ..connector_sync import pull_request_report
         from .runtime import build_routine_loop
 
+        try:
+            pull_requests = pull_request_report()
+        except Exception:
+            pull_requests = None
         scheduler = RoutineScheduler(
-            database, loop_factory=None if getattr(args, "no_model", False) else lambda: build_routine_loop(database)
+            database,
+            loop_factory=None if getattr(args, "no_model", False) else lambda: build_routine_loop(database),
+            pull_requests=pull_requests,
         )
     try:
         if args.routines_action == "list":
