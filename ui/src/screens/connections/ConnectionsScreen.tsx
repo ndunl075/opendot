@@ -4,6 +4,7 @@ import type { Connection } from "../../api/types.gen";
 import { Badge, Button, Card, Checkbox, ConfirmDialog, Dialog, EmptyState, ErrorState, Skeleton, Switch } from "../../design/components";
 import { ScreenHeading, useMutation, useResource } from "../shared";
 import { appLabels, ConnectionPicker } from "./ConnectionPicker";
+import { GoogleAuthorization } from "./GoogleAuthorization";
 
 const loadConnections = () => api.call("connections_list");
 const healthLabels: Record<Connection["health"], string> = { ok: "OK", stale: "Stale", error: "Error", never_synced: "Never synced" };
@@ -23,7 +24,7 @@ export default function ConnectionsScreen() {
   }
   async function writeAccess(connection: Connection, enabled: boolean) {
     const result = await mutation.run(() => api.call("connection_write_opt_in", { params: { connection_id: connection.id }, body: { enabled } }));
-    if (result) { replace(result); setWrite(undefined); mutation.setNotice(result.write_opt_in ? "Write access is opted in. Creating drafts or events still requires approval. Reconnect if the account needs new Google permissions." : enabled ? "Write access is still off. Reconnect the account if Google needs you to approve new permissions." : "Write access is off."); }
+    if (result) { replace(enabled ? result : { ...result, authorize_url: null }); setWrite(undefined); mutation.setNotice(!enabled ? "Write access is off." : result.authorize_url ? "Google needs your permission before write access is available." : result.write_opt_in && result.read_only === false ? "Write access is opted in. Every draft or event still needs your approval in OpenDot." : "Write access is still off. Try requesting access again."); }
     else setWrite(undefined);
   }
   async function disconnect() {
@@ -43,8 +44,9 @@ export default function ConnectionsScreen() {
       <div className="section-heading"><h2>{appLabels[connection.app]}</h2><Badge tone={connection.health === "ok" ? "success" : connection.health === "error" ? "danger" : "warning"}>{healthLabels[connection.health]}</Badge></div>
       <p>{connection.account_label}</p>{connection.health_detail && <p className="muted">{connection.health_detail}</p>}
       <p className="muted">{connection.last_synced_at ? <>Last synced <time dateTime={connection.last_synced_at}>{new Date(connection.last_synced_at).toLocaleString()}</time></> : "No sync recorded yet"}</p>
-      <Badge>{connection.write_opt_in ? "Write access opted in" : "Read-only"}</Badge>
-      {connection.app !== "github" && connection.write_opt_in_available && <Switch label={writeLabel(connection)} checked={connection.write_opt_in ?? false} disabled={mutation.pending} hint="Off by default. Requires Google write access; each draft or event still needs approval." onChange={event => { if (event.target.checked) setWrite(connection); else void writeAccess(connection, false); }} />}
+      <Badge>{connection.authorize_url ? "Waiting for Google permission" : connection.read_only === false ? "Write access opted in" : connection.read_only === true ? "Read-only" : "Access not reported"}</Badge>
+      {connection.app !== "github" && connection.write_opt_in_available && <Switch label={writeLabel(connection)} checked={connection.write_opt_in ?? false} disabled={mutation.pending} hint="Turning this on asks Google for permission to create drafts or events. Each one still needs your approval in OpenDot." onChange={event => { if (event.target.checked) setWrite(connection); else void writeAccess(connection, false); }} />}
+      {connection.app !== "github" && connection.authorize_url && <><GoogleAuthorization key={connection.authorize_url} app={connection.app} connectionId={connection.id} authorizeUrl={connection.authorize_url} onRefresh={() => void resource.reload()} onRetry={() => void writeAccess(connection, true)} /><Button variant="ghost" disabled={mutation.pending} onClick={() => void writeAccess(connection, false)}>Cancel write access request</Button></>}
       <div className="actions"><Button variant="secondary" disabled={mutation.pending} aria-label={`Sync ${appLabels[connection.app]} now`} onClick={() => void sync(connection)}>Sync now</Button><Button variant="ghost" disabled={mutation.pending} aria-label={`Disconnect ${appLabels[connection.app]}`} onClick={() => { setForget(false); setDisconnecting(connection); }}>Disconnect</Button></div>
     </Card>)}</div> : <EmptyState title="No accounts connected" description="Your companion can work with what you share in chat. Connect an account above whenever you are ready." />}
     <Dialog open={Boolean(disconnecting)} title={`Disconnect ${disconnecting ? appLabels[disconnecting.app] : "account"}?`} onClose={() => { if (!mutation.pending) setDisconnecting(undefined); }} description="Sync will stop and the companion will lose access to this account." initialFocusRef={cancelRef}>
