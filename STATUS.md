@@ -40,6 +40,14 @@ Milestone: **M2 (agent loop, router, usage meter, rules) — DONE** (2026-09-30;
 - [x] 2.8 API server (`api/server.py`, `api/escrow.py`): chat WebSocket and approval endpoints
 - [x] 2.9 cross-vendor review into `docs/reviews/m2.md` (F1 to F16 all fixed, Sol verdict "ready"; one residual risk accepted and carried to M4 tasks 4.4 and 4.8)
 
+- [x] 3.1 TypeScript types from `contract/` with a drift check in the build (Terra)
+- [x] 3.2 design system: tokens, light/dark, IBM Plex Sans, Lucide, code-drawn avatar, app mark (Astra)
+- [ ] 3.3 all v0.1 screens against the mock server (Astra, in progress)
+- [ ] 3.4 Vitest component tests and Playwright end-to-end tests (Terra)
+- [x] 3.5 `opendot serve`: UI and API on 127.0.0.1, token in the OS keychain (`opendot api-token show`)
+- [x] 3.6 Tauri shell: PyInstaller sidecar, start or attach, tray (Open, Pause, Resume, Quit), NSIS installer
+- [ ] 3.7 review of the UI code, accessibility and contract usage into `docs/reviews/m3.md`
+
 ## Notes for M3 and M4
 
 - `agent/runtime.py` `build_agent_runtime` is the production assembly of the agent loop and the API. M3 task 3.5 serves `runtime.app` on 127.0.0.1. The browser WebSocket authenticates with the subprotocols `["opendot", "opendot.bearer.<token>"]` from a local origin.

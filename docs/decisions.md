@@ -118,3 +118,19 @@ section 1. Newest last.
   old corepack shim pointed at an uncached pnpm 12.4.1.
 - 2026-09-30 (M3): Each GPT UI task runs in its own git worktree on branch `m3/<task>` so Opus can
   build daemon and desktop pieces in parallel, then reviews and merges into `m3/base`.
+- 2026-09-30 (M3): `opendot serve` puts the UI and API on one loopback origin. The API accepts only
+  the bearer token (never a cookie, so no cross-site request can act). A browser signs in once at
+  `/login` by pasting the token, which sets an HttpOnly, SameSite=Strict cookie that only unlocks
+  `index.html` with the token in a meta tag. Requests must address a loopback Host (DNS rebinding).
+  Contract endpoints the daemon does not serve yet return 501 `not_implemented`. Reason: the token must
+  never be handed to an unauthenticated local process, and the UI must work before every endpoint
+  is real.
+- 2026-09-30 (M3): The desktop app bundles the UI and passes the token to it through a Tauri
+  initialization script (`window.__OPENDOT__`). It reads the token by running the sidecar's
+  `api-token show` (the same user's keychain), and calls the daemon cross-origin. CORS allows only the
+  Tauri origins. The sidecar is one PyInstaller file that also ships `ui/dist`. Its data lives in the
+  OS app-data folder. The installer is unsigned NSIS until certificates exist (Needs you, before a
+  public release).
+- 2026-09-30 (M3): Package scripts never call `pnpm`, `npm` or `corepack` by name: on this machine
+  `cmd.exe` cannot see them. Nested pnpm goes through `npm_execpath`, the Tauri CLI through Node, and
+  `uv` is found by path search (`UV`, PATH, per-user install folders).
