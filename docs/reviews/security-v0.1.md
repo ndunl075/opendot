@@ -26,4 +26,21 @@ Every finding is fixed or accepted with a reason.
 
 ## Verification
 
-VERIFICATION_PLACEHOLDER
+Each round, Sol (xhigh, read-only, now able to run read-only commands in Codex's unelevated Windows sandbox) re-checked the fix commit.
+
+| Round | Result |
+|---|---|
+| Review | S1 to S6 found. Verdict: not ready until S1 to S6 |
+| 1 | S2 and S6 fixed. S1, S3, S4 and S5 incomplete. New: S7, S8, S9 |
+| 2 | S4, S5, S7, S8 and S9 fixed. S1 and S3 incomplete. New: S10, S11 |
+| 3 | S1, S3, S10 and S11 fixed. New: S12 |
+| 4 | S12 incomplete (open WebSockets). New: S13 |
+| 5 | S12 and S13 fixed. No new findings. **Verdict: ready** |
+
+Also found and fixed during M4, outside Sol's list:
+
+- Reminders, routine results and the catch-up note were queued for `desktop:`/`ui:` destinations that nothing delivered. They now reach the "From your companion" conversation (`companion_inbox.py`).
+- A flaky test exposed a real redaction bug: the credit-card pattern matched about 1 in 800 random memory ids (UUIDs), scrubbing them from the prompt. The redactor now leaves UUID record ids untouched (PR #9).
+- A test once wrote a fake GitHub token into the developer's real keychain; it was removed, and every test now runs against an in-memory keyring (`tests/conftest.py`).
+
+Final local run on the fix branch: 1447 daemon tests passed (6 skipped: POSIX-only checks on Windows; they run on Linux and macOS in CI), and the UI suite and builds passed.
