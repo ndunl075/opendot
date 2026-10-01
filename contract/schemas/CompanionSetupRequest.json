@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "avatar_seed": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Avatar Seed",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "avatar_seed"
+  ],
+  "title": "CompanionSetupRequest",
+  "type": "object"
+}

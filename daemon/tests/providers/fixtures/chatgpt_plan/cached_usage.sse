@@ -1,0 +1,6 @@
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"ok"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","model":"gpt-6-sol","output":[],"usage":{"input_tokens":2000,"input_tokens_details":{"cached_tokens":1792},"output_tokens":50,"output_tokens_details":{"reasoning_tokens":30},"total_tokens":2050}}}
+

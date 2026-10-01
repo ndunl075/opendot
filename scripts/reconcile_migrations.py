@@ -4,7 +4,7 @@ A database can record a migration this build does not ship -- work that was
 applied locally and never reached the branch now checked out. That is harmless
 until one of those records holds a version number a packaged migration also
 claims, because the version is the primary key: the packaged file can never be
-recorded, so ``migrate()`` fails and Alfred will not start.
+recorded, so ``migrate()`` fails and OpenDot will not start.
 
 Reports by default and changes nothing. ``--apply`` removes only the records
 whose files this build does not have, which is what unblocks ``migrate()``.
@@ -32,7 +32,7 @@ _CREATE_TABLE = re.compile(
 
 
 def _packaged_migrations() -> dict[str, Path]:
-    root = Path(__file__).resolve().parent.parent / "src" / "alfred" / "migrations"
+    root = Path(__file__).resolve().parent.parent / "daemon" / "src" / "opendot_core" / "migrations"
     return {path.name: path for path in sorted(root.glob("*.sql"))}
 
 
@@ -73,15 +73,15 @@ def _unaccounted_tables(connection: sqlite3.Connection, expected: set[str]) -> l
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("database", nargs="?", help="path to alfred.db (default: ALFRED_DB_PATH or .alfred/alfred.db)")
+    parser.add_argument("database", nargs="?", help="path to opendot.db (default: OPENDOT_DB_PATH or .opendot/opendot.db)")
     parser.add_argument("--apply", action="store_true", help="delete records this build has no migration for")
     parser.add_argument("--drop-table", action="append", default=[], metavar="NAME",
                         help="also drop this leftover table; refused unless it is empty")
     args = parser.parse_args(argv)
 
-    path = Path(args.database or os.environ.get("ALFRED_DB_PATH") or ".alfred/alfred.db")
+    path = Path(args.database or os.environ.get("OPENDOT_DB_PATH") or ".opendot/opendot.db")
     if not path.exists():
-        print(f"no database at {path}; pass the path or set ALFRED_DB_PATH")
+        print(f"no database at {path}; pass the path or set OPENDOT_DB_PATH")
         return 1
 
     migrations = _packaged_migrations()
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
     ).fetchone()["version"]
     print(f"\ndone. recorded version is now {remaining}.")
-    print("Start Alfred and the packaged migrations will apply the rest.")
+    print("Start OpenDot and the packaged migrations will apply the rest.")
     return 0
 
 

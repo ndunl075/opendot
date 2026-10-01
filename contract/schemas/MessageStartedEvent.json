@@ -1,0 +1,31 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "conversation_id": {
+      "title": "Conversation Id",
+      "type": "string"
+    },
+    "message_id": {
+      "title": "Message Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "type": {
+      "const": "message_started",
+      "default": "message_started",
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "seq",
+    "conversation_id",
+    "message_id"
+  ],
+  "title": "MessageStartedEvent",
+  "type": "object"
+}

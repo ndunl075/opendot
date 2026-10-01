@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "statement": {
+      "minLength": 1,
+      "title": "Statement",
+      "type": "string"
+    }
+  },
+  "required": [
+    "statement"
+  ],
+  "title": "MemoryCorrectRequest",
+  "type": "object"
+}

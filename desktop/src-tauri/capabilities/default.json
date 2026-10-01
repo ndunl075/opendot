@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bundled UI talks to the daemon over HTTP only; it gets no shell, file system or process access.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "forgotten_count": {
+      "title": "Forgotten Count",
+      "type": "integer"
+    },
+    "scope": {
+      "enum": [
+        "item",
+        "source",
+        "time",
+        "person"
+      ],
+      "title": "Scope",
+      "type": "string"
+    }
+  },
+  "required": [
+    "forgotten_count",
+    "scope"
+  ],
+  "title": "MemoryForgetResult",
+  "type": "object"
+}

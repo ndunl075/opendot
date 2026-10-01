@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "The outcome of a user decision on a paused task (continue anyway, allow the top tier).",
+  "properties": {
+    "message": {
+      "default": "",
+      "title": "Message",
+      "type": "string"
+    },
+    "state": {
+      "title": "State",
+      "type": "string"
+    },
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "state"
+  ],
+  "title": "TaskActionResult",
+  "type": "object"
+}

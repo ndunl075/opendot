@@ -1,0 +1,273 @@
+"""Durable Telegram approvals for OpenDot's existing safe action proposals."""
+
+from __future__ import annotations
+
+import secrets
+import sqlite3
+from datetime import UTC, datetime, timedelta
+from typing import Any, Callable
+
+from .action_executor import ActionExecutor
+from .audit import AuditEvent, AuditLog
+from .db import Database
+from .outbox import Outbox
+from .policy import ApprovalService
+from .secret_store import SystemKeyringSecretStore
+
+ACTION_LABELS = {
+    "calendar_event_create": "calendar event",
+    "gmail_draft_create": "email draft",
+    "gmail_message_send": "send email",
+    "github_issue_create": "GitHub issue",
+    "composio_tool_execute": "Composio action",
+    "memory_forget": "forget request",
+}
+
+
+#: How much of a body to show before trimming. Long enough for a real email
+#: to be read in full on a phone, short enough that the buttons stay on
+#: screen -- an approval the owner has to scroll past is one they approve
+#: without reading.
+PREVIEW_BODY_CHARS = 900
+
+
+def action_preview(action_type: str, preview: dict[str, Any]) -> str:
+    """Render what will actually happen, from the stored approval record.
+
+    The agent already describes its own proposal in prose, but that is the
+    model's account of what it did, written before the record existed and
+    free to differ from it. "i queued it up with the subject 'hi, it's
+    opendot'" told the owner the subject and nothing else, so approving meant
+    sending a letter they had never read.
+
+    This reads the record the executor will use, so what is shown and what is
+    sent cannot disagree.
+    """
+    if action_type in {"gmail_message_send", "gmail_draft_create"}:
+        lines = [f"to: {preview.get('to', '(no recipient)')}",
+                 f"subject: {preview.get('subject') or '(no subject)'}"]
+        body = str(preview.get("body") or "").strip()
+        if body:
+            lines.append("")
+            lines.append(_trim(body))
+        return "\n".join(lines)
+    if action_type == "calendar_event_create":
+        return "\n".join(
+            [
+                f"event: {preview.get('summary') or '(untitled)'}",
+                f"starts: {preview.get('start', '?')}",
+                f"ends: {preview.get('end', '?')}",
+            ]
+        )
+    if action_type == "github_issue_create":
+        lines = [f"repo: {preview.get('repository', '?')}",
+                 f"title: {preview.get('title') or '(untitled)'}"]
+        body = str(preview.get("body") or "").strip()
+        if body:
+            lines.append("")
+            lines.append(_trim(body))
+        return "\n".join(lines)
+    return ""
+
+
+def _trim(body: str) -> str:
+    if len(body) <= PREVIEW_BODY_CHARS:
+        return body
+    # Cut on a line break where possible so a trimmed letter still ends on a
+    # readable boundary rather than mid-word.
+    cut = body.rfind("\n", 0, PREVIEW_BODY_CHARS)
+    if cut < PREVIEW_BODY_CHARS // 2:
+        cut = PREVIEW_BODY_CHARS
+    return body[:cut].rstrip() + "\n[...]"
+
+
+def action_keyboard(
+    approvals: list[tuple[str, str]],
+) -> dict[str, list[list[dict[str, str]]]]:
+    """The only keyboard OpenDot still sends: a write it may not perform alone.
+
+    This used to carry the response-feedback buttons underneath as well.
+    Ratings are now inferred from the conversation, so a keyboard appearing at
+    all means a decision is actually waiting on the owner.
+    """
+    rows: list[list[dict[str, str]]] = []
+    for approval_id, _action_type in approvals[:3]:
+        # Cancel first so approve sits on the right, under the thumb and away
+        # from it. The label is bare "approve" because the message above
+        # already says what is being approved -- "approve send email" next to
+        # "cancel" made the destructive-looking button the wide one and read
+        # like a second description rather than a choice.
+        rows.append(
+            [
+                {"text": "cancel", "callback_data": f"aa:{approval_id}:n"},
+                {"text": "approve", "callback_data": f"aa:{approval_id}:y"},
+            ]
+        )
+    return {"inline_keyboard": rows}
+
+
+class TelegramActionWorker:
+    """Execute button decisions outside Telegram intake's database transaction."""
+
+    actor = "mcp:agent"
+
+    def __init__(
+        self,
+        database: Database,
+        *,
+        executor: Callable[[str, str, str], dict[str, Any]] | None = None,
+        secret_store: SystemKeyringSecretStore | None = None,
+        max_attempts: int = 3,
+    ) -> None:
+        self.database = database
+        self.approvals = ApprovalService(database)
+        self.secrets = secret_store or SystemKeyringSecretStore()
+        self.executor = executor or self._execute
+        self.max_attempts = max_attempts
+
+    def run_pending(self, *, limit: int = 5) -> int:
+        self.database.migrate()
+        handled = 0
+        for _ in range(limit):
+            intent = self._claim()
+            if intent is None:
+                break
+            try:
+                if intent["decision"] == "reject":
+                    self.approvals.reject(intent["approval_id"], actor=self.actor)
+                    message = "cancelled. nothing changed."
+                else:
+                    token = self._approval_token(intent["approval_id"])
+                    approval = self.approvals.get(intent["approval_id"])
+                    if approval is not None and approval.state == "pending":
+                        self.approvals.approve_with_token(
+                            intent["approval_id"], actor=self.actor, token=token
+                        )
+                    result = self.executor(intent["approval_id"], self.actor, token)
+                    message = self._success_message(intent["action_type"], result)
+                self._complete(intent, message)
+                if intent["decision"] == "approve":
+                    self.secrets.delete(self._secret_name(intent["approval_id"]))
+                handled += 1
+            except Exception as error:
+                self._retry_or_fail(intent, error)
+        return handled
+
+    def _execute(self, approval_id: str, actor: str, token: str) -> dict[str, Any]:
+        return ActionExecutor(self.database).execute(approval_id, actor=actor, token=token)
+
+    def _approval_token(self, approval_id: str) -> str:
+        name = self._secret_name(approval_id)
+        existing = self.secrets.get_optional(name)
+        if existing:
+            return existing
+        token = "alf_" + secrets.token_urlsafe(32)
+        self.secrets.store(name, token)
+        return token
+
+    @staticmethod
+    def _secret_name(approval_id: str) -> str:
+        return f"telegram-approval-{approval_id}"
+
+    def _claim(self) -> sqlite3.Row | None:
+        now = datetime.now(UTC).isoformat()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                row = connection.execute(
+                    """
+                    SELECT i.*, l.chat_id, l.action_type
+                    FROM telegram_action_intents i
+                    JOIN telegram_action_links l USING (approval_id)
+                    WHERE i.state IN ('pending', 'running')
+                      AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= ?)
+                    ORDER BY i.created_at
+                    LIMIT 1
+                    """,
+                    (now,),
+                ).fetchone()
+                if row is None:
+                    return None
+                connection.execute(
+                    """
+                    UPDATE telegram_action_intents
+                    SET state = 'running', attempts = attempts + 1, updated_at = ?
+                    WHERE approval_id = ?
+                    """,
+                    (now, row["approval_id"]),
+                )
+                return row
+
+    def _complete(self, intent: sqlite3.Row, message: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """
+                    UPDATE telegram_action_intents
+                    SET state = 'completed', updated_at = ?, completed_at = ?, last_error = NULL
+                    WHERE approval_id = ?
+                    """,
+                    (now, now, intent["approval_id"]),
+                )
+                Outbox.enqueue(
+                    connection,
+                    destination=f"telegram:{intent['chat_id']}",
+                    payload={"text": message},
+                    idempotency_key=f"telegram-action-result:{intent['approval_id']}",
+                )
+                AuditLog.append_in_transaction(
+                    connection,
+                    AuditEvent(
+                        actor="owner:telegram",
+                        client="telegram",
+                        tool="telegram_action",
+                        outcome="completed",
+                        result={
+                            "approval_id": intent["approval_id"],
+                            "decision": intent["decision"],
+                            "action_type": intent["action_type"],
+                        },
+                        correlation_id=intent["approval_id"],
+                    ),
+                )
+
+    def _retry_or_fail(self, intent: sqlite3.Row, error: Exception) -> None:
+        attempts = int(intent["attempts"]) + 1
+        final = attempts >= self.max_attempts
+        now = datetime.now(UTC)
+        retry_at = None if final else (now + timedelta(seconds=30 * attempts)).isoformat()
+        with self.database.connect() as connection:
+            with self.database.transaction(connection):
+                connection.execute(
+                    """
+                    UPDATE telegram_action_intents
+                    SET state = ?, next_attempt_at = ?, last_error = ?, updated_at = ?
+                    WHERE approval_id = ?
+                    """,
+                    (
+                        "failed" if final else "pending",
+                        retry_at,
+                        error.__class__.__name__,
+                        now.isoformat(),
+                        intent["approval_id"],
+                    ),
+                )
+                if final:
+                    Outbox.enqueue(
+                        connection,
+                        destination=f"telegram:{intent['chat_id']}",
+                        payload={"text": "I couldn't finish that action. nothing else was attempted."},
+                        idempotency_key=f"telegram-action-failed:{intent['approval_id']}",
+                    )
+
+    @staticmethod
+    def _success_message(action_type: str, result: dict[str, Any]) -> str:
+        messages = {
+            "calendar_event_create": "done — it’s on your calendar.",
+            "gmail_draft_create": "done — the email draft is ready.",
+            "gmail_message_send": "sent.",
+            "github_issue_create": "done — the GitHub issue is open.",
+            "composio_tool_execute": "done — the Composio action finished.",
+            "memory_forget": "done — I forgot it.",
+        }
+        return messages.get(action_type, "done.")

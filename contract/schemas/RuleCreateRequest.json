@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "minLength": 1,
+      "title": "Action",
+      "type": "string"
+    },
+    "behavior": {
+      "enum": [
+        "auto",
+        "auto_if_preapproved",
+        "ask",
+        "handoff"
+      ],
+      "title": "Behavior",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "action",
+    "behavior"
+  ],
+  "title": "RuleCreateRequest",
+  "type": "object"
+}

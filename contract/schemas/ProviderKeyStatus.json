@@ -1,0 +1,24 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "key_saved": {
+      "title": "Key Saved",
+      "type": "boolean"
+    },
+    "provider": {
+      "enum": [
+        "openai_key",
+        "anthropic_key",
+        "openrouter"
+      ],
+      "title": "Provider",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "key_saved"
+  ],
+  "title": "ProviderKeyStatus",
+  "type": "object"
+}

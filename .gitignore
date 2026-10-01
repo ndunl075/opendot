@@ -16,4 +16,16 @@ fixes.patch
 habits.patch
 deploy/couchdb/data/
 deploy/couchdb/config/
+ui/node_modules/
+ui/dist/
+ui/test-results/
+ui/playwright-report/
 .alfred/backup-verify.log
+
+# desktop (M3)
+desktop/node_modules/
+desktop/.sidecar-build/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+desktop/src-tauri/gen/
+desktop/src-tauri/icons/

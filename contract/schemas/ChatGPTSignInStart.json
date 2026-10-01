@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "authorize_url": {
+      "title": "Authorize Url",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "poll_interval_seconds": {
+      "default": 2,
+      "title": "Poll Interval Seconds",
+      "type": "integer"
+    },
+    "state": {
+      "enum": [
+        "signed_out",
+        "pending",
+        "signed_in",
+        "error"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "state",
+    "authorize_url",
+    "expires_at"
+  ],
+  "title": "ChatGPTSignInStart",
+  "type": "object"
+}

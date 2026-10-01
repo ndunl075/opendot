@@ -1,0 +1,43 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "default": 25,
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+    },
+    "person": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Person"
+    },
+    "q": {
+      "default": "",
+      "title": "Q",
+      "type": "string"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source"
+    }
+  },
+  "title": "MemorySearchQuery",
+  "type": "object"
+}

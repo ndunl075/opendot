@@ -10,7 +10,7 @@ Which build slice (section 10) or connector-order phase (section 9) is this
 part of? If it doesn't fit anywhere yet, say so — it may need an architecture
 decision (section 1) before any code.
 
-**What should Alfred do**
+**What should OpenDot do**
 
 **Why now**
 What's blocked or worse without it. If it depends on something only the

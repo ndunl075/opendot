@@ -1,0 +1,191 @@
+{
+  "$defs": {
+    "KeepAwakeSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "only_while_plugged_in": {
+          "default": true,
+          "title": "Only While Plugged In",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "KeepAwakeSettings",
+      "type": "object"
+    },
+    "ModelTierOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "job_type": {
+          "title": "Job Type",
+          "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "luna",
+            "terra",
+            "sol"
+          ],
+          "title": "Tier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_type",
+        "tier"
+      ],
+      "title": "ModelTierOverride",
+      "type": "object"
+    },
+    "QuietHoursSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "end": {
+          "pattern": "^\\d{2}:\\d{2}$",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "pattern": "^\\d{2}:\\d{2}$",
+          "title": "Start",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "start",
+        "end",
+        "timezone"
+      ],
+      "title": "QuietHoursSettings",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "auto_top_tier": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Auto Top Tier"
+    },
+    "keep_awake": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KeepAwakeSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "provider_opt_ins": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "propertyNames": {
+            "enum": [
+              "chatgpt_plan",
+              "openai_key",
+              "anthropic_key",
+              "openrouter",
+              "local"
+            ]
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider Opt Ins"
+    },
+    "quiet_hours": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QuietHoursSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "style_preset": {
+      "anyOf": [
+        {
+          "enum": [
+            "concise",
+            "warm",
+            "formal",
+            "playful"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Style Preset"
+    },
+    "tier_overrides": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ModelTierOverride"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tier Overrides"
+    }
+  },
+  "title": "SettingsUpdateRequest",
+  "type": "object"
+}

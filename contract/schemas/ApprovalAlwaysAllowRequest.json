@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "behavior": {
+      "default": "auto_if_preapproved",
+      "enum": [
+        "auto",
+        "auto_if_preapproved"
+      ],
+      "title": "Behavior",
+      "type": "string"
+    },
+    "scope_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope Note"
+    }
+  },
+  "title": "ApprovalAlwaysAllowRequest",
+  "type": "object"
+}

@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "days": {
+      "default": 7,
+      "maximum": 90,
+      "minimum": 1,
+      "title": "Days",
+      "type": "integer"
+    }
+  },
+  "title": "UsageQuery",
+  "type": "object"
+}

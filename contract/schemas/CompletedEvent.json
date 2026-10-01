@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "UsageStamp": {
+      "additionalProperties": false,
+      "properties": {
+        "cached_input_tokens": {
+          "default": 0,
+          "title": "Cached Input Tokens",
+          "type": "integer"
+        },
+        "credits": {
+          "title": "Credits",
+          "type": "number"
+        },
+        "effort": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Effort",
+          "type": "string"
+        },
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "output_tokens": {
+          "default": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "effort",
+        "credits"
+      ],
+      "title": "UsageStamp",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "conversation_id": {
+      "title": "Conversation Id",
+      "type": "string"
+    },
+    "message_id": {
+      "title": "Message Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "type": {
+      "const": "completed",
+      "default": "completed",
+      "title": "Type",
+      "type": "string"
+    },
+    "usage": {
+      "$ref": "#/$defs/UsageStamp"
+    }
+  },
+  "required": [
+    "seq",
+    "conversation_id",
+    "message_id",
+    "usage",
+    "text"
+  ],
+  "title": "CompletedEvent",
+  "type": "object"
+}

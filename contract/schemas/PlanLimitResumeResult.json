@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "resumed_task_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Resumed Task Ids",
+      "type": "array"
+    }
+  },
+  "title": "PlanLimitResumeResult",
+  "type": "object"
+}

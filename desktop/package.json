@@ -1,0 +1,18 @@
+{
+  "name": "opendot-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.34.6",
+  "scripts": {
+    "build:ui": "node scripts/build-ui.mjs",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
+    "build:app": "node scripts/build-app.mjs",
+    "build": "node scripts/build-ui.mjs && node scripts/build-sidecar.mjs && node scripts/build-icons.mjs && node scripts/build-app.mjs",
+    "dev": "node scripts/build-app.mjs dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1"
+  }
+}

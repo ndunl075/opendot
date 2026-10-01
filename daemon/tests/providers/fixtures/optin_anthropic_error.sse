@@ -1,0 +1,5 @@
+data: {"type":"message_start","message":{"model":"claude-sonnet-5","usage":{"input_tokens":40}}}
+
+event: error
+data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+

@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "title": "Api Version",
+      "type": "string"
+    },
+    "build": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Build"
+    },
+    "daemon_version": {
+      "title": "Daemon Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "daemon_version",
+    "api_version",
+    "schema_version"
+  ],
+  "title": "VersionResponse",
+  "type": "object"
+}

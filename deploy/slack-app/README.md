@@ -1,7 +1,7 @@
 # Slack setup
 
-Slack is optional, and Alfred only ever talks to it through Socket
-Mode — an outbound WebSocket connection Alfred opens, not an inbound
+Slack is optional, and OpenDot only ever talks to it through Socket
+Mode — an outbound WebSocket connection OpenDot opens, not an inbound
 webhook or a public URL. Nothing about this needs a tunnel, a domain, or
 an open port.
 
@@ -27,7 +27,7 @@ token, or invite the bot anywhere — those stay manual on purpose, since
 they're workspace-specific decisions a checked-in file shouldn't make for
 you.
 
-## 2. Generate the two tokens Alfred needs
+## 2. Generate the two tokens OpenDot needs
 
 - **App-level token** (`slack-app-token`): in the app's **Basic
   Information** page, under **App-Level Tokens**, generate one with the
@@ -38,8 +38,8 @@ you.
   (starts `xoxb-`). This is what posts messages and reads the events the
   manifest subscribed to.
 
-Save the app-level token under service `alfred`, account `slack-app-token`,
-and the bot token under service `alfred`, account `slack-bot-token`, in
+Save the app-level token under service `opendot`, account `slack-app-token`,
+and the bot token under service `opendot`, account `slack-bot-token`, in
 your OS credential manager. Never put either token in a config file, the
 database, or a commit —
 `SlackBotClient`/`SlackSocketReceiver` only ever read them from the OS
@@ -48,7 +48,7 @@ credential store, matching every other connector's credential handling.
 ## 3. Invite the bot and find your IDs
 
 Invite the bot user to whichever channel you want paired (`/invite
-@Alfred` in that channel). You need two IDs:
+@OpenDot` in that channel). You need two IDs:
 
 - **Channel ID**: right-click the channel → **View channel details** →
   it's at the bottom (starts `C`).
@@ -58,11 +58,11 @@ Invite the bot user to whichever channel you want paired (`/invite
 ## 4. Pair it and run
 
 ```powershell
-.\.venv\Scripts\alfred run --slack-pair CHANNEL_ID:USER_ID --slack-channel-id CHANNEL_ID
+.\.venv\Scripts\opendot run --slack-pair CHANNEL_ID:USER_ID --slack-channel-id CHANNEL_ID
 ```
 
 Only messages from that exact channel/user pair are accepted — everything
 else is rejected and audited, the same default-deny rule Telegram pairing
 uses. Send `/task <title>` or `/remind <ISO-8601 time> <title>` in the
-paired channel to confirm intake works, then check `alfred connector-status`
+paired channel to confirm intake works, then check `opendot connector-status`
 or the admin dashboard's Connectors page.

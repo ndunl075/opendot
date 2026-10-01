@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in Alfred behaved incorrectly
+about: Something in OpenDot behaved incorrectly
 title: ""
 labels: bug
 ---
@@ -19,10 +19,10 @@ token, email address, or personal content — paste the shape of the data, not
 the data itself.
 
 **Relevant output**
-`alfred status`, the specific error, or the audit record (`alfred audit-verify`
+`opendot status`, the specific error, or the audit record (`opendot audit-verify`
 if a hash-chain issue is suspected).
 
 **Environment**
 - OS:
 - Python version:
-- `alfred` version / commit:
+- `opendot` version / commit:
