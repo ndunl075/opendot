@@ -547,8 +547,8 @@ def choose_task_tool_group(
     review S4). Returned sorted by name, so the stable prompt prefix is byte-identical per group.
     """
     offered = sorted(set(available))
-    if len(offered) <= MAX_TOOLS_PER_GROUP:
-        return offered
+    if read_only is None and len(offered) <= MAX_TOOLS_PER_GROUP:
+        return offered  # an executor that declares nothing (tests, the scenario harness)
     wanted = select_tool_group(message)
     rank = {name: index for index, name in enumerate(_TOOL_PRIORITY)}
     chosen = sorted((name for name in offered if name in wanted), key=lambda name: (rank.get(name, len(rank)), name))

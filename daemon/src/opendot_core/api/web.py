@@ -5,8 +5,9 @@
 - ``/v1/*`` is the API app from ``api/server.py``: bearer token on every route, the chat
   WebSocket authenticates with its subprotocol. The API never accepts cookies at all, so a
   cross-site form can never act for the user.
-- A browser signs in once at ``/login`` by pasting the token (``opendot api-token show``). The page
-  checks it against the API and keeps it in this origin's localStorage; the daemon never puts the
+- A browser signs in at ``/login`` by pasting the token (``opendot api-token show``). The page trades
+  it for a session token (``POST /v1/session``) that lives only in the daemon's memory and dies when
+  the daemon restarts, and keeps only that in this origin's localStorage. The daemon never puts a
   token in a cookie (cookies are shared by every port on 127.0.0.1) or in a page it serves.
   ``index.html`` is public and holds no secrets.
 - Built assets (``/assets/...``) are public: they are the same for everyone and hold no secrets.
@@ -38,7 +39,7 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "https://tauri.localhost")
 
 TOKEN_STORAGE_KEY = "opendot.token"
-"""Where the web UI keeps the access token: the browser's localStorage for exactly this origin
+"""Where the web UI keeps its session token (never the long-lived access token): the browser's localStorage for exactly this origin
 (scheme, host and port), which no other local port can read. Never a cookie: cookies are shared by
 every port on 127.0.0.1, so any local process listening on another port would receive one
 (v0.1 security review S2)."""
@@ -77,9 +78,12 @@ document.getElementById("login").addEventListener("submit", async (event) => {
   const error = document.getElementById("error");
   error.textContent = "";
   try {
-    const response = await fetch("/v1/health", { headers: { Authorization: "Bearer " + token } });
+    // Trade the long-lived access token for a session token that dies when the daemon restarts; only
+    // the session token is kept in this browser (security review S8).
+    const response = await fetch("/v1/session", { method: "POST", headers: { Authorization: "Bearer " + token } });
     if (!response.ok) { error.textContent = "That token is not right."; return; }
-    localStorage.setItem("opendot.token", token);
+    const body = await response.json();
+    localStorage.setItem("opendot.token", body.session_token);
     location.replace("/");
   } catch (e) {
     error.textContent = "OpenDot is not answering. Is it running?";
@@ -196,10 +200,14 @@ def _authorized(scope: Scope, api_app: Starlette) -> bool:
     token = getattr(api_app.state, "api_token", None)
     if not token:
         return False
+    sessions = getattr(api_app.state, "sessions", None)
     for key, value in scope.get("headers", []):
         if key == b"authorization":
             prefix, _, rest = value.partition(b" ")
-            return prefix.lower() == b"bearer" and secrets.compare_digest(rest.strip(), token.encode())
+            supplied = rest.strip()
+            if prefix.lower() != b"bearer" or not supplied:
+                return False
+            return secrets.compare_digest(supplied, token.encode()) or (sessions is not None and sessions.valid(supplied))
     return False
 
 
@@ -211,8 +219,8 @@ def create_web_app(api_app: Starlette, *, token: str, ui_dist: Path | None) -> A
     index_path = ui_dist / "index.html" if ui_dist is not None else None
 
     async def login(_: Request) -> Response:
-        # The page checks the pasted token against the API itself and keeps it in this origin's
-        # localStorage; the daemon never puts the token in a cookie or a page.
+        # The page trades the pasted token for a session token and keeps only that in this origin's
+        # localStorage; the daemon never puts a token in a cookie or a page.
         return HTMLResponse(LOGIN_PAGE, headers=_PAGE_HEADERS)
 
     async def logout(_: Request) -> Response:

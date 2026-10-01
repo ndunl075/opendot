@@ -67,9 +67,9 @@ def _connection(ctx: ApiContext, app: str) -> Connection:
         id=app,
         app=app,  # type: ignore[arg-type]
         account_label="Google account",
-        health="ok" if connector.connected() else "never_synced",  # type: ignore[arg-type]
-        read_only=not connector.write_allowed(),
-        write_opt_in=bool(state.get("write_opt_in")),
+        health="ok" if connector.app_connected(app) else "never_synced",  # type: ignore[arg-type]
+        read_only=not connector.write_allowed(app),
+        write_opt_in=bool(state["write_opt_in"].get(app)),
         write_opt_in_available=connector.client_configured(),
     )
 
@@ -122,7 +122,7 @@ def routes(ctx: ApiContext) -> list[Route]:
         if body.app == "github":
             return _error(400, "use_github_token", "GitHub connects with a personal access token: save one instead.")
         try:
-            url, state = await asyncio.to_thread(google_connector(ctx).start)
+            url, state = await asyncio.to_thread(google_connector(ctx).start, body.app)
         except GoogleConnectError as error:
             return _error(409, "google_client_missing", str(error))
         return JSONResponse(ConnectionStart(app=body.app, authorize_url=url, state=state).model_dump(mode="json"))
@@ -133,7 +133,7 @@ def routes(ctx: ApiContext) -> list[Route]:
             return _error(404, "not_found", "Only Gmail and Google Calendar have a write opt-in.")
         try:
             body: ConnectionWriteOptInRequest = await _body(request, ConnectionWriteOptInRequest)
-            _, url = await asyncio.to_thread(google_connector(ctx).set_write_opt_in, body.enabled)
+            _, url = await asyncio.to_thread(google_connector(ctx).set_write_opt_in, app, body.enabled)
         except ValidationError as error:
             return _error(422, "invalid_request", str(error.errors()[0]["msg"]))
         except GoogleConnectError as error:

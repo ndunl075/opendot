@@ -29,7 +29,12 @@ def allow_google_writes(path: Path) -> None:
     from opendot_core.settings_store import SettingsStore
 
     SettingsStore(Database(path)).set(
-        "google_connection", {"write_opt_in": True, "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES]}
+        "google_connection",
+        {
+            "apps": ["gmail", "google_calendar"],
+            "write_opt_in": {"gmail": True, "google_calendar": True},
+            "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES],
+        },
     )
 
 
@@ -129,3 +134,40 @@ def test_s4_unrequested_write_tools_are_never_offered(db_path: Path) -> None:
     assert writes == set(), f"unrequested write tools offered: {writes}"
     asked = choose_task_tool_group("remind me to stretch at 5", available, read_only)
     assert "reminder_set" in asked  # a write the user asked for is still offered
+
+
+def test_s9_each_google_app_write_switch_offers_only_its_own_tools(db_path: Path) -> None:
+    from opendot_core.google_oauth import READ_SCOPES, WRITE_SCOPES
+    from opendot_core.settings_store import SettingsStore
+
+    SettingsStore(Database(db_path)).set(
+        "google_connection",
+        {
+            "apps": ["gmail", "google_calendar"],
+            "write_opt_in": {"gmail": True},
+            "granted_scopes": [*READ_SCOPES, *WRITE_SCOPES],
+        },
+    )
+    names = {spec.name for spec in McpTools(db_path).specs()}
+    assert {"message_draft", "message_send_propose"} <= names
+    assert "calendar_event_propose" not in names
+
+
+def test_s4_the_production_wrapper_keeps_unrequested_writes_out(tmp_path: Path, db_path: Path) -> None:
+    """The runtime wraps McpTools in ApprovalGatedTools; the read-only list must survive that."""
+    provider = ScriptedProvider([text_turn("ok")])
+    registry = ProviderRegistry(ProviderSettings(enabled={"chatgpt_plan"}))
+    registry.register(provider)
+    tools = McpTools(db_path)
+    runtime = build_agent_runtime(Database(db_path), registry, tools, api_token="t" * 32, actor=tools.actor)
+    assert runtime.tools.read_only_tools() == tools.read_only_tools()
+    task_id = runtime.loop.start_task("what's on my calendar today?")
+    group = runtime.loop.task(task_id).tool_group
+    assert group and not [name for name in group if TOOL_FACTS[name].writes]
+
+
+def test_s4_small_declared_sets_are_filtered_too() -> None:
+    from opendot_core.agent.tool_groups import choose_task_tool_group
+
+    group = choose_task_tool_group("hello there", ["agenda_get", "task_schedule"], frozenset({"agenda_get"}))
+    assert group == ["agenda_get"]

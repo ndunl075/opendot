@@ -92,9 +92,29 @@ fn verify_identity(token: &str) -> bool {
     expected.len() == proof.len() && expected.bytes().zip(proof.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
+fn mint_session(token: &str) -> Result<String, String> {
+    let response = ureq::post(&format!("{}/v1/session", base_url()))
+        .timeout(Duration::from_secs(5))
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| format!("could not start a session: {e}"))?;
+    let body: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
+    body.get("session_token")
+        .and_then(|value| value.as_str())
+        .filter(|value| value.starts_with("ods_"))
+        .map(str::to_owned)
+        .ok_or_else(|| "the daemon returned no session token".into())
+}
+
 fn sidecar_command(app: &AppHandle) -> Result<tauri_plugin_shell::process::Command, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        // Owner-only before the daemon writes anything there (security review S3).
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
     let db = data_dir.join("opendot.db");
     Ok(app
         .shell()
@@ -192,8 +212,14 @@ pub fn run() {
                 eprintln!("{error}");
                 String::new()
             });
+            // Prove the daemon is ours, then trade the long-lived token for a session token that dies
+            // when the daemon restarts. Only the session token reaches the webview and the tray, so a
+            // program that later takes over the port can capture nothing still valid (review S1, S8).
             let token = if verify_identity(&token) {
-                token
+                mint_session(&token).unwrap_or_else(|error| {
+                    eprintln!("{error}");
+                    String::new()
+                })
             } else {
                 eprintln!("the program on port {PORT} could not prove it is OpenDot; not sending it the token");
                 String::new()

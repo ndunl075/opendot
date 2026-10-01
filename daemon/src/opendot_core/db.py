@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import stat
+import sys
 from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
@@ -21,13 +23,20 @@ class MigrationConflict(RuntimeError):
     """
 
 
+_WARNED: set[str] = set()
+
+
 def _restrict(path: Path, mode: int) -> None:
     if os.name != "posix":
         return
     try:
-        os.chmod(path, mode)
-    except OSError:
-        pass  # not ours to change (for example a shared mount); doctor reports loose permissions
+        if stat.S_IMODE(path.stat().st_mode) != mode:
+            os.chmod(path, mode)
+    except OSError as error:
+        if str(path) not in _WARNED:  # say so once instead of silently leaving it readable
+            _WARNED.add(str(path))
+            print(f"warning: could not make {path} private ({error.strerror}); other users may read it",
+                  file=sys.stderr)
 
 
 def _migration_version(filename: str) -> int:
@@ -42,9 +51,14 @@ class Database:
 
     def connect(self) -> sqlite3.Connection:
         """Open a connection configured for durable local use."""
-        if not self.path.parent.exists():
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            _restrict(self.path.parent, 0o700)
+        parent = self.path.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+            _restrict(parent, 0o700)
+        elif "opendot" in parent.name.lower():
+            # OpenDot's own data folder (for example one the desktop app created before the daemon's
+            # umask applied): owner-only. A folder the user chose for --db is left as it is.
+            _restrict(parent, 0o700)
         connection = sqlite3.connect(self.path)
         self.secure_files()
         connection.row_factory = sqlite3.Row

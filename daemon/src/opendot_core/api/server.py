@@ -143,6 +143,41 @@ def identity_proof(token: str, nonce: str) -> str:
     return hmac.new(token.encode(), IDENTITY_LABEL + nonce.encode(), hashlib.sha256).hexdigest()
 
 
+SESSION_PATH = "/v1/session"
+
+
+class SessionTokens:
+    """Short-lived credentials for the UI and the desktop shell (security review S1, S8).
+
+    Only the long-lived access token can mint one (POST /v1/session). They live in this process's
+    memory only, so every daemon restart invalidates them: a process that takes over the port after
+    the daemon stops can only capture a token that is already dead. Stored as hashes."""
+
+    def __init__(self, limit: int = 64) -> None:
+        self._hashes: collections.OrderedDict[bytes, None] = collections.OrderedDict()
+        self._limit = limit
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _hash(token: bytes) -> bytes:
+        return hashlib.sha256(token).digest()
+
+    def mint(self) -> str:
+        token = "ods_" + secrets.token_urlsafe(32)
+        with self._lock:
+            self._hashes[self._hash(token.encode())] = None
+            while len(self._hashes) > self._limit:
+                self._hashes.popitem(last=False)
+        return token
+
+    def valid(self, supplied: bytes) -> bool:
+        if not supplied.startswith(b"ods_"):
+            return False
+        digest = self._hash(supplied)
+        with self._lock:
+            return any(secrets.compare_digest(digest, known) for known in self._hashes)
+
+
 class BearerAuth:
     """Pure ASGI middleware: reject HTTP and WebSocket requests without the right bearer token.
 
@@ -150,9 +185,10 @@ class BearerAuth:
     token as an offered subprotocol, and also checks the Origin header.
     """
 
-    def __init__(self, app: ASGIApp, token: str) -> None:
+    def __init__(self, app: ASGIApp, token: str, sessions: SessionTokens | None = None) -> None:
         self.app = app
         self._token = token.encode()
+        self._sessions = sessions
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
@@ -173,7 +209,12 @@ class BearerAuth:
             elif key == b"origin":
                 origin = value.decode("latin-1")
         allowed_origin = scope["type"] != "websocket" or origin_allowed(origin)
-        if supplied and allowed_origin and secrets.compare_digest(supplied, self._token):
+        long_lived = bool(supplied) and secrets.compare_digest(supplied, self._token)
+        if scope["type"] == "http" and scope.get("path") == SESSION_PATH:
+            accepted = long_lived  # only the long-lived token can mint a session
+        else:
+            accepted = long_lived or (bool(supplied) and self._sessions is not None and self._sessions.valid(supplied))
+        if accepted and allowed_origin:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "websocket":
@@ -422,6 +463,7 @@ def create_app(
     if not token:
         raise ValueError("an API token is required")
     hub = ChatHub(loop, approvals)
+    sessions = SessionTokens()
     started = time.monotonic()
     created_at = datetime.now(UTC)
 
@@ -474,6 +516,9 @@ def create_app(
         if not (32 <= len(nonce) <= 128) or not all(ch in "0123456789abcdef" for ch in nonce):
             return _error(400, "invalid_nonce", "Send a fresh random hex nonce (32 to 128 hex digits).")
         return JSONResponse({"daemon": "opendot", "proof": identity_proof(token, nonce)})
+
+    async def session(_: Request) -> Response:
+        return JSONResponse({"session_token": sessions.mint()})
 
     async def health(_: Request) -> Response:
         body = HealthResponse(
@@ -636,6 +681,7 @@ def create_app(
     routes: list[Route | WebSocketRoute] = [
         Route(f"{v}/health", health, methods=["GET"]),
         Route(IDENTITY_PATH, identity, methods=["GET"]),
+        Route(SESSION_PATH, session, methods=["POST"]),
         Route(f"{v}/chat/messages", chat_send, methods=["POST"]),
         Route(f"{v}/approvals", approvals_list, methods=["GET"]),
         Route(f"{v}/approvals/{{approval_id}}", approval_get, methods=["GET"]),
@@ -665,7 +711,8 @@ def create_app(
             raise ValueError(f"route registered twice: {key}")
         taken.add(key)
         routes.append(extra)
-    app = Starlette(routes=routes, middleware=[Middleware(BearerAuth, token=token)])
+    app = Starlette(routes=routes, middleware=[Middleware(BearerAuth, token=token, sessions=sessions)])
+    app.state.sessions = sessions
     app.state.context = context
     app.state.hub = hub
     app.state.token_escrow = token_escrow

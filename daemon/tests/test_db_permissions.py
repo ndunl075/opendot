@@ -44,3 +44,15 @@ def test_existing_loose_database_is_tightened(tmp_path: Path) -> None:
 
 def test_permissions_code_is_harmless_on_windows(tmp_path: Path) -> None:
     Database(tmp_path / "x" / "opendot.db").migrate()  # must not raise anywhere
+
+
+@posix_only
+def test_an_existing_opendot_folder_is_tightened_but_a_user_folder_is_left_alone(tmp_path: Path) -> None:
+    app_dir = tmp_path / "org.opendot.desktop"
+    app_dir.mkdir(mode=0o755)
+    Database(app_dir / "opendot.db").migrate()
+    assert stat.S_IMODE(app_dir.stat().st_mode) == 0o700
+    user_dir = tmp_path / "Documents"
+    user_dir.mkdir(mode=0o755)
+    Database(user_dir / "opendot.db").migrate()
+    assert stat.S_IMODE(user_dir.stat().st_mode) == 0o755

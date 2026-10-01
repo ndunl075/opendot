@@ -226,3 +226,39 @@ def test_token_file_must_be_private_and_complete(tmp_path: Path) -> None:
         short.chmod(0o600)
     with pytest.raises(InsecureTokenFile):
         read_token_file(short)
+
+
+def test_token_file_symlink_is_refused_on_posix(tmp_path: Path) -> None:
+    import os
+
+    from opendot_core.api.serve_cli import read_token_file
+
+    if os.name != "posix":
+        pytest.skip("POSIX symlink and mode semantics")
+    real = tmp_path / "real"
+    real.write_text("t" * 40, encoding="utf-8")
+    real.chmod(0o600)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    with pytest.raises(OSError):
+        read_token_file(link)
+
+
+def test_session_tokens_die_with_the_daemon_and_cannot_mint_more(tmp_path: Path, dist: Path) -> None:
+    """Security review S1 and S8: UIs hold only session tokens, which a daemon restart invalidates."""
+    client, _ = _client(tmp_path, dist)
+    assert client.post("/v1/session").status_code == 401
+    session = client.post("/v1/session", headers={"Authorization": f"Bearer {TOKEN}"}).json()["session_token"]
+    assert session.startswith("ods_") and TOKEN not in session
+    assert client.get("/v1/health", headers={"Authorization": f"Bearer {session}"}).status_code == 200
+    assert client.get("/v1/rules", headers={"Authorization": f"Bearer {session}"}).status_code != 401
+    assert client.post("/v1/session", headers={"Authorization": f"Bearer {session}"}).status_code == 401
+    restarted, _ = _client(tmp_path, dist)  # a new daemon process over the same data
+    assert restarted.get("/v1/health", headers={"Authorization": f"Bearer {session}"}).status_code == 401
+    from opendot_core.api.server import WS_SUBPROTOCOL, WS_TOKEN_PREFIX
+
+    with client.websocket_connect(
+        "/v1/chat/stream", subprotocols=[WS_SUBPROTOCOL, WS_TOKEN_PREFIX + session],
+        headers={"Origin": BASE, "Host": "127.0.0.1:8765"},
+    ) as ws:
+        assert ws.accepted_subprotocol == WS_SUBPROTOCOL

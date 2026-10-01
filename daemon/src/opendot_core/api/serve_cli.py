@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -44,16 +45,26 @@ class InsecureTokenFile(SystemExit):
 
 
 def read_token_file(path: Path) -> str:
-    """Read a headless token file, refusing one other local users could read (POSIX).
+    """Read a headless token file, refusing one other local users could read or swap (POSIX).
 
-    On Windows the file inherits the user profile's ACLs; doctor warns about headless secrets files."""
+    The file is opened once (never following a symlink) and the owner and mode are checked on that
+    same open file, so nothing can replace it between the check and the read (review S5). On Windows
+    the file inherits the user profile's ACLs; doctor warns about headless secrets files."""
     if os.name == "posix":
-        info = path.stat()
-        if info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise InsecureTokenFile(
-                f"{path} must be owned by you and readable only by you (chmod 600 {path}); refusing to use it."
-            )
-    token = path.read_text(encoding="utf-8").strip()
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise InsecureTokenFile(
+                    f"{path} must be a regular file owned by you and readable only by you (chmod 600 {path}); "
+                    "refusing to use it."
+                )
+            with os.fdopen(os.dup(fd), "r", encoding="utf-8") as handle:
+                token = handle.read().strip()
+        finally:
+            os.close(fd)
+    else:
+        token = path.read_text(encoding="utf-8").strip()
     if len(token) < 32:
         raise InsecureTokenFile(f"{path} does not hold a full access token (run `opendot api-token rotate`).")
     return token
@@ -131,8 +142,11 @@ def build_serve_app(  # noqa: ANN201
     extras["secret_store"] = secrets
     extras["connector_syncers"] = build_syncers(database, secrets)
 
-    def disconnect_google() -> None:  # Gmail and Calendar share one Google grant
-        extras["google_connector"].disconnect()
+    def disconnect_gmail() -> None:
+        extras["google_connector"].disconnect("gmail")
+
+    def disconnect_calendar() -> None:
+        extras["google_connector"].disconnect("google_calendar")
 
     def disconnect_github() -> None:
         try:
@@ -141,8 +155,8 @@ def build_serve_app(  # noqa: ANN201
             pass
 
     extras["connector_disconnectors"] = {
-        "gmail": disconnect_google,
-        "google_calendar": disconnect_google,
+        "gmail": disconnect_gmail,
+        "google_calendar": disconnect_calendar,
         "github": disconnect_github,
     }
     runtime.app.state.context.extras["google_connector"] = GoogleConnector(

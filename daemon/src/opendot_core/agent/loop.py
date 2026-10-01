@@ -246,8 +246,9 @@ class AgentLoop:
         task_id = str(uuid4())
         available = [spec.name for spec in self.tools.specs()]
         if tool_group is None:
-            read_only = getattr(self.tools, "read_only_tools", None)
-            group = choose_task_tool_group(message, available, read_only() if callable(read_only) else None)
+            declared = getattr(self.tools, "read_only_tools", None)
+            read_only = declared() if callable(declared) else None
+            group = choose_task_tool_group(message, available, read_only)
         else:
             group = sorted(name for name in set(tool_group) if name in available)
         assert len(group) <= MAX_TOOLS_PER_GROUP

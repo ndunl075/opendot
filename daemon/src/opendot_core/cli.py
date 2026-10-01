@@ -1673,7 +1673,17 @@ def _composio_status(database: Database, secret_name: str) -> ComposioStatus:
         client.close()
 
 
+def _google_app_wanted(database: Database, app: str) -> bool:
+    """Sync a Google app only if the user connected it (review S7). The legacy `google-auth` setup,
+    which predates per-app choices, keeps syncing both."""
+    from .connections_google import google_app_connected, google_managed
+
+    return not google_managed(database) or google_app_connected(database, app)
+
+
 def _calendar_sync_once(database: Database, calendar_id: str) -> None:
+    if not _google_app_wanted(database, "google_calendar"):
+        return
     client = GoogleCalendarClient(_google_access_token())
     try:
         # The bounds are ignored by Google when a valid incremental cursor is
@@ -1770,6 +1780,8 @@ def _github_sync_once(database: Database, secret_name: str) -> None:
 
 
 def _gmail_sync_once(database: Database, limit: int = DEFAULT_UNREAD_LIMIT) -> None:
+    if not _google_app_wanted(database, "gmail"):
+        return
     client = GmailClient(_google_access_token())
     try:
         GmailSync(database, client, limit=limit).sync()

@@ -550,19 +550,34 @@ def test_connections_list_reports_health(env: Env) -> None:
     _sync_row(env, "google_calendar", ok=now - timedelta(days=3))
     _sync_row(env, "github", ok=None, error="HTTPError")
     _sync_row(env, "telegram", ok=now)  # not an app connection
-    SettingsStore(env.db).set("google_connection", {"write_opt_in": True, "granted_scopes": ["gmail.compose"]})
+    SettingsStore(env.db).set("google_connection", {
+        "apps": ["gmail", "google_calendar"],
+        "write_opt_in": {"gmail": True},
+        "granted_scopes": [
+            "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",
+        ],
+    })
     items = {c["id"]: c for c in env.get("/v1/connections", ConnectionList)["connections"]}
     assert set(items) == {"gmail", "google_calendar", "github"}
     assert items["gmail"]["health"] == "ok" and items["gmail"]["account_label"] == "sam@example.test"
     assert items["gmail"]["write_opt_in"] is True and items["gmail"]["read_only"] is False
-    assert items["google_calendar"]["health"] == "stale" and items["google_calendar"]["write_opt_in"] is True
+    # Each Google app has its own write switch (security review S9).
+    assert items["google_calendar"]["health"] == "stale" and items["google_calendar"]["write_opt_in"] is False
+    assert items["google_calendar"]["read_only"] is True
     assert items["github"]["health"] == "error" and "HTTPError" in items["github"]["health_detail"]
     assert items["github"]["write_opt_in"] is False and items["github"]["account_label"] == "GitHub"
     assert items["github"]["last_synced_at"] is None
 
 
 def test_connections_include_a_google_app_that_never_synced(env: Env) -> None:
-    SettingsStore(env.db).set("google_connection", {"granted_scopes": ["https://www.googleapis.com/auth/calendar.events"]})
+    # The grant covers Gmail too, but only Calendar was connected (security review S7).
+    SettingsStore(env.db).set("google_connection", {
+        "apps": ["google_calendar"],
+        "granted_scopes": ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly"],
+    })
     items = env.get("/v1/connections", ConnectionList)["connections"]
     assert [(c["id"], c["health"]) for c in items] == [("google_calendar", "never_synced")]
 

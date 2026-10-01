@@ -76,6 +76,11 @@ class ApprovalGatedTools:
     def specs(self) -> Any:
         return self._tools.specs()
 
+    def read_only_tools(self) -> frozenset[str] | None:
+        """Forwarded so the loop can keep unrequested write tools out of task groups (review S4)."""
+        inner = getattr(self._tools, "read_only_tools", None)
+        return inner() if callable(inner) else None
+
     def intent(self, name: str, arguments: Any) -> Any:
         return self._tools.intent(name, arguments)
 

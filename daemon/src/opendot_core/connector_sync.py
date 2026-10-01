@@ -22,7 +22,15 @@ GITHUB_TOKEN_SECRET = "github-issue-token"
 CALENDAR_DAYS = 14
 
 
+def _require(database: Database, app: str) -> None:
+    from .connections_google import GoogleConnectError, google_app_connected, google_managed
+
+    if google_managed(database) and not google_app_connected(database, app):
+        raise GoogleConnectError(f"{app} is not connected.")
+
+
 def sync_gmail(database: Database, secrets: SecretStore) -> Any:
+    _require(database, "gmail")
     client = GmailClient(current_access_token(secrets))
     try:
         return GmailSync(database, client).sync()
@@ -31,6 +39,7 @@ def sync_gmail(database: Database, secrets: SecretStore) -> Any:
 
 
 def sync_calendar(database: Database, secrets: SecretStore) -> Any:
+    _require(database, "google_calendar")
     start, _ = default_sync_window()
     client = GoogleCalendarClient(current_access_token(secrets))
     try:
