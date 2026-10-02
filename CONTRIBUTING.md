@@ -102,6 +102,6 @@ ARCHITECTURE.md section 0, which wins if the two ever differ):
 - Never commit secrets, tokens, or real personal data. The fake tokens in the
   redaction tests are allowed; they are listed in `.gitleaks.toml` and
   `.gitleaksignore` and must not be deleted.
-- Never copy OpenAI's visual design, icons, mascots or logos.
+- Never copy OpenAI's icons, mascots, characters, logos, artwork or proprietary fonts. The UI may closely follow ChatGPT's general look (owner decision, ARCHITECTURE.md §0), but nothing may suggest OpenDot is made by or affiliated with OpenAI.
 - Never skip, delete, or weaken tests to make a check pass. The only test files
   that may be deleted are the ones ARCHITECTURE.md section 5 lists.

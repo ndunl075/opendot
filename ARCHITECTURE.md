@@ -40,7 +40,7 @@ When you hit one of these, write it under **Needs you** in `STATUS.md`, then con
 - Build a "log in with Claude" flow, read another app's credential files (`~/.claude`, `~/.codex`, browser cookies), spoof client headers, or proxy anyone's tokens. This is what got other open-source tools shut down (§6.3).
 - Turn on any paid path by default: API keys, ChatGPT credits after the plan limit, or paid fallbacks.
 - Commit secrets, tokens, or real personal data. Alfred's fixtures were audited once; audit again when copying them. The fake tokens in the redaction tests are allowed (listed in `.gitleaksignore`) and must not be deleted.
-- Copy OpenAI's visual design, icons, mascots or logos. The only OpenAI-branded elements allowed are the ones "Sign in with ChatGPT" requires, taken from OpenAI's DevKit under its license (§12).
+- Copy OpenAI's icons, mascots, characters, logos, artwork or proprietary fonts. The only OpenAI-branded elements allowed are the ones "Sign in with ChatGPT" requires, taken from OpenAI's DevKit under its license (§12). Owner decision (2026-10-01): the UI may closely match ChatGPT's general look (layout, spacing, colors, components, the customize dialog, ring-shaped color swatches), accepting the risk that OpenAI treats a lookalike less favorably when reviewing the sign-in program. Nothing may suggest OpenDot is made by or affiliated with OpenAI.
 - Skip, delete, or weaken tests to make a goal pass. The only test files that may be deleted are the ones listed in §5.
 - Write UI code as a Claude model. The UI belongs to Astra and Terra (§13). If Codex isn't available, stop and ask.
 
@@ -69,7 +69,7 @@ When you hit one of these, write it under **Needs you** in `STATUS.md`, then con
 
 ## 2. What we are recreating (Dots, briefly)
 
-ChatGPT Dots launched on September 29, 2026 for Pro and Business Premium. Each "dot" is an always-on agent with its own cloud computer and browser, thousands of app plugins, memory, scheduled and proactive work, and rules for when it may act on its own. OpenDot recreates the **behavior**, not the look.
+ChatGPT Dots launched on September 29, 2026 for Pro and Business Premium. Each "dot" is an always-on agent with its own cloud computer and browser, thousands of app plugins, memory, scheduled and proactive work, and rules for when it may act on its own. OpenDot recreates the **behavior**; since 2026-10-01 the UI may also closely follow ChatGPT's general look (see the "never" list in §0 for what stays off limits).
 
 | Dots feature | OpenDot version | Milestone |
 |---|---|---|
