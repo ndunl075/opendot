@@ -1,0 +1,20 @@
+import { memo } from "react";
+import type { ApprovalItem, ApprovalDecisionResult } from "../../api/types.gen";
+import { Badge } from "../../design/components";
+import { ApprovalCard } from "./ApprovalCard";
+import type { Message } from "./messages";
+
+export const MessageBubble = memo(function MessageBubble({ message, streaming, approval, onDecision }: {
+  message: Message;
+  streaming: boolean;
+  approval?: ApprovalItem;
+  onDecision: (result: ApprovalDecisionResult) => void;
+}) {
+  return <article className={`chat-message chat-message--${message.role}`} aria-busy={streaming} aria-label={message.role === "user" ? "Your message" : "Companion reply"}>
+    <p className="sr-only">{message.role === "user" ? "You" : "Companion"}</p>
+    <p className="message-text">{message.text || (streaming ? <span className="typing-indicator"><span className="sr-only">Companion is typing</span><i /><i /><i /></span> : message.pending ? "No reply received yet." : "")}</p>
+    {message.failed && <p className="message-delivery">Not sent</p>}
+    {message.tool_calls?.map(call => <p className="tool-record" key={call.call_id}><Badge>{call.status.replaceAll("_", " ")}</Badge> {call.summary}</p>)}
+    {approval && <ApprovalCard approval={approval} onDecision={onDecision} />}
+  </article>;
+});

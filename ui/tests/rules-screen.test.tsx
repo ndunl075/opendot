@@ -52,7 +52,8 @@ describe("Rules screen", () => {
     render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><RulesScreen /></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Read mail" }));
     expect(screen.getByLabelText("Action")).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Behavior"), { target: { value: "auto_if_preapproved" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Behavior" }));
+    fireEvent.click(screen.getByRole("option", { name: "Only when preapproved (auto_if_preapproved)" }));
     expect(screen.getByText(/explicitly asked for this exact action/)).toBeInTheDocument();
     call.mockResolvedValueOnce({ ...rule, behavior: "auto_if_preapproved" });
     fireEvent.click(screen.getByRole("button", { name: "Save rule" }));

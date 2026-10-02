@@ -66,9 +66,7 @@ export function ApprovalCard({ approval, onDecision }: { approval: ApprovalItem;
       <p>Action: {current.action}</p><p>Target and action preview: {current.preview}</p>
       {Object.entries(current.payload).map(([key, value]) => <p key={key}>{key}: {value}</p>)}
       {current.review_verdict === "block" && <blockquote>{current.review_note || "The reviewer marked this action as blocked without a note."}</blockquote>}
-      <div className="form-stack"><Select label="Rule behavior" value={behavior} onChange={event => setBehavior(event.target.value as ApprovalAlwaysAllowRequest["behavior"])}>
-        <option value="auto_if_preapproved">Only when I explicitly request this action</option><option value="auto">Automatically, without asking</option>
-      </Select><p>The rule matches this action type. Review its scope in Rules after saving.</p>
+      <div className="form-stack"><Select label="Rule behavior" value={behavior} onChange={value => setBehavior(value as ApprovalAlwaysAllowRequest["behavior"])} options={[{ value: "auto_if_preapproved", label: "Only when I explicitly request this action" }, { value: "auto", label: "Automatically, without asking" }]} /><p>The rule matches this action type. Review its scope in Rules after saving.</p>
         {mutation.error != null && <ErrorState error={mutation.error} />}
         <div className="actions"><Button variant="secondary" disabled={mutation.pending} onClick={() => setMode(null)}>Cancel</Button><Button loading={mutation.pending} onClick={() => void decide(() => api.call("approval_always_allow", { params, body: { behavior } }))}>Approve and create rule</Button></div>
       </div>

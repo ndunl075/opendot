@@ -62,7 +62,8 @@ function ConnectionStatus() {
     window.addEventListener("focus", check);
     return () => { active = false; clearInterval(timer); window.removeEventListener("focus", check); };
   }, []);
-  return <p className="connection-status" role="status"><Cable size={14} aria-hidden="true" />{status}</p>;
+  if (status === "Checking daemon" || status === "Daemon connected") return null;
+  return <div className="connection-banner" role="alert"><Cable size={18} aria-hidden="true" /><span>{status}. Check the local daemon connection.</span></div>;
 }
 
 export function App() {
@@ -99,8 +100,9 @@ export function App() {
       </div>
     </aside>
     <div className={`workspace ${current === "Chat" ? "workspace--chat" : ""}`}><div className="topbar"><div className="breadcrumb"><span>OpenDot</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
-      <Select label="Appearance" value={preference} onChange={event => setTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></Select>
+      <Select label="Appearance" value={preference} onChange={value => setTheme(value as ThemePreference)} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />
     </div>
+      <ConnectionStatus />
       <main id="main" ref={main} tabIndex={-1} className="main-content">{location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !["/about", "/onboarding"].includes(location.pathname) ? <Navigate to="/onboarding" replace /> : <Routes>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/onboarding" element={<OnboardingScreen onComplete={async () => { await onboarding.reload(); navigate("/chat"); }} />} />
@@ -115,7 +117,6 @@ export function App() {
         <Route path="/about" element={<About />} />
         <Route path="*" element={<EmptyState title="This page isn’t here" description="Head back to your space to find what you need." icon={<Settings size={26} />} action={<Link to="/chat">Back to Chat</Link>} />} />
       </Routes>}</main>
-      <footer className="workspace-footer"><span>OpenDot <span className="footer-divider">/</span> A space of your own</span><ConnectionStatus /></footer>
     </div>
   </div>;
 }

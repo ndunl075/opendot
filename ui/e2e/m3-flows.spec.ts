@@ -102,9 +102,10 @@ test("chat streams an approval and sends approve, deny, and always-allow decisio
   await expect(page.getByRole("log")).toContainText("I can draft that reply for you.");
   const card = page.getByLabel(/^Approval:/);
   await expect(page.getByRole("region", { name: "Reviewer note" })).toBeVisible();
-  await expect(page.getByText("mock-model-terra")).toBeVisible();
-  await expect(page.getByText("low effort")).toBeVisible();
-  await expect(page.getByText("0.12 credits")).toBeVisible();
+  await expect(page.getByLabel("Companion reply", { exact: true })).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByText("mock-model-terra")).toHaveCount(0);
+  await expect(page.getByText("low effort")).toHaveCount(0);
+  await expect(page.getByText("0.12 credits")).toHaveCount(0);
   const approve = page.waitForRequest(request => request.url().includes("/approve") && request.method() === "POST");
   await card.getByRole("button", { name: "Approve" }).click();
   await approve;
@@ -148,7 +149,8 @@ test("rules support create, edit, delete, and show core deny rules as locked", a
   await create;
   const editable = page.getByRole("article", { name: "Ask before drafting email" });
   await editable.getByRole("button", { name: "Edit Ask before drafting email" }).click();
-  await page.getByLabel("Behavior").selectOption("auto_if_preapproved");
+  await page.getByRole("combobox", { name: "Behavior" }).click();
+  await page.getByRole("option", { name: "Only when preapproved (auto_if_preapproved)", exact: true }).click();
   const edit = page.waitForRequest(request => /\/v1\/rules\/rule_001$/.test(request.url()) && request.method() === "PUT");
   await page.getByRole("button", { name: "Save rule" }).click();
   await edit;
@@ -177,7 +179,8 @@ test("usage shows all breakdowns, validates budgets, handles 501, and chat works
 
   await page.unroute("**/v1/usage?days=7");
   for (const theme of ["light", "dark"]) {
-    await page.getByLabel("Appearance").selectOption(theme);
+    await page.getByRole("combobox", { name: "Appearance" }).click();
+  await page.getByRole("option", { name: theme === "light" ? "Light" : "Dark", exact: true }).click();
     await page.goto("/chat");
     await expect(page.getByRole("textbox", { name: "Message your companion" })).toBeVisible();
     await page.keyboard.press("Tab");

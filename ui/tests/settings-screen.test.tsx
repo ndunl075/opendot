@@ -82,11 +82,14 @@ it("saves availability, quiet hours, style and job tier overrides through settin
   fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "21:30" } });
   fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "08:15" } });
   fireEvent.change(screen.getByLabelText("Quiet hours timezone"), { target: { value: "America/New_York" } });
-  fireEvent.change(screen.getByLabelText("Style preset"), { target: { value: "warm" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Style preset" }));
+  fireEvent.click(screen.getByRole("option", { name: "Warm" }));
   fireEvent.click(screen.getByRole("button", { name: "Add model override" }));
   fireEvent.change(screen.getByLabelText("Job type 1"), { target: { value: "review" } });
-  fireEvent.change(screen.getByLabelText("Model tier 1"), { target: { value: "terra" } });
-  fireEvent.change(screen.getByLabelText("Effort 1"), { target: { value: "medium" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Model tier 1" }));
+  fireEvent.click(screen.getByRole("option", { name: "Mid" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "Effort 1" }));
+  fireEvent.click(screen.getByRole("option", { name: "Medium" }));
   fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
   await waitFor(() => expect(api.call).toHaveBeenCalledWith("settings_update", { body: {
     keep_awake: { enabled: true, only_while_plugged_in: true },

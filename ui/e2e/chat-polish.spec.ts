@@ -1,0 +1,123 @@
+import { expect, test, type WebSocketRoute } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+
+test.beforeEach(async ({ page }) => {
+  await mkdir(".visual-check", { recursive: true });
+  await page.route("**/v1/onboarding", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), current_step: "done", completed_steps: ["done"] } });
+  });
+});
+
+test("composer focus, optimistic bubbles, streaming identity and eight-line sizing", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  await page.setViewportSize({ width: 1440, height: 950 });
+  let socket!: WebSocketRoute;
+  let accept!: () => void;
+  const accepted = new Promise<void>(resolve => { accept = resolve; });
+  let subscribed!: () => void;
+  const subscription = new Promise<void>(resolve => { subscribed = resolve; });
+  await page.routeWebSocket("**/v1/chat/stream", ws => {
+    socket = ws;
+    ws.onMessage(() => subscribed());
+  });
+  await page.route("**/v1/chat/messages", async route => {
+    await accepted;
+    await route.fulfill({ json: { conversation_id: "polish", message_id: "user", stream_path: "/v1/chat/stream" } });
+  });
+  await page.goto("/chat");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  const input = page.getByLabel("Message your companion");
+  const composer = page.locator(".chat-composer");
+  const border = await composer.evaluate(el => getComputedStyle(el).borderColor);
+  await input.fill("h");
+  expect(await input.evaluate(el => getComputedStyle(el).outlineStyle)).toBe("none");
+  await expect.poll(() => composer.evaluate(el => getComputedStyle(el).borderColor)).not.toBe(border);
+  await page.screenshot({ path: ".visual-check/chat-focused.png" });
+  await input.press("Shift+Enter");
+  await input.press("x");
+  await expect(input).toHaveValue("h\nx");
+  await input.fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1}`).join("\n"));
+  const sizing = await input.evaluate(el => ({ height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), scroll: el.scrollHeight }));
+  expect(sizing.height).toBeLessThanOrEqual(sizing.line * 8 + 20);
+  expect(sizing.scroll).toBeGreaterThan(sizing.height);
+  await input.fill("Hello from me");
+  await input.press("Enter");
+  const user = page.getByLabel("Your message", { exact: true });
+  const reply = page.getByLabel("Companion reply", { exact: true });
+  await expect(user).toContainText("Hello from me");
+  await expect(reply.locator(".typing-indicator i")).toHaveCount(3);
+  await expect(input).toBeEmpty();
+  await expect(input).toBeFocused();
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toHaveAttribute("aria-busy", "true");
+  await reply.evaluate(el => { el.setAttribute("data-original-bubble", "true"); });
+  await page.screenshot({ path: ".visual-check/chat-typing.png", animations: "disabled" });
+  accept(); await subscription;
+  const base = { conversation_id: "polish", message_id: "user" };
+  socket.send(JSON.stringify({ ...base, type: "message_started", seq: 1 }));
+  socket.send(JSON.stringify({ ...base, type: "text_delta", seq: 2, text: "Hello back" }));
+  await expect(reply).toContainText("Hello back");
+  await expect(reply).toHaveAttribute("data-original-bubble", "true");
+  await expect(reply.locator(".typing-indicator")).toHaveCount(0);
+  socket.send(JSON.stringify({ ...base, type: "completed", seq: 3, text: "Hello back!", usage: { model: "mock-model", effort: "low", credits: 0 } }));
+  await expect(reply).toHaveCount(1);
+  await expect(reply).toContainText("Hello back!");
+  await expect(user).toContainText("Hello from me");
+  await expect(reply).toHaveAttribute("data-original-bubble", "true");
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+  await page.screenshot({ path: ".visual-check/chat-completed.png" });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await input.fill("A new thought");
+  await expect(input).toBeFocused();
+  expect(await reply.evaluate(el => getComputedStyle(el).animationName)).toBe("none");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: ".visual-check/chat-mobile-dark.png" });
+  expect(errors).toEqual([]);
+});
+
+test("follows streamed text near the bottom and leaves a reader's scroll position alone", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 720 });
+  let socket!: WebSocketRoute;
+  await page.routeWebSocket("**/v1/chat/stream", ws => { socket = ws; });
+  await page.route("**/v1/chat/messages", route => route.fulfill({ json: { conversation_id: "scroll", message_id: "user", stream_path: "/v1/chat/stream" } }));
+  await page.goto("/chat");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await page.getByLabel("Message your companion").fill("Tell me a story");
+  await page.getByLabel("Message your companion").press("Enter");
+  await expect(page.getByLabel("Your message", { exact: true })).toBeVisible();
+  const base = { conversation_id: "scroll", message_id: "user_a" };
+  socket.send(JSON.stringify({ ...base, type: "message_started", seq: 1 }));
+  socket.send(JSON.stringify({ ...base, type: "text_delta", seq: 2, text: "A line of the story.\n".repeat(45) }));
+  const log = page.getByRole("log");
+  const distance = () => log.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop);
+  await expect.poll(distance).toBeLessThan(3);
+  await log.hover();
+  await page.mouse.wheel(0, -650);
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+  const top = await log.evaluate(el => el.scrollTop);
+  socket.send(JSON.stringify({ ...base, type: "text_delta", seq: 3, text: "More story.\n".repeat(15) }));
+  await expect(page.getByLabel("Companion reply", { exact: true })).toContainText("More story.");
+  expect(await log.evaluate(el => el.scrollTop)).toBeCloseTo(top, 0);
+  await page.screenshot({ path: ".visual-check/chat-scrolled-up.png" });
+  await page.getByRole("button", { name: "Jump to latest" }).click();
+  await expect.poll(distance).toBeLessThan(3);
+  await expect(page.getByRole("button", { name: "Jump to latest" })).toHaveCount(0);
+  socket.send(JSON.stringify({ ...base, type: "text_delta", seq: 4, text: "The final lines.\n".repeat(5) }));
+  await expect.poll(distance).toBeLessThan(3);
+});
+
+test("real mock-server reply preserves the prompt with one reply bubble", async ({ page }) => {
+  await page.goto("/chat");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await page.getByLabel("Message your companion").fill("Draft a reply");
+  await page.getByLabel("Message your companion").press("Enter");
+  await expect(page.getByLabel("Your message", { exact: true })).toContainText("Draft a reply");
+  await expect(page.getByLabel("Companion reply", { exact: true })).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByText("mock-model-terra", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Companion reply", { exact: true })).toHaveCount(1);
+  await expect.poll(() => page.getByRole("log").evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(3);
+  await page.screenshot({ path: ".visual-check/chat-mock-server.png" });
+});

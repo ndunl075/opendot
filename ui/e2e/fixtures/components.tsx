@@ -22,7 +22,7 @@ function Fixture() {
       <Dialog open={open} title="Review action" onClose={() => setOpen(false)} description="Nothing happens without your permission."><Input label="Action name" /><Button disabled>Unavailable</Button><div hidden><Button>Hidden action</Button></div><Button>Last action</Button></Dialog>
       <ConfirmDialog open={confirm} title="Forget memory?" description="This removes the selected memory." confirmLabel="Forget" onConfirm={() => setConfirm(false)} onClose={() => setConfirm(false)} danger />
     </Card>
-    <Card><Input label="Companion name" hint="Choose a name that feels right." /><Textarea label="Instructions" /><Select label="Preference"><option>Option one</option><option>Option two</option></Select><Switch label="Keep awake" /><Checkbox label="Ask before acting" /><Input label="Required name" error="Please enter a name." /></Card>
+    <Card><Input label="Companion name" hint="Choose a name that feels right." /><Textarea label="Instructions" /><Select label="Preference" options={[{ value: "Option one", label: "Option one" }, { value: "Option two", label: "Option two" }]} /><Switch label="Keep awake" /><Checkbox label="Ask before acting" /><Input label="Required name" error="Please enter a name." /></Card>
     <Card><Tabs label="Tasks" value={tab} onValueChange={setTab} items={[{ value: "active", label: "In progress", content: "Active tasks" }, { value: "scheduled", label: "Scheduled", content: "Scheduled tasks" }, { value: "done", label: "Completed", content: "Completed tasks" }]} />
       <UsageStamp model="Test model" effort="low" credits={null} /><p><Badge tone="success">Success</Badge> <Badge tone="warning">Warning</Badge> <Badge tone="danger">Error</Badge></p>
     </Card>

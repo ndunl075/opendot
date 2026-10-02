@@ -20,8 +20,12 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator("footer").getByRole("status")).toHaveText("Daemon connected");
-  await page.getByLabel("Appearance").selectOption("light");
+  await expect(page).toHaveURL(/\/chat$/);
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.locator("footer")).toHaveCount(0);
+  await expect(page.getByText("Daemon connected", { exact: true })).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Appearance" }).click();
+  await page.getByRole("option", { name: "Light", exact: true }).click();
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   for (const name of ["Onboarding", "Chat", "Companion", "Activity", "Rules", "Memory", "Connections", "Usage", "Settings"]) {
@@ -35,7 +39,8 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   await expect(page.getByText("OpenDot is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. ChatGPT is a trademark of OpenAI.")).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "About OpenDot" })).toBeVisible();
-  await page.getByLabel("Appearance").selectOption("system");
+  await page.getByRole("combobox", { name: "Appearance" }).click();
+  await page.getByRole("option", { name: "System", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -48,7 +53,7 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   expect(errors).toEqual([]);
 });
 
-test("unfinished setup redirects to onboarding; mock chat streams a stamped reply and approval", async ({ page }) => {
+test("unfinished setup redirects to onboarding; mock chat streams a reply without inline usage and approval", async ({ page }) => {
   await page.goto("/chat");
   await expect(page).toHaveURL(/\/onboarding$/);
   await expect(page.getByRole("button", { name: "Continue to introduction" })).toBeVisible();
@@ -60,8 +65,9 @@ test("unfinished setup redirects to onboarding; mock chat streams a stamped repl
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   await page.getByLabel("Message your companion").fill("Draft a reply");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByText("mock-model-terra", { exact: true })).toBeVisible();
-  await expect(page.getByText("0.12 credits", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Companion reply", { exact: true })).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByText("mock-model-terra", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("0.12 credits", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Always allow this", exact: true })).toBeVisible();
 });

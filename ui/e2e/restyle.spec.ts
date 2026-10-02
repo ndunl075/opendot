@@ -25,7 +25,8 @@ test("chat rail, bubbles, composer, history and details remain usable", async ({
   await expect(send).toBeEnabled();
   await send.click();
   await expect(page.getByLabel("Your message")).toContainText("Draft a reply");
-  await expect(page.getByText("mock-model-terra", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Companion reply", { exact: true })).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByText("mock-model-terra", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
   const bubbleColors = await page.locator(".chat-message--user").evaluate(element => ({ fg: getComputedStyle(element).color, bg: getComputedStyle(element).backgroundColor }));
   expect(bubbleColors).toEqual({ fg: "rgb(255, 255, 255)", bg: "rgb(38, 120, 204)" });
