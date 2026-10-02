@@ -40,3 +40,10 @@ def _isolated_keyring():
         yield backend
     finally:
         keyring.set_keyring(previous)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_dir(tmp_path_factory, monkeypatch):
+    """No test reads or writes the developer's real OpenDot data folder."""
+    monkeypatch.setenv("OPENDOT_DATA_DIR", str(tmp_path_factory.mktemp("opendot-data")))
+    monkeypatch.delenv("OPENDOT_DB_PATH", raising=False)

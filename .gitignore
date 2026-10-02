@@ -29,3 +29,6 @@ desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/src-tauri/gen/
 desktop/src-tauri/icons/
+
+# OpenDot data from older builds that stored it in the working directory
+.opendot/

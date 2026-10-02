@@ -497,7 +497,7 @@ class ChatGPTPlanProvider:
     def __init__(
         self,
         token_store: TokenStore | None = None,
-        state_path: Path | str = ".opendot/chatgpt_plan.json",
+        state_path: Path | str | None = None,
         *,
         http: httpx.Client | None = None,
         open_browser: Callable[[str], object] | None = None,
@@ -512,6 +512,10 @@ class ChatGPTPlanProvider:
 
             token_store = SystemKeyringSecretStore()
         self._tokens = token_store
+        if state_path is None:
+            from ..config import chatgpt_state_path
+
+            state_path = chatgpt_state_path()
         self._state = ProviderState(state_path)
         self._http = http or httpx.Client(timeout=httpx.Timeout(180.0, connect=10.0))
         self._open_browser = open_browser
