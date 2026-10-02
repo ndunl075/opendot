@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "../src/api/client";
 import type { Settings, FeatureSwitchList, BackupStatus, BackupRestoreResult } from "../src/api/types.gen";
+import { ThemeProvider } from "../src/design/theme";
 import SettingsScreen from "../src/screens/settings/SettingsScreen";
 
 const settings: Settings = {
@@ -27,7 +28,7 @@ beforeEach(() => {
 });
 
 it("keeps saved API keys write-only and saving a key does not enable a provider", async () => {
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   const key = await screen.findByLabelText("Anthropic API API key");
   expect(key).toHaveAttribute("type", "password");
   expect(key).toHaveValue("");
@@ -40,7 +41,7 @@ it("keeps saved API keys write-only and saving a key does not enable a provider"
 });
 
 it("requires a cost acknowledgement before enabling a feature", async () => {
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   fireEvent.click(await screen.findByRole("switch", { name: "Use Claude as the reviewer" }));
   expect(api.call).not.toHaveBeenCalledWith("feature_set", expect.anything());
   const dialog = screen.getByRole("dialog", { name: "Enable Use Claude as the reviewer?" });
@@ -51,13 +52,13 @@ it("requires a cost acknowledgement before enabling a feature", async () => {
 
 it("shows version availability errors without fabricating settings", async () => {
   vi.mocked(api.call).mockRejectedValue(new ApiError(501, "not_implemented", "Unavailable"));
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   expect(await screen.findByText("Not available in this version yet")).toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: "Keep awake" })).not.toBeInTheDocument();
 });
 
 it("keeps provider opt-in separate and waits for its cost confirmation", async () => {
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   fireEvent.click(await screen.findByRole("switch", { name: "Enable Anthropic API" }));
   expect(api.call).not.toHaveBeenCalledWith("provider_enabled_set", expect.anything());
   const dialog = screen.getByRole("dialog", { name: "Enable Anthropic API?" });
@@ -68,7 +69,7 @@ it("keeps provider opt-in separate and waits for its cost confirmation", async (
 });
 
 it("confirms removing a saved key before calling the destructive endpoint", async () => {
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   fireEvent.click(await screen.findByRole("button", { name: "Remove Anthropic API key" }));
   expect(api.call).not.toHaveBeenCalledWith("provider_api_key_remove", expect.anything());
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove key" }));
@@ -76,7 +77,7 @@ it("confirms removing a saved key before calling the destructive endpoint", asyn
 });
 
 it("saves availability, quiet hours, style and job tier overrides through settings_update", async () => {
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   fireEvent.click(await screen.findByRole("switch", { name: "Keep awake" }));
   fireEvent.click(screen.getByRole("switch", { name: "Quiet hours" }));
   fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "21:30" } });
@@ -108,7 +109,7 @@ it("refreshes feature availability after an API key is saved", async () => {
     if (name === "settings_get") return { ...settings, providers: [{ ...settings.providers[0], configured: saved }] } as never;
     return original(name, options);
   });
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   expect(await screen.findByRole("switch", { name: "Use Claude as the reviewer" })).toBeDisabled();
   const timezone = screen.getByLabelText("Quiet hours timezone");
   fireEvent.change(timezone, { target: { value: "America/New_York" } });
@@ -130,7 +131,7 @@ it("restores only after confirmation and keeps the dialog open while the daemon 
     if (name === "backup_restore") return await pending as never;
     return original(name, options);
   });
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   fireEvent.click(await screen.findByRole("button", { name: "Restore backup backup-1" }));
   expect(api.call).not.toHaveBeenCalledWith("backup_restore", expect.anything());
   const dialog = screen.getByRole("dialog", { name: "Restore this backup?" });
@@ -149,7 +150,7 @@ it("shows a restore 501 error inside the still-open confirmation dialog", async 
     if (name === "backup_restore") throw new ApiError(501, "not_implemented", "Unavailable");
     return original(name, options);
   });
-  render(<SettingsScreen />);
+  render(<ThemeProvider><SettingsScreen /></ThemeProvider>);
   fireEvent.click(await screen.findByRole("button", { name: "Restore backup backup-1" }));
   const dialog = screen.getByRole("dialog", { name: "Restore this backup?" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Restore backup" }));

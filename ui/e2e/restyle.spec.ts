@@ -13,7 +13,8 @@ test("chat rail, bubbles, composer, history and details remain usable", async ({
   await page.goto("/chat");
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   expect((await page.locator(".sidebar").boundingBox())?.width).toBe(84);
-  for (const label of ["Chat", "Activity", "Memory", "Rules", "Connections", "Usage", "Settings", "Companion"]) {
+  await expect(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link")).toHaveCount(2);
+  for (const label of ["Chat", "Settings"]) {
     const link = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: label, exact: true });
     await expect(link.locator("span")).toBeVisible();
     expect(await link.locator("span").evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(11);

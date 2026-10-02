@@ -1,0 +1,29 @@
+.workspace--settings .main-content { max-width: 1220px; padding: clamp(24px, 4vw, 56px) clamp(20px, 4vw, 56px) 64px; }
+.settings-hub { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: clamp(32px, 4vw, 64px); align-items: start; }
+.settings-directory { position: sticky; top: 40px; }
+.settings-directory-title { font-size: var(--text-lg); font-weight: var(--weight-semibold); margin: 0 12px 24px; }
+.settings-directory ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.settings-section-link { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border-radius: 10px; color: var(--color-text); text-decoration: none; font-size: var(--text-sm); }
+.settings-section-link svg { flex-shrink: 0; }
+.settings-section-link:hover, .settings-section-link.is-active { background: var(--color-surface-hover); }
+.settings-pane { min-width: 0; padding-left: clamp(24px, 3vw, 40px); border-left: 1px solid var(--color-border); }
+.settings-pane > h1 { font-size: var(--text-xl); font-weight: var(--weight-semibold); letter-spacing: -.035em; margin: 0 0 24px; padding-bottom: 24px; border-bottom: 1px solid var(--color-border); }
+.settings-pane .section-card { padding-top: 12px; }
+.settings-pane .screen-stack { gap: 24px; }
+.settings-pane-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.settings-appearance { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 24px; border-bottom: 1px solid var(--color-border); }
+.settings-appearance h2 { font-size: var(--text-md); font-weight: var(--weight-medium); }
+.settings-appearance .field { width: 160px; }
+.settings-appearance .field-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.settings-back, .settings-mobile-title { display: none; }
+@media (max-width: 800px) {
+  .workspace--settings .main-content { padding: 24px 20px 48px; }
+  .settings-hub { display: block; }
+  .settings-directory { position: static; }
+  .settings-directory-title { display: none; }
+  .settings-mobile-title { display: block; margin: 0 12px 24px; font-size: var(--text-xl); }
+  .settings-section-link { min-height: 52px; font-size: var(--text-md); }
+  .settings-pane { padding: 0; border: 0; }
+  .settings-hub--index .settings-pane, .settings-hub--detail .settings-directory { display: none; }
+  .settings-back { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin: -8px 0 16px; color: var(--color-text-muted); text-decoration: none; font-size: var(--text-sm); }
+}

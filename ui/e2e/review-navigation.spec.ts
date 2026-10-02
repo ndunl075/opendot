@@ -9,10 +9,12 @@ test("activity evidence links navigate without reloading and scroll/focus the ha
   const documents: string[] = [];
   page.on("request", request => { if (request.resourceType() === "document") documents.push(request.url()); });
   await page.getByRole("link", { name: "Rule: Draft rule" }).click();
+  await expect(page).toHaveURL(/\/settings\/rules#rule%2Ftarget$/);
   const rule = page.getByRole("article", { name: "Rule 19", exact: true });
   await expect(rule).toBeFocused(); await expect(rule).toBeInViewport();
   await page.getByRole("link", { name: "Activity", exact: true }).click();
   await page.getByRole("link", { name: "Memory memory/target" }).click();
+  await expect(page).toHaveURL(/\/settings\/memory#memory%2Ftarget$/);
   await expect(page.getByRole("article", { name: "Memory: Prefers drafts" })).toBeFocused();
   expect(documents).toEqual([]);
 });

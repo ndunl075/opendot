@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ErrorState, Skeleton } from "../design/components";
 
 /** Load daemon-owned data; late responses cannot replace a newer request. */
@@ -36,7 +36,11 @@ export function useMutation() {
   return { run, pending, error, notice, setNotice };
 }
 
+export const SettingsPaneContext = createContext(false);
+
 export function ScreenHeading({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
+  const inSettings = useContext(SettingsPaneContext);
+  if (inSettings) return action ? <div className="settings-pane-actions">{action}</div> : null;
   return <header className="page-heading screen-heading"><div><p className="eyebrow">Your personal companion</p><h1>{title}</h1><p className="muted">{description}</p></div>{action}</header>;
 }
 
