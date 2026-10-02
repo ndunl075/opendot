@@ -1,50 +1,26 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, BookOpen, Brain, Cable, ChevronRight, Gauge, Info, LogOut, Menu, MessageCircle, Plug, Settings, ShieldCheck, Smile, Sprout, X, type LucideIcon } from "lucide-react";
+import { Cable, ChevronRight, LogOut, Menu, MessageCircle, Settings, X, type LucideIcon } from "lucide-react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError } from "./api/client";
 import { isWebApp, signOut } from "./api/connection";
-import { Card, EmptyState, ErrorState, IconButton, Select, Skeleton } from "./design/components";
+import { EmptyState, ErrorState, IconButton, Select, Skeleton } from "./design/components";
 import { useTheme, type ThemePreference } from "./design/theme";
 import { useResource } from "./screens/shared";
 import OnboardingScreen from "./screens/onboarding/OnboardingScreen";
 import ChatScreen from "./screens/chat/ChatScreen";
-import CompanionScreen from "./screens/companion/CompanionScreen";
-import ActivityScreen from "./screens/activity";
-import RulesScreen from "./screens/rules";
-import MemoryScreen from "./screens/memory";
-import ConnectionsScreen from "./screens/connections/ConnectionsScreen";
-import UsageScreen from "./screens/usage/UsageScreen";
-import SettingsScreen from "./screens/settings/SettingsScreen";
+import SettingsHub, { settingsSections } from "./screens/settings/SettingsHub";
+export { About, NON_AFFILIATION } from "./screens/About";
 
 const loadOnboarding = () => api.call("onboarding_get");
 
 const screens: { path: string; label: string; icon: LucideIcon }[] = [
-  { path: "/onboarding", label: "Onboarding", icon: Sprout },
   { path: "/chat", label: "Chat", icon: MessageCircle },
-  { path: "/companion", label: "Companion", icon: Smile },
-  { path: "/activity", label: "Activity", icon: Activity },
-  { path: "/rules", label: "Rules", icon: ShieldCheck },
-  { path: "/memory", label: "Memory", icon: Brain },
-  { path: "/connections", label: "Connections", icon: Plug },
-  { path: "/usage", label: "Usage", icon: Gauge },
   { path: "/settings", label: "Settings", icon: Settings },
 ];
 
-export const NON_AFFILIATION = "OpenDot is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. ChatGPT is a trademark of OpenAI.";
-
-export function About() {
-  return <><PageHeading title="About OpenDot" description="An independent project. A personal companion." />
-    <Card className="about-card"><img src="/app-icon.svg" alt="" width="72" height="72" />
-      <p className="eyebrow">Made for your own corner of the world</p>
-      <h2>Useful company.<br />Room for your judgment.</h2>
-      <p>OpenDot is a personal companion designed to run on your own computer. It remembers context, helps you keep track of things, and asks before acting.</p>
-      <div className="about-principles"><span><ShieldCheck size={18} aria-hidden="true" /> Your permission matters</span><span><BookOpen size={18} aria-hidden="true" /> Open source, Apache-2.0</span></div>
-      <p className="non-affiliation">{NON_AFFILIATION}</p>
-    </Card></>;
-}
-
-function PageHeading({ title, description }: { title: string; description: string }) {
-  return <header className="page-heading"><p className="eyebrow">Your personal companion</p><h1>{title}</h1><p>{description}</p></header>;
+function LegacySettingsRedirect({ section }: { section: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: `/settings/${section}`, search, hash }} replace />;
 }
 
 function ConnectionStatus() {
@@ -77,11 +53,14 @@ export function App() {
   const previousPath = useRef(location.pathname);
   const mustOnboard = !!onboarding.data && onboarding.data.current_step !== "done" && !onboarding.data.completed_steps?.includes("done");
   const gateUnavailable = onboarding.error instanceof ApiError && onboarding.error.code === "not_implemented";
-  const current = screens.find(screen => screen.path === location.pathname)?.label ?? (location.pathname === "/" ? "Chat" : location.pathname === "/about" ? "About" : "Page not found");
+  const inSettings = location.pathname === "/settings" || location.pathname.startsWith("/settings/");
+  const isAbout = ["/about", "/settings/about"].includes(location.pathname);
+  const setupDone = !!onboarding.data && !mustOnboard;
+  const current = (inSettings ? settingsSections.find(section => location.pathname === `/settings/${section.id}`)?.label ?? "Settings" : undefined) ?? screens.find(screen => screen.path === location.pathname)?.label ?? (location.pathname === "/" ? "Chat" : location.pathname === "/about" ? "About" : location.pathname === "/onboarding" ? "Onboarding" : "Page not found");
   useEffect(() => {
     document.title = `${current} · OpenDot`;
-    if (previousPath.current !== location.pathname) { main.current?.focus(); previousPath.current = location.pathname; }
-  }, [location.pathname, current]);
+    if (previousPath.current !== location.pathname) { if (!inSettings) main.current?.focus(); previousPath.current = location.pathname; }
+  }, [location.pathname, current, inSettings]);
 
   return <div className="app-shell">
     <a className="skip-link" href="#main">Skip to content</a>
@@ -93,28 +72,21 @@ export function App() {
           <Icon size={19} strokeWidth={1.6} aria-hidden="true" /><span>{label}</span>
         </NavLink>)}</nav>
         <div className="sidebar-bottom">
-          <NavLink to="/about" title="About" aria-label="About" className={({ isActive }) => `nav-item ${isActive ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}><Info size={19} strokeWidth={1.6} aria-hidden="true" /><span>About</span></NavLink>
           {isWebApp() && <button type="button" title="Sign out" aria-label="Sign out" className="nav-item" onClick={() => signOut()}><LogOut size={19} strokeWidth={1.6} aria-hidden="true" /><span>Sign out</span></button>}
           <Link to="/settings" className="workspace-avatar" aria-label="Local workspace settings" title="Local workspace settings" onClick={() => setMenuOpen(false)}>OD</Link>
         </div>
       </div>
     </aside>
-    <div className={`workspace ${current === "Chat" ? "workspace--chat" : ""}`}><div className="topbar"><div className="breadcrumb"><span>OpenDot</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
+    <div className={`workspace ${current === "Chat" ? "workspace--chat" : inSettings ? "workspace--settings" : ""}`}>{!inSettings && <div className="topbar"><div className="breadcrumb"><span>OpenDot</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
       <Select label="Appearance" value={preference} onChange={value => setTheme(value as ThemePreference)} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />
-    </div>
+    </div>}
       <ConnectionStatus />
-      <main id="main" ref={main} tabIndex={-1} className="main-content">{location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !["/about", "/onboarding"].includes(location.pathname) ? <Navigate to="/onboarding" replace /> : <Routes>
+      <main id="main" ref={main} tabIndex={-1} className="main-content">{!isAbout && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : !isAbout && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !isAbout && location.pathname !== "/onboarding" ? <Navigate to="/onboarding" replace /> : <Routes>
         <Route path="/" element={<Navigate to="/chat" replace />} />
-        <Route path="/onboarding" element={<OnboardingScreen onComplete={async () => { await onboarding.reload(); navigate("/chat"); }} />} />
+        <Route path="/onboarding" element={setupDone ? <Navigate to="/chat" replace /> : <OnboardingScreen onComplete={async () => { await onboarding.reload(); navigate("/chat"); }} />} />
         <Route path="/chat" element={<ChatScreen />} />
-        <Route path="/companion" element={<CompanionScreen />} />
-        <Route path="/activity" element={<ActivityScreen />} />
-        <Route path="/rules" element={<RulesScreen />} />
-        <Route path="/memory" element={<MemoryScreen />} />
-        <Route path="/connections" element={<ConnectionsScreen />} />
-        <Route path="/usage" element={<UsageScreen />} />
-        <Route path="/settings" element={<SettingsScreen />} />
-        <Route path="/about" element={<About />} />
+        <Route path="/settings/:section?" element={<SettingsHub />} />
+        {settingsSections.filter(section => section.id !== "general").map(section => <Route key={section.id} path={`/${section.id}`} element={<LegacySettingsRedirect section={section.id} />} />)}
         <Route path="*" element={<EmptyState title="This page isn’t here" description="Head back to your space to find what you need." icon={<Settings size={26} />} action={<Link to="/chat">Back to Chat</Link>} />} />
       </Routes>}</main>
     </div>

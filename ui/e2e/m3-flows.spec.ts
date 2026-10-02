@@ -179,6 +179,7 @@ test("usage shows all breakdowns, validates budgets, handles 501, and chat works
 
   await page.unroute("**/v1/usage?days=7");
   for (const theme of ["light", "dark"]) {
+    await page.goto("/settings/general");
     await page.getByRole("combobox", { name: "Appearance" }).click();
   await page.getByRole("option", { name: theme === "light" ? "Light" : "Dark", exact: true }).click();
     await page.goto("/chat");

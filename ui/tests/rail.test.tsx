@@ -11,13 +11,17 @@ it("labels every rail link, keeps tooltips and accessible names, and marks the a
   await act(async () => {});
   expect(screen.queryByText("Daemon connected")).not.toBeInTheDocument();
   const navigation = screen.getByRole("navigation", { name: "Main navigation" });
-  for (const label of ["Onboarding", "Chat", "Companion", "Activity", "Rules", "Memory", "Connections", "Usage", "Settings"]) {
+  expect(within(navigation).getAllByRole("link")).toHaveLength(2);
+  for (const label of ["Chat", "Settings"]) {
     const link = within(navigation).getByRole("link", { name: label });
     expect(link).toHaveAttribute("aria-label", label);
     expect(link).toHaveAttribute("title", label);
     expect(within(link).getByText(label)).toBeVisible();
   }
-  expect(screen.getByRole("link", { name: "About" })).toHaveAttribute("aria-current", "page");
+  expect(within(navigation).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  expect(screen.queryByRole("link", { name: "Onboarding" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Local workspace settings" })).toHaveTextContent("OD");
   fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
   expect(navigation.parentElement).toHaveClass("is-open");
   fireEvent.keyDown(navigation, { key: "Escape" });

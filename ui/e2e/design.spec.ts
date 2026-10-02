@@ -28,17 +28,20 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   await page.getByRole("option", { name: "Light", exact: true }).click();
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  for (const name of ["Onboarding", "Chat", "Companion", "Activity", "Rules", "Memory", "Connections", "Usage", "Settings"]) {
-    await page.getByRole("link", { name, exact: true }).click();
-    await expect(page.getByRole("heading", { name: name === "Onboarding" ? "Welcome to OpenDot" : name, level: 1 })).toBeVisible();
-    const markers: Record<string, string> = { Onboarding: "Open chat", Chat: "Send message", Companion: "Rename", Activity: "Refresh activity", Rules: "Create rule", Memory: "Search", Connections: "Connect Gmail", Usage: "Save budgets", Settings: "Save settings" };
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings" }).click();
+  for (const name of ["General", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity"]) {
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name, exact: true }).click();
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    const markers: Record<string, string> = { General: "Save settings", Companion: "Rename", Activity: "Refresh activity", Rules: "Create rule", Memory: "Search", Connections: "Connect Gmail", Usage: "Save budgets" };
     await expect(page.getByRole("button", { name: markers[name], exact: true })).toBeVisible();
-    await expect(page.locator("main")).toBeFocused();
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeFocused();
   }
   await page.getByRole("link", { name: "About", exact: true }).click();
   await expect(page.getByText("OpenDot is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. ChatGPT is a trademark of OpenAI.")).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "About OpenDot" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "About", level: 1 })).toBeVisible();
+  await page.getByRole("link", { name: "General", exact: true }).click();
   await page.getByRole("combobox", { name: "Appearance" }).click();
   await page.getByRole("option", { name: "System", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -82,7 +85,7 @@ test("screens fit 720px in both themes without runtime errors", async ({ page },
   });
   for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: theme });
-    for (const path of ["onboarding", "chat", "companion", "activity", "rules", "memory", "connections", "usage", "settings"]) {
+    for (const path of ["chat", "companion", "activity", "rules", "memory", "connections", "usage", "settings", "settings/general"]) {
       await page.goto(`/${path}`);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.locator("main .skeleton")).toHaveCount(0);
@@ -106,13 +109,14 @@ test("mobile navigation is keyboard usable and fits a narrow screen", async ({ p
   const toggle = page.getByRole("button", { name: "Open navigation" });
   await toggle.focus(); await page.keyboard.press("Enter");
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("link", { name: "Onboarding", exact: true })).toBeFocused();
+  await expect(page.getByRole("link", { name: "Chat", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(toggle).toBeFocused();
   await toggle.click();
-  await page.getByRole("link", { name: "About", exact: true }).click();
-  await expect(page.getByRole("navigation")).toBeHidden();
-  await expect(page.getByRole("heading", { name: "About OpenDot" })).toBeVisible();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeHidden();
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByRole("heading", { name: "Welcome to OpenDot" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
