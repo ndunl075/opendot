@@ -20,7 +20,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from .contract import ENDPOINTS, STREAM, Endpoint
 from .events import ClientFrame, StreamEvent
 from .fake_data import fake_json, fake_model
-from .models import ApprovalItem, ErrorResponse, ToolCallRecord, UsageStamp
+from .models import ApprovalItem, ErrorResponse, OnboardingState, ToolCallRecord, UsageStamp
 
 ALLOWED_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -71,9 +71,29 @@ def _handler(endpoint: Endpoint):
                     endpoint.request.model_validate(dict(request.query_params))
             except ValidationError as exc:
                 return _error(422, "invalid_request", f"{exc.error_count()} validation error(s)")
+        if endpoint.name in _ONBOARDING_ENDPOINTS:
+            return _json(_onboarding_state(finish=endpoint.name == "onboarding_complete"))
         return _json(fake_json(endpoint.response))
 
     return handle
+
+
+_ONBOARDING_ENDPOINTS = {"onboarding_get", "onboarding_complete"}
+_onboarding = {"done": False}
+
+
+def _onboarding_state(*, finish: bool) -> Any:
+    """Onboarding is the one flow the UI walks step by step, so the mock remembers finishing it."""
+    if finish:
+        _onboarding["done"] = True
+    state = fake_json(OnboardingState)
+    if _onboarding["done"]:
+        state.update(
+            current_step="done",
+            completed_steps=["companion", "chatgpt", "weekly_limit", "connections", "intro", "done"],
+            intro_message=state.get("intro_message") or "Hi, I'm Juniper. I'm ready when you are.",
+        )
+    return state
 
 
 async def _chat_socket(websocket: WebSocket) -> None:
