@@ -29,6 +29,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any, Callable, Literal, TextIO
 
+from .config import chatgpt_state_path as default_chatgpt_state_path
+
 Status = Literal["ok", "warn", "fail", "skipped"]
 
 LOW_DISK_BYTES = 1024**3
@@ -165,7 +167,7 @@ class DoctorContext:
     service_status: Callable[[], ServiceInfo | None] = _default_service_status
     sign_in: Callable[[Path], SignInInfo] = _default_sign_in
     disk_free: Callable[[Path], int] = _default_disk_free
-    chatgpt_state_path: Path = Path(".opendot") / "chatgpt_plan.json"
+    chatgpt_state_path: Path = field(default_factory=default_chatgpt_state_path)
 
 
 # --------------------------------------------------------------------------- helpers
