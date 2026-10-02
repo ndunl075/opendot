@@ -33,7 +33,7 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   for (const name of ["General", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity"]) {
     await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name, exact: true }).click();
     await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-    const markers: Record<string, string> = { General: "Save settings", Companion: "Rename", Activity: "Refresh activity", Rules: "Create rule", Memory: "Search", Connections: "Connect Gmail", Usage: "Save budgets" };
+    const markers: Record<string, string> = { General: "Save general", Companion: "Rename", Activity: "Refresh activity", Rules: "Create rule", Memory: "Search", Connections: "Connect Gmail", Usage: "Save budgets" };
     await expect(page.getByRole("button", { name: markers[name], exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name, level: 1 })).toBeFocused();
   }
