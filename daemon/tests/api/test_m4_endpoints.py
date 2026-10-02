@@ -372,6 +372,36 @@ def test_conversations_persist_messages_in_order_with_usage(env: Env) -> None:
     assert env.client.get("/v1/chat/conversations/nope", headers=AUTH).status_code == 404
 
 
+def test_a_follow_up_message_carries_the_conversation_so_far(env: Env) -> None:
+    """Each chat message runs as its own task; without the earlier turns the companion forgets them."""
+    first = env.chat("My dog is called Biscuit.")
+    env.chat("What is my dog called?", conversation_id=first["conversation_id"])
+    other = env.chat("Unrelated question")  # a new conversation starts empty
+
+    follow_up, fresh = env.world.provider.requests[-2], env.world.provider.requests[-1]
+    turns = [(item.role, item.content) for item in follow_up.input if item.role in ("user", "assistant")]
+    assert turns[:2] == [("user", "My dog is called Biscuit."), ("assistant", "Hello there.")]
+    assert "What is my dog called?" in turns[-1][1]  # the new message is still the last thing sent
+    assert sum("Biscuit" in text for _, text in turns) == 1
+    assert not any("Biscuit" in item.content for item in fresh.input)
+    assert other["conversation_id"] != first["conversation_id"]
+
+
+def test_streamed_reply_ids_match_the_stored_reply(env: Env) -> None:
+    """The live stream and the stored history use one id for the reply, distinct from the user message."""
+    from opendot_core.api.events import CHAT_STREAM_PATH, assistant_id
+
+    with env.client.websocket_connect(
+        CHAT_STREAM_PATH, headers={"Authorization": AUTH["Authorization"]}
+    ) as ws:
+        sent = env.chat("hello")
+        streamed = {ws.receive_json()["message_id"] for _ in range(2)}
+    conversation = env.get(f"/v1/chat/conversations/{sent['conversation_id']}", Conversation)
+    user, reply = conversation["messages"]
+    assert user["id"] == sent["message_id"] and reply["id"] == assistant_id(sent["message_id"])
+    assert streamed == {reply["id"]}
+
+
 def test_conversation_records_tool_calls_and_the_approval_card(tmp_path: Path) -> None:
     env = Env(tmp_path, [tool_turn("gmail_draft_create", DRAFT), text_turn(OK_REVIEW), text_turn("Draft is ready.")])
     sent = env.chat("draft an email to bob@example.com about lunch")

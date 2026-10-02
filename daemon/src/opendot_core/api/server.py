@@ -366,7 +366,10 @@ class ChatHub:
     def _publish(self, conversation_id: str, message_id: str, payload: dict[str, Any]) -> None:
         with self._lock:
             self._seq += 1
-            event = {"seq": self._seq, "conversation_id": conversation_id, "message_id": message_id, **payload}
+            event = {
+                "seq": self._seq, "conversation_id": conversation_id, "message_id": ev.assistant_id(message_id),
+                **payload,
+            }
             validated = _STREAM_EVENT.validate_python(event).model_dump(mode="json")
             self._history.append(validated)
             subs = list(self._subs)
@@ -392,7 +395,13 @@ class ChatHub:
         """Start a task for a user message and run it in the background."""
         conversation_id = conversation_id or f"conv_{uuid4().hex[:12]}"
         message_id = f"msg_{uuid4().hex[:12]}"
-        task_id = self.loop.start_task(text)
+        prior: list[tuple[str, str]] = []
+        if self.recorder is not None:
+            try:
+                prior = self.recorder.recent_turns(conversation_id)
+            except Exception:  # history is a convenience; the message still goes through
+                prior = []
+        task_id = self.loop.start_task(text, prior_turns=prior) if prior else self.loop.start_task(text)
         with self._lock:
             self._ids[task_id] = (conversation_id, message_id)
         if self.recorder is not None:

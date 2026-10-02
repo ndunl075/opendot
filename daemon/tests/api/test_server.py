@@ -18,7 +18,7 @@ from opendot_core.agent.loop_api import (
     ToolEvent,
 )
 from opendot_core.api.escrow import TokenEscrow
-from opendot_core.api.events import CHAT_STREAM_PATH
+from opendot_core.api.events import CHAT_STREAM_PATH, assistant_id
 from opendot_core.api.server import create_app
 from opendot_core.db import Database
 from opendot_core.policy import ApprovalService
@@ -46,9 +46,11 @@ class FakeLoop:
         self._paused: str | None = None
         self.runs: list[str] = []
 
-    def start_task(self, message, *, job_type="chat", chat_id=None, preapproved_actions=frozenset()) -> str:
+    def start_task(
+        self, message, *, job_type="chat", chat_id=None, preapproved_actions=frozenset(), prior_turns=()
+    ) -> str:
         task_id = f"task{len(self.tasks) + 1}"
-        self.tasks[task_id] = {"message": message, "approval": None}
+        self.tasks[task_id] = {"message": message, "approval": None, "prior_turns": list(prior_turns)}
         return task_id
 
     def run(self, task_id: str) -> Iterator[LoopEvent]:
@@ -204,7 +206,8 @@ def test_chat_send_http_streams_to_connected_client(client: TestClient) -> None:
         assert body["stream_path"] == CHAT_STREAM_PATH
         events = collect(ws, until={"completed"})
     assert events[0]["conversation_id"] == body["conversation_id"]
-    assert events[0]["message_id"] == body["message_id"]
+    # The stream carries the reply's own id, never the user message's (a client would overwrite it).
+    assert events[0]["message_id"] == assistant_id(body["message_id"]) != body["message_id"]
 
 
 def test_resume_replays_missed_events(client: TestClient) -> None:
