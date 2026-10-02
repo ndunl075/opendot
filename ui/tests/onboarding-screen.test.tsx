@@ -65,9 +65,10 @@ describe("Onboarding screen", () => {
     const call = vi.spyOn(api, "call").mockResolvedValue({ ...initial, current_step: "companion" });
     render(<OnboardingScreen />);
     fireEvent.change(await screen.findByRole("textbox", { name: "Companion name" }), { target: { value: "Cedar" } });
-    fireEvent.click(screen.getByRole("button", { name: "Choose avatar 2" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Color: Sky" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Pet: Fox" }));
     fireEvent.click(screen.getByRole("button", { name: "Save companion" }));
-    await waitFor(() => expect(call).toHaveBeenCalledWith("onboarding_companion", { body: { name: "Cedar", avatar_seed: "open-fold-2" } }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith("onboarding_companion", { body: { name: "Cedar", avatar_seed: "v2:c=sky;h=none;p=fox" } }));
   });
 
   it("polls sign-in and stops an account without Plus or Pro", async () => {
@@ -118,6 +119,41 @@ describe("Onboarding screen", () => {
     vi.spyOn(api, "call").mockRejectedValue(new ApiError(501, "not_implemented", "Unavailable"));
     render(<OnboardingScreen />);
     expect(await screen.findByText("Not available in this version yet")).toBeVisible();
+  });
+
+  it.each(["Continue to introduction", "Skip for now"])("shows a rejected onboarding_complete and allows retry after %s", async action => {
+    const ready: OnboardingState = { ...initial, current_step: "connections", chatgpt: { ...initial.chatgpt, state: "signed_in", eligible: true, plan: "eligible_plus" } };
+    const onComplete = vi.fn();
+    let reject!: (error: Error) => void;
+    const call = vi.spyOn(api, "call").mockImplementation(async name => {
+      if (name === "onboarding_get") return ready;
+      if (name === "onboarding_complete") return new Promise<OnboardingState>((_, fail) => { reject = fail; });
+      if (name === "google_client_get") return { configured: true };
+      throw new Error(`Unexpected ${name}`);
+    });
+    render(<OnboardingScreen onComplete={onComplete} />);
+    const continueButton = await screen.findByRole("button", { name: "Continue to introduction" });
+    const skipButton = screen.getByRole("button", { name: "Skip for now" });
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    for (const button of [continueButton, skipButton]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button).toHaveTextContent("Loading");
+    }
+    await act(async () => { reject(new ApiError(503, "unavailable", "Could not finish setup. Please try again.")); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not finish setup. Please try again.");
+    expect(screen.getByRole("heading", { name: "Connect your apps" })).toBeVisible();
+    expect(onComplete).not.toHaveBeenCalled();
+    for (const button of [continueButton, skipButton]) {
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute("aria-busy");
+    }
+    call.mockResolvedValueOnce({ ...ready, current_step: "intro", intro_message: "Hello from Moss." });
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(await screen.findByText("Hello from Moss.")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(call.mock.calls.filter(([name]) => name === "onboarding_complete")).toHaveLength(2);
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it.each(["Continue to introduction", "Skip for now"])("introduces the companion after %s", async action => {

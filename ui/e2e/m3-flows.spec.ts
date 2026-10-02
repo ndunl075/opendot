@@ -71,9 +71,9 @@ test("onboarding names a companion, acknowledges plan limits, skips connections,
   await page.getByLabel("Companion name").fill("Cedar");
   const avatar = page.getByRole("img", { name: "Selected companion avatar" });
   const firstAvatar = await avatar.innerHTML();
-  await page.getByRole("button", { name: "Re-roll avatar" }).click();
+  await page.getByRole("radio", { name: "Color: Sky" }).click();
   expect(await avatar.innerHTML()).not.toBe(firstAvatar);
-  await page.getByRole("button", { name: "Choose avatar 2" }).click();
+  await page.getByRole("radio", { name: "Pet: Fox" }).click();
   await page.getByRole("button", { name: "Save companion" }).click();
   await page.getByRole("button", { name: "Continue with ChatGPT" }).click();
   await expect(page.getByRole("heading", { name: "Keep usage in your hands" })).toBeVisible();

@@ -1,7 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  // Completion in another test or preview tab must not change this test's start.
+  await page.route("**/v1/onboarding", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), current_step: "connections", completed_steps: ["companion", "chatgpt", "weekly_limit"] } });
+  });
+});
+
 test("all routes, About copy, self-hosted fonts, and persisted OS/override themes", async ({ page }) => {
-  // The daemon mock is deliberately stateless. Only mark setup complete for this
+  // Only mark setup complete for this
   // navigation/design test; every screen still reads the real contract mock.
   await page.route("**/v1/onboarding", async route => {
     const response = await route.fetch();
@@ -32,10 +40,11 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.evaluate(() => document.fonts.ready);
-  expect(await page.evaluate(() => document.fonts.check('16px "IBM Plex Sans"'))).toBe(true);
+  expect(await page.evaluate(() => document.fonts.check('16px "Inter Variable"'))).toBe(true);
+  expect(await page.locator("body").evaluate(element => getComputedStyle(element).fontFamily)).toContain("Inter Variable");
   const fonts = await page.evaluate(() => performance.getEntriesByType("resource").map(entry => entry.name).filter(name => /\.woff2?/.test(name)));
   expect(fonts.length).toBeGreaterThan(0);
-  expect(fonts.every(url => new URL(url).origin === "http://127.0.0.1:5173")).toBe(true);
+  expect(fonts.every(url => new URL(url).origin === new URL(page.url()).origin)).toBe(true);
   expect(errors).toEqual([]);
 });
 

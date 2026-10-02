@@ -5,8 +5,7 @@ import { Badge, Button, Card, Checkbox, ConfirmDialog, Dialog, ErrorState, Input
 import { Avatar, createAvatarSeed } from "../../src/design/avatar";
 import { ThemeProvider, useTheme } from "../../src/design/theme";
 import { ApiError } from "../../src/api/client";
-import "@fontsource/ibm-plex-sans/latin-400.css";
-import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource-variable/inter/wght.css";
 import "../../src/design/tokens.css";
 import "../../src/design/components.css";
 

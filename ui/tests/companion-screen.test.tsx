@@ -35,7 +35,7 @@ describe("Companion screen", () => {
     render(<CompanionScreen />);
     fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Companion name" }), { target: { value: "Fern" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(call).toHaveBeenCalledWith("companion_rename", { body: { name: "Fern" } }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Re-roll avatar" }));

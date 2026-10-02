@@ -36,7 +36,7 @@ describe("Google client upload", () => {
     expect(storage).not.toHaveBeenCalled();
     expect(document.body.innerHTML).not.toContain(credentials.client_secret);
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Replace" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Replace" })).toHaveFocus());
   });
 
   it.each(["not json", "null", "[]", "{}", '{"installed":{"client_id":"id"}}', '{"installed":{"client_id":3,"client_secret":"secret"}}', '{"installed":{"client_id":" ","client_secret":"secret"}}']) ("rejects malformed credentials: %s", async contents => {

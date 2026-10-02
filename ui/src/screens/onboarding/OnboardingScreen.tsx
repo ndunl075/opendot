@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../api/client";
 import type { ChatGPTSignInStart, OnboardingState } from "../../api/types.gen";
-import { Avatar, createAvatarSeed } from "../../design/avatar";
+import { Avatar, DEFAULT_AVATAR, encodeAvatarSeed } from "../../design/avatar";
+import { AvatarPicker } from "../../design/AvatarPicker";
 import { Badge, Button, Card, Checkbox, ErrorState, Input, Skeleton } from "../../design/components";
 import { ConnectionPicker } from "../connections/ConnectionPicker";
 import { safeExternalUrl, ScreenHeading, useMutation, useResource } from "../shared";
@@ -10,14 +11,14 @@ const loadOnboarding = () => api.call("onboarding_get");
 
 function CompanionSetup({ state, onSave, pending }: { state: OnboardingState; onSave: (name: string, seed: string) => void; pending: boolean }) {
   const [name, setName] = useState(state.companion_name ?? "");
-  const [seed, setSeed] = useState(state.avatar_seed ?? "open-fold-1");
+  const [seed, setSeed] = useState(state.avatar_seed ?? encodeAvatarSeed(DEFAULT_AVATAR));
   function submit(event: FormEvent) { event.preventDefault(); if (name.trim()) onSave(name.trim(), seed); }
-  return <form className="form-stack" onSubmit={submit}>
-    <h2>Meet your companion</h2><p>Give it a name and choose a ribbon avatar. You can change both later.</p>
-    <Input label="Companion name" value={name} required maxLength={40} autoComplete="off" onChange={event => setName(event.target.value)} />
-    <Avatar seed={seed} label="Selected companion avatar" />
-    <div className="actions" role="group" aria-label="Choose a companion avatar">{["open-fold-1", "open-fold-2", "open-fold-3"].map((choice, index) => <Button key={choice} variant="secondary" aria-label={`Choose avatar ${index + 1}`} aria-pressed={seed === choice} onClick={() => setSeed(choice)}><Avatar seed={choice} size={44} label={`Ribbon avatar ${index + 1}`} /></Button>)}</div>
-    <div className="actions"><Button variant="secondary" onClick={() => setSeed(createAvatarSeed())}>Re-roll avatar</Button><Button type="submit" loading={pending} disabled={!name.trim()}>Save companion</Button></div>
+  return <form className="form-stack onboarding-identity" onSubmit={submit}>
+    <h2>Meet your companion</h2><p>Give it a name and a look of its own. You can change both later.</p>
+    <Input label="Companion name" value={name} required maxLength={40} disabled={pending} autoComplete="off" onChange={event => setName(event.target.value)} />
+    <div className="identity-avatar"><Avatar seed={seed} size={144} label="Selected companion avatar" /></div>
+    <AvatarPicker seed={seed} onChange={setSeed} disabled={pending} />
+    <div className="actions"><Button type="submit" loading={pending} disabled={!name.trim()}>Save companion</Button></div>
   </form>;
 }
 
@@ -106,7 +107,7 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
   if (!data) return null;
   const ineligible = data.chatgpt.state === "signed_in" && (!data.chatgpt.eligible || !["eligible_plus", "eligible_pro"].includes(data.chatgpt.plan));
   const step = data.current_step;
-  return <section className="screen-stack"><ScreenHeading title="Welcome to OpenDot" description="A companion on your computer, with you in control." />
+  return <section className="screen-stack onboarding-screen"><ScreenHeading title="Welcome to OpenDot" description="A companion on your computer, with you in control." />
     <Card className="section-card form-stack">
       {mutation.error != null && <ErrorState error={mutation.error} />}
       {ineligible ? <div className="form-stack"><h2>ChatGPT Plus or Pro is required</h2><p role="alert">This account cannot share its ChatGPT plan with OpenDot. Free and Go accounts are not supported. Setup cannot continue.</p>{data.chatgpt.ineligible_reason && <p>{data.chatgpt.ineligible_reason}</p>}<Button onClick={() => void startSignIn()} loading={mutation.pending || polling}>Continue with ChatGPT</Button></div> : <>
@@ -120,7 +121,7 @@ export default function OnboardingScreen({ onComplete }: { onComplete?: () => vo
           {data.chatgpt.error && <p role="alert">{data.chatgpt.error}</p>}
         </div>}
         {step === "weekly_limit" && <UsageAcknowledgement state={data} onAcknowledge={() => void acknowledge()} onCheck={() => void checkCredits()} pending={mutation.pending} />}
-        {step === "connections" && <div className="form-stack"><h2>Connect your apps</h2><ConnectionPicker githubOptional onRefresh={() => void resource.reload()} /><p className="muted">You can add or manage read-only accounts in Connections at any time.</p><div className="actions"><Button onClick={() => void finish()} loading={mutation.pending}>Continue to introduction</Button><Button variant="secondary" disabled={mutation.pending} onClick={() => void finish()}>Skip for now</Button></div></div>}
+        {step === "connections" && <div className="form-stack"><h2>Connect your apps</h2><ConnectionPicker githubOptional onRefresh={() => void resource.reload()} /><p className="muted">You can add or manage read-only accounts in Connections at any time.</p><div className="actions"><Button onClick={() => void finish()} loading={mutation.pending}>Continue to introduction</Button><Button variant="secondary" loading={mutation.pending} onClick={() => void finish()}>Skip for now</Button></div></div>}
         {(step === "intro" || step === "done") && <div className="form-stack"><Avatar seed={data.avatar_seed ?? "open-fold-1"} /><h2>Hello, I’m {data.companion_name ?? "your companion"}</h2><p>{data.intro_message ?? "I can help you keep track of work, remember what matters, and ask before taking action. You can pause me at any time."}</p><Button loading={mutation.pending} onClick={() => { if (step === "done" || data.completed_steps.includes("done")) onComplete?.(); else void finish(true); }}>Open chat</Button></div>}
       </>}
       {pollError != null && <ErrorState error={pollError} onRetry={() => { setPollError(undefined); setPolling(true); }} />}

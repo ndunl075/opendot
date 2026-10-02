@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, BookOpen, Cable, ChevronRight, Gauge, Info, LogOut, Menu, MessageSquare, PanelTop, Settings, ShieldCheck, SlidersHorizontal, Sprout, X, type LucideIcon } from "lucide-react";
+import { Activity, BookOpen, Brain, Cable, ChevronRight, Gauge, Info, LogOut, Menu, MessageCircle, Plug, Settings, ShieldCheck, Smile, Sprout, X, type LucideIcon } from "lucide-react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError } from "./api/client";
 import { isWebApp, signOut } from "./api/connection";
-import { Avatar } from "./design/avatar";
 import { Card, EmptyState, ErrorState, IconButton, Select, Skeleton } from "./design/components";
 import { useTheme, type ThemePreference } from "./design/theme";
 import { useResource } from "./screens/shared";
@@ -21,14 +20,14 @@ const loadOnboarding = () => api.call("onboarding_get");
 
 const screens: { path: string; label: string; icon: LucideIcon }[] = [
   { path: "/onboarding", label: "Onboarding", icon: Sprout },
-  { path: "/chat", label: "Chat", icon: MessageSquare },
-  { path: "/companion", label: "Companion", icon: PanelTop },
+  { path: "/chat", label: "Chat", icon: MessageCircle },
+  { path: "/companion", label: "Companion", icon: Smile },
   { path: "/activity", label: "Activity", icon: Activity },
   { path: "/rules", label: "Rules", icon: ShieldCheck },
-  { path: "/memory", label: "Memory", icon: BookOpen },
-  { path: "/connections", label: "Connections", icon: Cable },
+  { path: "/memory", label: "Memory", icon: Brain },
+  { path: "/connections", label: "Connections", icon: Plug },
   { path: "/usage", label: "Usage", icon: Gauge },
-  { path: "/settings", label: "Settings", icon: SlidersHorizontal },
+  { path: "/settings", label: "Settings", icon: Settings },
 ];
 
 export const NON_AFFILIATION = "OpenDot is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. ChatGPT is a trademark of OpenAI.";
@@ -89,17 +88,17 @@ export function App() {
       <div className="brand-row"><Link to="/" className="brand" aria-label="OpenDot home" onClick={() => setMenuOpen(false)}><img src="/app-icon.svg" width="36" height="36" alt="" /><h2>OpenDot</h2></Link>
         <IconButton className="mobile-menu" label={menuOpen ? "Close navigation" : "Open navigation"} ref={menuButton} aria-expanded={menuOpen} aria-controls="navigation-panel" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</IconButton></div>
       <div id="navigation-panel" className={`navigation-panel ${menuOpen ? "is-open" : ""}`} onKeyDown={event => { if (event.key === "Escape" && menuOpen) { setMenuOpen(false); menuButton.current?.focus(); } }}>
-        <p className="nav-caption">Your space</p>
-        <nav aria-label="Main navigation">{screens.map(({ path, label, icon: Icon }) => <NavLink key={path} to={path} className={({ isActive }) => `nav-item ${isActive || (path === "/chat" && location.pathname === "/") ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}>
+        <nav aria-label="Main navigation">{screens.map(({ path, label, icon: Icon }) => <NavLink key={path} to={path} title={label} aria-label={label} className={({ isActive }) => `nav-item ${isActive || (path === "/chat" && location.pathname === "/") ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}>
           <Icon size={19} strokeWidth={1.6} aria-hidden="true" /><span>{label}</span>
         </NavLink>)}</nav>
-        <div className="sidebar-bottom"><div className="companion-preview"><Avatar seed="opendot-first-fold" size={42} label="OpenDot companion avatar preview" /><div><strong>A thoughtful companion</strong><span>Asks before it acts</span></div></div>
-          <NavLink to="/about" className={({ isActive }) => `nav-item ${isActive ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}><Info size={19} strokeWidth={1.6} aria-hidden="true" /><span>About</span></NavLink>
-          {isWebApp() && <button type="button" className="nav-item" onClick={() => signOut()}><LogOut size={19} strokeWidth={1.6} aria-hidden="true" /><span>Sign out</span></button>}
+        <div className="sidebar-bottom">
+          <NavLink to="/about" title="About" aria-label="About" className={({ isActive }) => `nav-item ${isActive ? "is-active" : ""}`} onClick={() => setMenuOpen(false)}><Info size={19} strokeWidth={1.6} aria-hidden="true" /><span>About</span></NavLink>
+          {isWebApp() && <button type="button" title="Sign out" aria-label="Sign out" className="nav-item" onClick={() => signOut()}><LogOut size={19} strokeWidth={1.6} aria-hidden="true" /><span>Sign out</span></button>}
+          <Link to="/settings" className="workspace-avatar" aria-label="Local workspace settings" title="Local workspace settings" onClick={() => setMenuOpen(false)}>OD</Link>
         </div>
       </div>
     </aside>
-    <div className="workspace"><div className="topbar"><div className="breadcrumb"><span>Your space</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
+    <div className={`workspace ${current === "Chat" ? "workspace--chat" : ""}`}><div className="topbar"><div className="breadcrumb"><span>OpenDot</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
       <Select label="Appearance" value={preference} onChange={event => setTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></Select>
     </div>
       <main id="main" ref={main} tabIndex={-1} className="main-content">{location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : location.pathname !== "/about" && location.pathname !== "/onboarding" && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !["/about", "/onboarding"].includes(location.pathname) ? <Navigate to="/onboarding" replace /> : <Routes>

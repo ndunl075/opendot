@@ -36,12 +36,14 @@ it("sends through REST, ignores foreign broadcasts, and announces only final rep
   await waitFor(() => expect(socket.sent.map(value => JSON.parse(value))).toContainEqual({ type: "resume", conversation_id: "c", after_seq: 0 }));
   expect(call).toHaveBeenCalledWith("chat_send", { body: { conversation_id: null, text: "Please draft a reply" } });
   expect(screen.queryByText("Another window's reply")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Message read time")).not.toBeInTheDocument();
   const base = { conversation_id: "c", message_id: "m" };
   act(() => {
     socket.event({ ...base, type: "message_started", seq: 1 });
     socket.event({ ...base, type: "text_delta", seq: 2, text: "I can help." });
   });
   expect(screen.getByText("I can help.")).toBeInTheDocument();
+  expect(screen.getByLabelText("Message read time")).toHaveTextContent(/^Read /);
   expect(screen.getByRole("log")).toHaveAttribute("aria-live", "off");
   expect(screen.getByLabelText("Companion reply")).toHaveAttribute("aria-busy", "true");
   expect(screen.getByLabelText("Completed reply")).toBeEmptyDOMElement();
@@ -61,6 +63,7 @@ it("sends through REST, ignores foreign broadcasts, and announces only final rep
   fireEvent.change(screen.getByLabelText("Message your companion"), { target: { value: "Next message" } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(call).toHaveBeenCalledWith("chat_send", { body: { conversation_id: "c", text: "Next message" } }));
+  await waitFor(() => expect(screen.queryByLabelText("Message read time")).not.toBeInTheDocument());
 });
 
 it.each([true, false])("uses authoritative approval state across replay and fetch ordering (fetch first: %s)", async fetchFirst => {
@@ -77,6 +80,7 @@ it.each([true, false])("uses authoritative approval state across replay and fetc
     throw new Error(`Unexpected ${name}`);
   });
   render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Conversation history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Saved conversation/ }));
   await screen.findByText("Saved reply");
   await waitFor(() => expect(Socket.instances).toHaveLength(2));
@@ -122,6 +126,7 @@ it("shows unavailable history without inventing conversation data", async () => 
   vi.stubGlobal("WebSocket", Socket);
   vi.spyOn(api, "call").mockResolvedValueOnce({ conversations: [{ id: "c", title: "Previous chat", message_count: 1, updated_at: "2026-09-30" }] }).mockResolvedValueOnce(status).mockRejectedValue(new ApiError(501, "not_implemented", "Not served"));
   render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Conversation history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Previous chat/ }));
   expect(await screen.findByText("Not available in this version yet")).toBeInTheDocument();
 });
