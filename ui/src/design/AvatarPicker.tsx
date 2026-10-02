@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, PawPrint, Smile } from "lucide-react";
-import { DEFAULT_AVATAR, encodeAvatarSeed, parseAvatarSeed } from "./avatar";
+import { AvatarBase, DEFAULT_AVATAR, encodeAvatarSeed, parseAvatarSeed } from "./avatar";
 import { avatarColors, characters, pets } from "./characters/catalog";
 import { Character } from "./characters/Character";
 import { PixelPet } from "./characters/PixelPet";
 import "./avatar-picker.css";
 
 interface Option { id: string; name: string; art: ReactNode }
-const colorOptions: Option[] = avatarColors.map(color => ({ ...color, art: <span className="avatar-swatch" style={{ background: `radial-gradient(circle at 30% 25%, ${color.light}, ${color.color} 85%)` }} /> }));
+const colorOptions: Option[] = avatarColors.map(color => ({ ...color, art: <svg className="avatar-swatch" viewBox="4 4 92 92"><AvatarBase colorId={color.id} /></svg> }));
 const characterOptions: Option[] = [
   { id: "none", name: "None", art: <span className="avatar-none"><Smile size={38} strokeWidth={1.5} /></span> },
   ...characters.map(character => ({ ...character, art: <svg viewBox="0 0 100 100"><Character id={character.id} /></svg> })),

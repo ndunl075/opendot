@@ -25,6 +25,14 @@ describe("companion avatar seeds", () => {
   it("sanitizes invalid choices before encoding", () => {
     expect(parseAvatarSeed(encodeAvatarSeed({ color: "invalid", character: "<script>", pet: "x".repeat(100) }))).toEqual(DEFAULT_AVATAR);
   });
+  it("uses the same ring in swatches and a plain preview, with a 30 percent white center", () => {
+    render(<Avatar seed="v2:c=slate;h=none;p=cat" />);
+    const avatar = screen.getByRole("img");
+    expect(avatar.querySelector('[data-avatar-base="ring"]')).toBeInTheDocument();
+    expect(avatar.querySelector('[data-ring-center]')).toHaveAttribute("r", "13.8");
+    expect(avatar.querySelector('[data-ring-center]')).toHaveAttribute("fill", "#ffffff");
+    expect(avatar.querySelector('[data-pet="cat"]')).toBeInTheDocument();
+  });
   it("composes a solid color, character, and pet with unique gradient references", () => {
     render(<><Avatar seed="v2:c=jade;h=cloud;p=fox" label="First" /><Avatar seed="v2:c=jade;h=cloud;p=fox" label="Second" /></>);
     for (const name of ["First", "Second"]) {
@@ -32,6 +40,8 @@ describe("companion avatar seeds", () => {
       expect(avatar.querySelector('[data-character="cloud"]')).toBeInTheDocument();
       expect(avatar.querySelector('[data-pet="fox"]')).toHaveAttribute("shape-rendering", "crispEdges");
       expect(avatar.querySelector("circle")).toHaveAttribute("r", "46");
+      expect(avatar.querySelector('[data-avatar-base="disc"]')).toBeInTheDocument();
+      expect(avatar.querySelector('[data-ring-center]')).not.toBeInTheDocument();
     }
     const ids = [...document.querySelectorAll("svg [id]")].map(element => element.id);
     expect(new Set(ids).size).toBe(ids.length);

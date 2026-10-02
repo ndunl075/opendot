@@ -12,7 +12,7 @@ function validChoices(value: AvatarChoices): boolean {
     && (value.pet === "none" || pets.some(pet => pet.id === value.pet));
 }
 
-/** null means a legacy ribbon; malformed v2 seeds use the safe plain slate circle. */
+/** null means a legacy ribbon; malformed v2 seeds use the safe plain slate ring. */
 export function parseAvatarSeed(seed: string): AvatarChoices | null {
   if (!seed.startsWith("v2:")) return null;
   const match = seed.length <= 64 ? /^v2:c=([a-z]+);h=([a-z]+);p=([a-z]+)$/.exec(seed) : null;
@@ -46,12 +46,20 @@ export function Avatar({ seed, ...props }: AvatarProps) {
   return choices ? <ComposedAvatar choices={choices} {...props} /> : <RibbonAvatar seed={seed} {...props} />;
 }
 
-function ComposedAvatar({ choices, label = "Companion avatar", size = 88, ...props }: Omit<AvatarProps, "seed"> & { choices: AvatarChoices }) {
+/** Shared by color swatches and previews so their geometry and shading stay identical. */
+export function AvatarBase({ colorId, ring = true }: { colorId: string; ring?: boolean }) {
   const uid = useId();
-  const color = avatarColors.find(color => color.id === choices.color) ?? avatarColors[0];
-  return <svg width={size} height={size} viewBox="0 0 100 100" {...props} role="img" aria-label={label}>
+  const color = avatarColors.find(color => color.id === colorId) ?? avatarColors[0];
+  return <g data-avatar-base={ring ? "ring" : "disc"}>
     <defs><radialGradient id={`${uid}-color`} cx="32%" cy="25%" r="80%"><stop stopColor={color.light} /><stop offset="1" stopColor={color.color} /></radialGradient></defs>
-    <circle cx="50" cy="50" r="46" fill={`url(#${uid}-color)`} />
+    <circle cx="50" cy="50" r="46" fill={`url(#${uid}-color)`} opacity={ring ? 1 : 0.32} />
+    {ring && <circle data-ring-center="" cx="50" cy="50" r="13.8" fill="#ffffff" />}
+  </g>;
+}
+
+function ComposedAvatar({ choices, label = "Companion avatar", size = 88, ...props }: Omit<AvatarProps, "seed"> & { choices: AvatarChoices }) {
+  return <svg width={size} height={size} viewBox="0 0 100 100" {...props} role="img" aria-label={label}>
+    <AvatarBase colorId={choices.color} ring={choices.character === "none"} />
     {choices.character !== "none" && <g transform="translate(7 4) scale(.86)"><Character id={choices.character as CharacterId} /></g>}
     {choices.pet !== "none" && <g transform="translate(65 65) scale(2.15)"><PixelPet id={choices.pet as PetId} /></g>}
   </svg>;

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
   <title>OpenDot open-fold mark</title>
-  <rect width="64" height="64" rx="14" fill="#245c6a"/>
-  <path d="M16 47V17h13l19 16v14H35V33L22 22v25Z" fill="#fff8e9"/>
+  <rect width="64" height="64" rx="14" fill="#0d0d0d"/>
+  <path d="M16 47V17h13l19 16v14H35V33L22 22v25Z" fill="#ffffff"/>
 </svg>

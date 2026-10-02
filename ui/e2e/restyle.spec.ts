@@ -28,7 +28,9 @@ test("chat rail, bubbles, composer, history and details remain usable", async ({
   await expect(page.getByText("mock-model-terra", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
   const bubbleColors = await page.locator(".chat-message--user").evaluate(element => ({ fg: getComputedStyle(element).color, bg: getComputedStyle(element).backgroundColor }));
-  expect(bubbleColors).toEqual({ fg: "rgb(255, 255, 255)", bg: "rgb(22, 118, 118)" });
+  expect(bubbleColors).toEqual({ fg: "rgb(255, 255, 255)", bg: "rgb(38, 120, 204)" });
+  await expect(page.getByLabel("Message read time")).toContainText("Read ");
+  await expect(page.getByPlaceholder("Send a message")).toBeVisible();
   const history = page.getByRole("button", { name: "Conversation history", exact: true });
   await history.click();
   await expect(history).toHaveAttribute("aria-expanded", "true");

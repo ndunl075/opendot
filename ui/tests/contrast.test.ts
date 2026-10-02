@@ -12,7 +12,7 @@ function contrast(a: string, b: string) { const x = luminance(a), y = luminance(
 describe.each(["light", "dark"])("%s theme WCAG AA", theme => {
   const palette = theme === "light" ? tokens(css.split('[data-theme="dark"]')[0]) : tokens(css.split('[data-theme="dark"]')[1].split("@media")[0]);
   const textPairs = [
-    ...["bg", "surface", "surface-raised", "surface-muted"].flatMap(background => ["text", "text-muted", "accent"].map(foreground => [foreground, background])),
+    ...["bg", "rail", "surface", "surface-raised", "surface-muted", "surface-hover"].flatMap(background => ["text", "text-muted", "accent"].map(foreground => [foreground, background])),
     ["on-accent", "accent"], ["on-accent", "accent-hover"], ["on-danger", "danger"], ["on-danger", "danger-hover"],
     ["on-primary", "primary"], ["on-primary", "primary-hover"],
     ["on-chat-accent", "chat-accent"], ["on-chat-accent", "chat-accent-hover"],
