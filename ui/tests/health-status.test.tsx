@@ -6,21 +6,25 @@ import { api, ApiError } from "../src/api/client";
 import { ThemeProvider } from "../src/design/theme";
 
 afterEach(() => vi.useRealTimers());
-it("refreshes footer health on interval and focus, distinguishes auth from network, and cleans up", async () => {
+it("refreshes the connection banner on interval and focus, distinguishes auth from network, and cleans up", async () => {
   vi.useFakeTimers(); let failure: unknown;
   const call = vi.spyOn(api, "call").mockImplementation(async name => {
     if (name === "health") { if (failure) throw failure; return { status: "ok" } as never; }
     return { current_step: "done", completed_steps: ["done"] } as never;
   });
   const view = render(<ThemeProvider><MemoryRouter initialEntries={["/about"]}><App /></MemoryRouter></ThemeProvider>);
-  await act(async () => {}); expect(screen.getByText("Daemon connected")).toBeVisible();
+  await act(async () => {}); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByText("Daemon connected")).not.toBeInTheDocument();
+  expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
   failure = new Error("Network error"); await act(async () => { vi.advanceTimersByTime(30000); });
-  expect(screen.getByText("Daemon unreachable")).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Daemon unreachable");
   failure = new ApiError(401, "unauthorized", "Bad token");
   await act(async () => { window.dispatchEvent(new Event("focus")); });
-  expect(screen.getByText("Daemon unauthorized — your session expired")).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Daemon unauthorized — your session expired");
   failure = undefined; await act(async () => { window.dispatchEvent(new Event("focus")); });
-  expect(screen.getByText("Daemon connected")).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByText("Daemon connected")).not.toBeInTheDocument();
+  expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
   view.unmount(); const count = call.mock.calls.length;
   await act(async () => { vi.advanceTimersByTime(60000); window.dispatchEvent(new Event("focus")); });
   expect(call).toHaveBeenCalledTimes(count);

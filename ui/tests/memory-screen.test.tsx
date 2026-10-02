@@ -27,7 +27,8 @@ describe("Memory screen", () => {
     render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.click(screen.getByRole("button", { name: "Forget memories" }));
-    fireEvent.change(screen.getByLabelText("Forget by"), { target: { value: "source" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Forget by" }));
+    fireEvent.click(screen.getByRole("option", { name: "Source" }));
     fireEvent.change(screen.getByLabelText("Source to forget"), { target: { value: "gmail" } });
     fireEvent.click(screen.getByRole("button", { name: "Review forget request" }));
     expect(call).not.toHaveBeenCalledWith("memory_forget", expect.anything());
@@ -51,7 +52,8 @@ describe("Memory screen", () => {
     render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.click(screen.getByRole("button", { name: "Forget memories" }));
-    fireEvent.change(screen.getByLabelText("Forget by"), { target: { value: "person" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Forget by" }));
+    fireEvent.click(screen.getByRole("option", { name: "Person" }));
     fireEvent.change(screen.getByLabelText("Person to forget"), { target: { value: "Alex" } });
     fireEvent.click(screen.getByRole("button", { name: "Review forget request" }));
     expect(screen.getByText(/all memories about “Alex”/)).toBeInTheDocument();
@@ -65,7 +67,8 @@ describe("Memory screen", () => {
     render(<MemoryRouter initialEntries={[window.location.pathname + window.location.hash]}><MemoryScreen /></MemoryRouter>);
     await screen.findByText("Prefers morning meetings");
     fireEvent.click(screen.getByRole("button", { name: "Forget memories" }));
-    fireEvent.change(screen.getByLabelText("Forget by"), { target: { value: "time" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Forget by" }));
+    fireEvent.click(screen.getByRole("option", { name: "Time range" }));
     fireEvent.change(screen.getByLabelText("Forget from"), { target: { value: "2026-09-01T09:00" } });
     fireEvent.change(screen.getByLabelText("Forget until"), { target: { value: "2026-09-30T09:00" } });
     fireEvent.click(screen.getByRole("button", { name: "Review forget request" }));

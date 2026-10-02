@@ -121,7 +121,7 @@ it("sends through REST, ignores foreign broadcasts, and announces only final rep
   expect(screen.getByRole("log")).toHaveAttribute("aria-live", "off");
   expect(screen.getByLabelText("Companion reply")).toHaveAttribute("aria-busy", "true");
   expect(screen.getByLabelText("Completed reply")).toBeEmptyDOMElement();
-  expect(screen.getByText("Credits not reported")).toBeInTheDocument();
+  expect(screen.queryByText("Credits not reported")).not.toBeInTheDocument();
   act(() => {
     socket.event({ ...base, type: "approval_required", seq: 3, approval: { id: "a", title: "Draft reply", action: "gmail.create_draft", created_at: "2026-09-30", status: "pending", payload: { body: "Hello" }, preview: "Draft only.", review_note: "Check the recipient.", review_verdict: "concern" } });
     socket.event({ ...base, type: "completed", seq: 4, text: "I can help.", usage: { model: "catalog-model", effort: "low", credits: 0.2 } });
@@ -129,8 +129,9 @@ it("sends through REST, ignores foreign broadcasts, and announces only final rep
   expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "Reviewer note" })).toHaveTextContent("Check the recipient.");
   expect(screen.getByText("Review: concern")).toBeInTheDocument();
-  expect(screen.getByText("catalog-model")).toBeInTheDocument();
-  expect(screen.getByText("0.2 credits")).toBeInTheDocument();
+  expect(screen.queryByText("catalog-model")).not.toBeInTheDocument();
+  expect(screen.queryByText("0.2 credits")).not.toBeInTheDocument();
+  expect(screen.queryByText("low effort")).not.toBeInTheDocument();
   expect(screen.getByText("Using ChatGPT plan")).toBeInTheDocument();
   expect(screen.getByLabelText("Companion reply")).toHaveAttribute("aria-busy", "false");
   expect(screen.getByLabelText("Completed reply")).toHaveTextContent("I can help.");

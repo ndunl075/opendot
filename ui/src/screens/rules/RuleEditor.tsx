@@ -31,7 +31,7 @@ export function RuleEditor({ rule, onClose, onSaved }: { rule?: Rule; onClose: (
     <form className="form-stack" onSubmit={event => void save(event)}>
       <Input label="Rule name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} />
       <Input label="Action" required value={action} disabled={!!rule} hint={rule ? "The action cannot be changed after creation." : "Use the action identifier shown in an approval or existing rule, such as gmail.draft."} onChange={event => setAction(event.target.value)} />
-      <Select label="Behavior" value={behavior} onChange={event => setBehavior(event.target.value as Rule["behavior"])} hint={behaviors[behavior].description}>{Object.entries(behaviors).map(([value, item]) => <option key={value} value={value}>{item.label} ({value})</option>)}</Select>
+      <Select label="Behavior" value={behavior} onChange={value => setBehavior(value as Rule["behavior"])} hint={behaviors[behavior].description} options={Object.entries(behaviors).map(([value, item]) => ({ value, label: `${item.label} (${value})` }))} />
       <Textarea label="Description" value={description} onChange={event => setDescription(event.target.value)} />
       {rule && <Checkbox label="Rule enabled" checked={enabled} onChange={event => setEnabled(event.target.checked)} />}
       {!!mutation.error && <ErrorState error={mutation.error} />}

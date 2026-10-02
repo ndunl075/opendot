@@ -90,7 +90,6 @@
 .typing-indicator i:nth-of-type(2) { animation-delay: 160ms; }
 .typing-indicator i:nth-of-type(3) { animation-delay: 320ms; }
 @keyframes typing-dot { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: .7; transform: translateY(-2px); } }
-.message-usage--pending { visibility: hidden; }
 .message-delivery { margin-top: var(--space-2); font-size: var(--text-xs); }
 .chat-composer .send-button[aria-busy] > span[aria-hidden] { display: none; }
 .transcript .state-icon { background: transparent; width: 72px; height: 72px; margin-bottom: var(--space-6); }

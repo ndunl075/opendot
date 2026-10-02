@@ -115,7 +115,8 @@ test("real mock-server reply preserves the prompt with one reply bubble", async 
   await page.getByLabel("Message your companion").fill("Draft a reply");
   await page.getByLabel("Message your companion").press("Enter");
   await expect(page.getByLabel("Your message", { exact: true })).toContainText("Draft a reply");
-  await expect(page.getByText("mock-model-terra", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Companion reply", { exact: true })).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByText("mock-model-terra", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Companion reply", { exact: true })).toHaveCount(1);
   await expect.poll(() => page.getByRole("log").evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(3);
   await page.screenshot({ path: ".visual-check/chat-mock-server.png" });

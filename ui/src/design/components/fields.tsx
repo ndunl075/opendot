@@ -21,11 +21,7 @@ export function Textarea({ label, hint, error, id: providedId, className = "", "
   const generatedId = useId(); const id = providedId ?? generatedId;
   return <Field {...{ id, label, hint, error }}><textarea rows={4} {...props} id={id} className={`input textarea ${className}`} aria-invalid={error ? true : props["aria-invalid"]} aria-describedby={descriptions(id, hint, error, describedBy)} /></Field>;
 }
-export interface SelectProps extends FieldProps, ComponentPropsWithRef<"select"> {}
-export function Select({ label, hint, error, id: providedId, className = "", "aria-describedby": describedBy, children, ...props }: SelectProps) {
-  const generatedId = useId(); const id = providedId ?? generatedId;
-  return <Field {...{ id, label, hint, error }}><select {...props} id={id} className={`input select ${className}`} aria-invalid={error ? true : props["aria-invalid"]} aria-describedby={descriptions(id, hint, error, describedBy)}>{children}</select></Field>;
-}
+export { Select, type SelectProps, type SelectOption } from "./Select";
 
 export interface CheckboxProps extends Omit<ComponentPropsWithRef<"input">, "type" | "role" | "children"> { label: string; hint?: string }
 export function Checkbox({ label, hint, id: providedId, className = "", "aria-describedby": describedBy, ...props }: CheckboxProps) {

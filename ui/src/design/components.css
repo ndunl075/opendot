@@ -35,7 +35,19 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .input::placeholder { color: var(--color-text-muted); opacity: 1; }
 .input[aria-invalid="true"] { border-color: var(--color-danger); }
 .textarea { resize: vertical; }
-.select { padding-right: var(--space-8); }
+.select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; min-height: 40px; padding: 8px 16px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--color-surface-muted); color: var(--color-text); text-align: left; }
+.select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-trigger svg, .select-option svg { flex-shrink: 0; }
+.select-trigger:hover:not(:disabled) { background: var(--color-surface-hover); }
+.select-trigger:focus-visible { outline: none; border-color: var(--color-text-muted); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-muted) 30%, transparent); }
+.select-trigger[aria-invalid="true"] { border-color: var(--color-danger); }
+.select-popover { position: fixed; inset: auto; z-index: 100; margin: 0; padding: 8px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface); color: var(--color-text); box-shadow: 0 8px 28px #0000001a, 0 2px 6px #00000008; }
+.select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 8px 10px; border-radius: 6px; font-size: var(--text-sm); line-height: 20px; cursor: pointer; overflow-wrap: anywhere; }
+.select-option.is-active, .select-option:hover:not([aria-disabled="true"]) { background: var(--color-surface-muted); }
+.select-option[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+[data-theme="dark"] .select-popover { background: var(--color-surface-raised); box-shadow: 0 8px 28px #00000040; }
+[data-theme="dark"] .select-option.is-active, [data-theme="dark"] .select-option:hover:not([aria-disabled="true"]) { background: var(--color-surface-hover); }
+@media (forced-colors: active) { .select-trigger:focus-visible, .select-option.is-active { outline: 1px solid Highlight; outline-offset: -1px; } }
 .field-hint, .field-error { font-size: var(--text-sm); }
 .field-hint { color: var(--color-text-muted); }
 .field-error { color: var(--color-danger); }
