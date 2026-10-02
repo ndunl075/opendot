@@ -6,7 +6,7 @@ import { api } from "../src/api/client";
 import { ThemeProvider } from "../src/design/theme";
 import { ScreenHeading, SettingsPaneContext } from "../src/screens/shared";
 
-vi.mock("../src/screens/settings/SettingsScreen", () => ({ default: () => <p>General controls</p> }));
+vi.mock("../src/screens/settings/SettingsScreen", () => ({ default: () => <p>General controls</p>, AvailabilityScreen: () => <p>Availability controls</p>, ModelsScreen: () => <p>Model controls</p>, ProvidersScreen: () => <p>Provider controls</p>, BackupScreen: () => <p>Backup controls</p> }));
 vi.mock("../src/screens/companion/CompanionScreen", () => ({ default: () => <p>Companion controls</p> }));
 vi.mock("../src/screens/connections/ConnectionsScreen", () => ({ default: () => <p>Connections controls</p> }));
 vi.mock("../src/screens/memory", () => ({ default: () => <p>Memory controls</p> }));
@@ -15,7 +15,7 @@ vi.mock("../src/screens/usage/UsageScreen", () => ({ default: () => <p>Usage con
 vi.mock("../src/screens/activity", () => ({ default: () => <p>Activity controls</p> }));
 vi.mock("../src/screens/chat/ChatScreen", () => ({ default: () => <h1>Chat</h1> }));
 
-const labels = ["General", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity", "About"];
+const labels = ["General", "Availability", "Models", "Providers", "Backup", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity", "About"];
 function Location() { const location = useLocation(); return <output data-testid="location">{location.pathname}{location.search}{location.hash}</output>; }
 function mount(path: string) {
   render(<ThemeProvider><MemoryRouter initialEntries={[path]}><App /><Location /></MemoryRouter></ThemeProvider>);
@@ -43,6 +43,12 @@ it.each(labels.slice(1))("redirects legacy %s URLs without losing query or hash"
   mount(`/${section}?source=notification#item%2Ftarget`);
   await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(`/settings/${section}?source=notification#item%2Ftarget`));
   expect(await screen.findByRole("heading", { name: label, level: 1 })).toBeInTheDocument();
+});
+
+it.each(labels)("opens the %s section directly", async label => {
+  mount(`/settings/${label.toLowerCase()}`);
+  expect(await screen.findByRole("heading", { name: label, level: 1 })).toHaveFocus();
+  expect(screen.getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
 });
 
 it("sends a completed user's onboarding link to Chat", async () => {

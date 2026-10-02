@@ -1,21 +1,28 @@
 import { api } from "../../api/client";
 import { Resource, ScreenHeading, useResource } from "../shared";
-import { GeneralSettings } from "./general";
+import { AvailabilitySettings, GeneralSettings, ModelSettings } from "./general";
 import { ProviderSettings } from "./providers";
 import { Backups } from "./backups";
-import { Select } from "../../design/components";
-import { useTheme, type ThemePreference } from "../../design/theme";
+
+type Section = "general" | "availability" | "models" | "providers" | "backup";
 
 const loadSettings = () => api.call("settings_get");
-export default function SettingsScreen() {
+function SettingsFields({ section }: { section: Exclude<Section, "backup"> }) {
   const resource = useResource(loadSettings);
-  const { preference, setTheme } = useTheme();
-  return <div className="screen-stack"><ScreenHeading title="Settings" description="Make room for your companion on your terms." />
-    <div className="settings-appearance"><h2>Appearance</h2><Select label="Appearance" value={preference} onChange={value => setTheme(value as ThemePreference)} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} /></div>
-    <Resource resource={resource}>{settings => <>
-      <GeneralSettings settings={settings} onSaved={resource.setData} />
-      <ProviderSettings providers={settings.providers} onChanged={() => { void resource.reload(); }} />
-      <Backups />
-    </>}</Resource>
+  return <Resource resource={resource}>{settings => {
+    if (section === "providers") return <ProviderSettings providers={settings.providers} onChanged={() => { void resource.reload(); }} />;
+    const Form = section === "availability" ? AvailabilitySettings : section === "models" ? ModelSettings : GeneralSettings;
+    return <Form settings={settings} onSaved={resource.setData} />;
+  }}</Resource>;
+}
+
+export default function SettingsScreen({ section = "general" }: { section?: Section }) {
+  return <div className="screen-stack"><ScreenHeading title={section[0].toUpperCase() + section.slice(1)} description="Make room for your companion on your terms." />
+    {section === "backup" ? <Backups /> : <SettingsFields key={section} section={section} />}
   </div>;
 }
+
+export function AvailabilityScreen() { return <SettingsScreen section="availability" />; }
+export function ModelsScreen() { return <SettingsScreen section="models" />; }
+export function ProvidersScreen() { return <SettingsScreen section="providers" />; }
+export function BackupScreen() { return <SettingsScreen section="backup" />; }

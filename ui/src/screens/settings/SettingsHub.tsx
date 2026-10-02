@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import { Activity, ArrowLeft, Brain, Gauge, Info, Plug, Settings, ShieldCheck, Smile } from "lucide-react";
+import { Activity, ArrowLeft, Brain, Clock, DatabaseBackup, Gauge, Info, Plug, Settings, ShieldCheck, SlidersHorizontal, Smile, Waypoints } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { EmptyState } from "../../design/components";
 import { SettingsPaneContext } from "../shared";
@@ -9,12 +9,16 @@ import MemoryScreen from "../memory";
 import RulesScreen from "../rules";
 import UsageScreen from "../usage/UsageScreen";
 import ActivityScreen from "../activity";
-import SettingsScreen from "./SettingsScreen";
+import SettingsScreen, { AvailabilityScreen, BackupScreen, ModelsScreen, ProvidersScreen } from "./SettingsScreen";
 import { About } from "../About";
 import "./settings-hub.css";
 
 export const settingsSections = [
   { id: "general", label: "General", icon: Settings, Screen: SettingsScreen },
+  { id: "availability", label: "Availability", icon: Clock, Screen: AvailabilityScreen },
+  { id: "models", label: "Models", icon: SlidersHorizontal, Screen: ModelsScreen },
+  { id: "providers", label: "Providers", icon: Waypoints, Screen: ProvidersScreen },
+  { id: "backup", label: "Backup", icon: DatabaseBackup, Screen: BackupScreen },
   { id: "companion", label: "Companion", icon: Smile, Screen: CompanionScreen },
   { id: "connections", label: "Connections", icon: Plug, Screen: ConnectionsScreen },
   { id: "memory", label: "Memory", icon: Brain, Screen: MemoryScreen },

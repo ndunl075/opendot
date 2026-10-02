@@ -28,7 +28,7 @@ function ApiKeyField({ provider, configured, label, onChanged }: { provider: Pro
     {!!mutation.error && !remove && <ErrorState error={mutation.error} />}{mutation.notice && <p role="status">{mutation.notice}</p>}
     <ConfirmDialog open={remove} error={mutation.error} onClose={() => { if (!mutation.pending) setRemove(false); }} title={`Remove ${label} API key?`} description="Features relying on this key will no longer be able to use it." confirmLabel="Remove key" danger loading={mutation.pending} onConfirm={async () => {
       const result = await mutation.run(() => api.call("provider_api_key_remove", { params: { provider } }));
-      if (result) { setSaved(result.key_saved); setKey(""); setRemove(false); onChanged(); }
+      if (result) { setSaved(result.key_saved); setKey(""); setRemove(false); mutation.setNotice("Key removed."); onChanged(); }
     }} />
   </div>;
 }
@@ -38,7 +38,7 @@ function ProviderCard({ provider, onChanged }: { provider: ProviderOptIn; onChan
   const mutation = useMutation();
   async function toggle(enabled: boolean) {
     const result = await mutation.run(() => api.call("provider_enabled_set", { params: { provider: provider.provider }, body: { enabled } }));
-    if (result) { setConfirm(false); onChanged(); }
+    if (result) { setConfirm(false); mutation.setNotice("Saved"); onChanged(); }
   }
   const warning = provider.cost_warning || (provider.provider === "local" ? "Local models use your own hardware, electricity and memory." : "Requests through this provider are billed separately to your API account.");
   return <Card className="section-card form-stack"><h3>{provider.label}</h3>
@@ -47,7 +47,7 @@ function ProviderCard({ provider, onChanged }: { provider: ProviderOptIn; onChan
       {supportsKey(provider.provider) && <ApiKeyField provider={provider.provider} configured={provider.configured ?? false} label={provider.label} onChanged={onChanged} />}
       {provider.provider === "local" && <p className="muted">{provider.configured ? "Local provider configured." : "Local provider is not configured. Server address setup is not available in this version yet."}</p>}
     </>}
-    {!!mutation.error && !confirm && <ErrorState error={mutation.error} />}
+    {!!mutation.error && !confirm && <ErrorState error={mutation.error} />}{mutation.notice && <span className="muted text-sm" role="status">{mutation.notice}</span>}
     <ConfirmDialog open={confirm} error={mutation.error} onClose={() => { if (!mutation.pending) setConfirm(false); }} title={`Enable ${provider.label}?`} description={`${warning} Features each have their own switch and remain unchanged.`} confirmLabel="Enable provider" loading={mutation.pending} onConfirm={() => { void toggle(true); }} />
   </Card>;
 }
@@ -57,10 +57,10 @@ function Feature({ feature, onChanged }: { feature: FeatureSwitchState; onChange
   const mutation = useMutation();
   async function toggle(enabled: boolean) {
     const result = await mutation.run(() => api.call("feature_set", { params: { feature: feature.name }, body: { enabled } }));
-    if (result) { setConfirm(false); onChanged(); }
+    if (result) { setConfirm(false); mutation.setNotice("Saved"); onChanged(); }
   }
   return <div className="form-stack"><Switch label={feature.title} checked={feature.enabled ?? false} disabled={mutation.pending || (!feature.enabled && feature.available === false)} hint={feature.cost_warning} onChange={event => { if (event.target.checked) setConfirm(true); else void toggle(false); }} />
-    <p className="muted">{feature.requirement}</p>{!!mutation.error && !confirm && <ErrorState error={mutation.error} />}
+    <p className="muted">{feature.requirement}</p>{!!mutation.error && !confirm && <ErrorState error={mutation.error} />}{mutation.notice && <span className="muted text-sm" role="status">{mutation.notice}</span>}
     <ConfirmDialog open={confirm} error={mutation.error} onClose={() => { if (!mutation.pending) setConfirm(false); }} title={`Enable ${feature.title}?`} description={feature.cost_warning} confirmLabel="Enable feature" loading={mutation.pending} onConfirm={() => { void toggle(true); }} />
   </div>;
 }
@@ -71,9 +71,9 @@ function SpendCap({ spend, onChanged }: { spend: ProviderSpend; onChanged: () =>
   return <form className="form-stack" onSubmit={async event => {
     event.preventDefault();
     const result = await mutation.run(() => api.call("spend_cap_set", { params: { provider: spend.provider }, body: { cap_usd: Number(cap) } }));
-    if (result) onChanged();
-  }}><Input label={`${spend.provider} monthly spend cap (USD)`} required type="number" min="0" step="0.01" value={cap} onChange={event => setCap(event.target.value)} hint={`${spend.month}: $${spend.spent_usd.toFixed(2)} spent. ${spend.cap_set ? "" : "No cap is set."}`} />
-    <div className="actions"><Button variant="secondary" type="submit" loading={mutation.pending}>Save {spend.provider} cap</Button></div>{!!mutation.error && <ErrorState error={mutation.error} />}
+    if (result) { mutation.setNotice("Saved"); onChanged(); }
+  }}><Input label={`${spend.provider} monthly spend cap (USD)`} disabled={mutation.pending} required type="number" min="0" step="0.01" value={cap} onChange={event => { setCap(event.target.value); mutation.setNotice(""); }} hint={`${spend.month}: $${spend.spent_usd.toFixed(2)} spent. ${spend.cap_set ? "" : "No cap is set."}`} />
+    <div className="actions"><Button variant="secondary" type="submit" loading={mutation.pending}>Save {spend.provider} cap</Button>{mutation.notice && <span className="muted text-sm" role="status">{mutation.notice}</span>}</div>{!!mutation.error && <ErrorState error={mutation.error} />}
   </form>;
 }
 

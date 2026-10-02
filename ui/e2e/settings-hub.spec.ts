@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
+import type { Settings, SettingsUpdateRequest } from "../src/api/types.gen";
 
-const sections = ["General", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity", "About"];
+const sections = ["General", "Availability", "Models", "Providers", "Backup", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity", "About"];
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/v1/onboarding", async route => {
@@ -25,7 +26,7 @@ test("desktop settings has only the requested rail, ordered sections and keyboar
   await expect(rail.getByRole("link", { name: "OpenDot home" })).toBeVisible();
   await expect(rail.getByRole("link", { name: "Local workspace settings" })).toHaveText("OD");
   const navigation = page.getByRole("navigation", { name: "Settings sections" });
-  await expect(navigation.getByRole("listitem")).toHaveCount(8);
+  await expect(navigation.getByRole("listitem")).toHaveCount(12);
   await expect(navigation.getByRole("link")).toHaveText(sections);
   await expect(page.getByRole("heading", { name: "General", level: 1 })).toBeFocused();
   await expect(navigation.locator('[aria-current="page"]')).toHaveText("General");
@@ -70,6 +71,66 @@ test("completed setup cannot be reopened from its old URL", async ({ page }) => 
   await expect(page).toHaveURL(/\/chat$/);
   await expect(page.getByRole("textbox", { name: "Message your companion" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Onboarding", exact: true })).toHaveCount(0);
+});
+
+test("focused settings routes save only their fields and preserve other sections", async ({ page }) => {
+  let settings: Settings = {
+    style_preset: "concise", auto_top_tier: false, tier_overrides: [], providers: [],
+    keep_awake: { enabled: false, only_while_plugged_in: true },
+    quiet_hours: { enabled: false, start: "22:00", end: "07:00", timezone: "UTC" },
+  };
+  const updates: SettingsUpdateRequest[] = [];
+  await page.route("**/v1/settings", async route => {
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON() as SettingsUpdateRequest;
+      updates.push(body);
+      settings = { ...settings, ...body } as Settings;
+    }
+    await route.fulfill({ json: settings });
+  });
+  await page.goto("/settings/general");
+  await page.getByRole("combobox", { name: "Style preset" }).click();
+  await page.getByRole("option", { name: "Warm", exact: true }).click();
+  // Simulate another client's change while this General form is open.
+  settings.keep_awake = { enabled: true, only_while_plugged_in: false };
+  await page.getByRole("button", { name: "Save general" }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(updates.at(-1)).toEqual({ style_preset: "warm" });
+  expect(settings.keep_awake).toEqual({ enabled: true, only_while_plugged_in: false });
+  await expect(page.getByRole("switch", { name: "Keep awake" })).toHaveCount(0);
+
+  await page.goto("/settings/availability");
+  await expect(page.getByRole("heading", { name: "Availability", level: 1 })).toBeFocused();
+  await expect(page.getByRole("switch", { name: "Keep awake" })).toBeChecked();
+  await page.getByLabel("Quiet hours timezone").fill("America/New_York");
+  settings.style_preset = "formal";
+  await page.getByRole("button", { name: "Save availability" }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(updates.at(-1)).toEqual({
+    keep_awake: { enabled: true, only_while_plugged_in: false },
+    quiet_hours: { enabled: false, start: "22:00", end: "07:00", timezone: "America/New_York" },
+  });
+  expect(settings.style_preset).toBe("formal");
+
+  await page.goto("/settings/models");
+  await expect(page.getByRole("heading", { name: "Models", level: 1 })).toBeFocused();
+  await page.getByRole("button", { name: "Add model override" }).click();
+  await page.getByLabel("Job type 1").fill("review");
+  await page.getByRole("button", { name: "Save models" }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(updates.at(-1)).toEqual({ tier_overrides: [{ job_type: "review", tier: "luna", effort: "low" }] });
+  await page.getByRole("switch", { name: "Automatic top-tier use" }).click();
+  const count = updates.length;
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  expect(updates).toHaveLength(count);
+  await page.getByRole("switch", { name: "Automatic top-tier use" }).click();
+  await page.getByRole("button", { name: "Allow top-tier use" }).click();
+  await expect(page.getByRole("switch", { name: "Automatic top-tier use" })).toBeChecked();
+  expect(updates.at(-1)).toEqual({ auto_top_tier: true });
+  await page.reload();
+  await expect(page.getByLabel("Job type 1")).toHaveValue("review");
+  await page.goto("/settings/general");
+  await expect(page.getByRole("combobox", { name: "Style preset" })).toContainText("Formal");
 });
 
 for (const theme of ["light", "dark"] as const) {
