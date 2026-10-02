@@ -1,21 +1,21 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUp, Ellipsis, MessageSquare, Mic, PanelRight, Plus, SquarePen } from "lucide-react";
+import { ArrowDown, ArrowUp, Ellipsis, MessageSquare, Mic, PanelRight, Plus, SquarePen } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import { ChatStream, type StreamState } from "../../api/stream";
 import type { StreamEvent } from "../../api/endpoints.gen";
-import type { ApprovalItem, Conversation, PausedEvent } from "../../api/types.gen";
-import { Badge, EmptyState, ErrorState, IconButton, Button, Skeleton, Textarea, UsageStamp } from "../../design/components";
+import type { ApprovalItem, ApprovalDecisionResult, PausedEvent } from "../../api/types.gen";
+import { Badge, EmptyState, ErrorState, IconButton, Button, Skeleton, Textarea } from "../../design/components";
 import { Avatar } from "../../design/avatar";
 import { safeExternalUrl, useResource } from "../shared";
 import { CompanionDetails } from "./CompanionDetails";
-import { ApprovalCard } from "./ApprovalCard";
+import { MessageBubble } from "./MessageBubble";
+import { applyStreamEvent, dedupeMessages, mergeHistory, type Message } from "./messages";
 import { PausedBanner } from "./PausedBanner";
 
 const loadConversations = () => api.call("chat_conversations");
 const loadCompanion = () => api.call("companion_get");
 const loadPlan = () => api.call("chatgpt_status");
-type Message = Conversation["messages"][number];
 
 export default function ChatScreen() {
   const conversations = useResource(loadConversations);
@@ -65,11 +65,23 @@ function ConversationPanel({ conversationId, avatarSeed, manageUsageUrl, onChang
   const [interrupted, setInterrupted] = useState(false);
   const sending = useRef(false);
   const alive = useRef(false);
+  const hasLoaded = useRef(false);
   const approvalRequests = useRef(new Map<string, number>());
   const stream = useRef<ChatStream | null>(null);
   const actualId = useRef(conversationId);
   const transcript = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const lastScrollTop = useRef(0);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [showLatest, setShowLatest] = useState(false);
+  const queuedEvents = useRef<StreamEvent[]>([]);
+
+  const onDecision = useCallback((result: ApprovalDecisionResult) => {
+    const id = result.approval.id;
+    approvalRequests.current.set(id, (approvalRequests.current.get(id) ?? 0) + 1);
+    setApprovals(items => ({ ...items, [id]: result.approval }));
+  }, []);
 
   const refreshApproval = useCallback(async (id: string) => {
     const revision = (approvalRequests.current.get(id) ?? 0) + 1;
@@ -87,25 +99,15 @@ function ConversationPanel({ conversationId, avatarSeed, manageUsageUrl, onChang
 
   const receive = useCallback((event: StreamEvent) => {
     if (!actualId.current || event.conversation_id !== actualId.current) return;
+    if (sending.current) { queuedEvents.current.push(event); return; }
     setInterrupted(false);
     if (event.type === "error") { setError(new ApiError(400, event.code, event.message)); setBusy(false); setStreamingId(undefined); return; }
     if (event.type === "paused") { setPaused(event); setBusy(false); setStreamingId(undefined); onChanged(); return; }
     if (event.type === "approval_required") { void refreshApproval(event.approval.id); setBusy(false); setStreamingId(undefined); }
     if (event.type === "message_started") { setBusy(true); setStreamingId(event.message_id); setAnnouncement(""); setPaused(undefined); setPreviouslyPaused(false); setError(undefined); }
     if (event.type === "completed") { setBusy(false); setStreamingId(undefined); setAnnouncement(event.text); onChanged(); }
-    setMessages(items => {
-      const found = items.find(item => item.id === event.message_id);
-      const message: Message = found ?? { id: event.message_id, role: "assistant", created_at: new Date().toISOString(), text: "" };
-      let next = message;
-      switch (event.type) {
-        case "message_started": next = { ...message, text: "", usage: null, tool_calls: [] }; break;
-        case "text_delta": next = { ...message, text: message.text + event.text }; break;
-        case "completed": next = { ...message, text: event.text, usage: event.usage }; break;
-        case "approval_required": next = { ...message, approval_id: event.approval.id }; break;
-        case "tool_call": next = { ...message, tool_calls: [...(message.tool_calls ?? []).filter(call => call.call_id !== event.call.call_id), event.call] }; break;
-      }
-      return found ? items.map(item => item.id === next.id ? next : item) : [...items, next];
-    });
+    if (event.type === "text_delta") { setBusy(true); setStreamingId(event.message_id); }
+    setMessages(items => applyStreamEvent(items, event));
   }, [onChanged, refreshApproval]);
 
   useEffect(() => {
@@ -126,18 +128,18 @@ function ConversationPanel({ conversationId, avatarSeed, manageUsageUrl, onChang
       // Let StrictMode's initial cleanup cancel before creating a real socket.
       await Promise.resolve();
       if (!active) return;
-      setError(undefined); setApprovalError(undefined); setLoading(!!actualId.current);
+      setError(undefined); setApprovalError(undefined); setLoading(!hasLoaded.current && !!actualId.current);
       try {
         if (actualId.current) {
           const conversation = await api.call("chat_conversation", { params: { conversation_id: actualId.current } });
           if (!active) return;
-          setMessages(conversation.messages); setPreviouslyPaused(conversation.paused ?? false);
+          setMessages(items => mergeHistory(items, conversation.messages)); setPreviouslyPaused(conversation.paused ?? false);
           const ids = [...new Set(conversation.messages.flatMap(message => message.approval_id ? [message.approval_id] : []))];
           for (const id of ids) void refreshApproval(id);
         }
         if (active) transport.connect();
       } catch (cause) { if (active) setError(cause); }
-      finally { if (active) setLoading(false); }
+      finally { if (active) { hasLoaded.current = true; setLoading(false); } }
     }
     void start();
     return () => {
@@ -153,35 +155,60 @@ function ConversationPanel({ conversationId, avatarSeed, manageUsageUrl, onChang
     return () => clearTimeout(timer);
   }, [busy, messages]);
 
-  useEffect(() => { if (following.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight; }, [messages, approvals, paused]);
+  const scrollToLatest = useCallback(() => {
+    const element = transcript.current;
+    if (!element) return;
+    const behavior = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    element.scrollTo?.({ top: element.scrollHeight, behavior });
+  }, []);
+  useEffect(() => { if (following.current) scrollToLatest(); else setShowLatest(true); }, [messages, approvals, paused, scrollToLatest]);
   useEffect(() => {
     const element = transcript.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (following.current) element.scrollTop = element.scrollHeight;
+      if (following.current) scrollToLatest();
     });
     observer.observe(element);
+    if (content.current) observer.observe(content.current);
     return () => observer.disconnect();
-  }, []);
+  }, [scrollToLatest]);
+  useLayoutEffect(() => {
+    const element = composer.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [text]);
   async function send() {
     const value = text.trim();
     if (!value || busy || sending.current || state !== "connected" || loading) return;
     sending.current = true; setBusy(true); setError(undefined); setInterrupted(false);
+    const id = `local-${crypto.randomUUID()}`;
+    const created_at = new Date().toISOString();
+    setMessages(items => [...items.filter(item => !item.pending),
+      { id, renderKey: id, role: "user", text: value, created_at },
+      { id: `${id}_a`, renderKey: `${id}_a`, role: "assistant", text: "", created_at, pending: true, received: false }
+    ]);
+    setText(""); composer.current?.focus();
     try {
       const accepted = await api.call("chat_send", { body: { conversation_id: actualId.current, text: value } });
       if (!alive.current) return;
       actualId.current = accepted.conversation_id;
-      setMessages(items => [...items, { id: accepted.message_id, role: "user", text: value, created_at: new Date().toISOString() }]);
-      setText(current => current.trim() === value ? "" : current); following.current = true;
+      setMessages(items => dedupeMessages(items.map(item => item.id === id ? { ...item, id: accepted.message_id } : item.id === `${id}_a` ? { ...item, id: `${accepted.message_id}_a` } : item)));
+      sending.current = false;
+      for (const event of queuedEvents.current.splice(0)) receive(event);
       stream.current?.subscribe(accepted.conversation_id);
       onChanged();
-    } catch (cause) { if (alive.current) { setError(cause); setBusy(false); } }
-    finally { sending.current = false; }
+    } catch (cause) { if (alive.current) {
+      setError(cause); setBusy(false); setStreamingId(undefined);
+      setMessages(items => items.filter(item => item.id !== `${id}_a`).map(item => item.id === id ? { ...item, failed: true } : item));
+      setText(current => current || value);
+    } }
+    finally { sending.current = false; queuedEvents.current = []; }
   }
   // A send acknowledgement alone is not evidence of a read. Only a subsequent
   // assistant response establishes that the companion has started processing it.
   const lastUserIndex = messages.map(message => message.role).lastIndexOf("user");
-  const readAt = lastUserIndex < 0 ? undefined : messages.slice(lastUserIndex + 1).find(message => message.role === "assistant")?.created_at;
+  const readAt = lastUserIndex < 0 ? undefined : messages.slice(lastUserIndex + 1).find(message => message.role === "assistant" && message.received !== false)?.created_at;
   const readDate = readAt ? new Date(readAt) : undefined;
   const readTime = readDate && Number.isFinite(readDate.getTime()) ? readDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : undefined;
   return <section className="conversation-panel" aria-label="Current conversation">
@@ -192,23 +219,28 @@ function ConversationPanel({ conversationId, avatarSeed, manageUsageUrl, onChang
     {approvalError != null && <ErrorState error={approvalError} onRetry={() => setAttempt(value => value + 1)} />}
     {paused ? <PausedBanner event={paused} manageUsageUrl={manageUsageUrl} /> : previouslyPaused && <p className="notice" role="alert">This conversation is paused. The saved history does not include its pause reason. <Link to="/companion">Review your companion</Link> and <Link to="/usage">budgets</Link>.</p>}
     <div className="sr-only" role="status" aria-label="Completed reply" aria-live="polite" aria-atomic="true">{announcement}</div>
-    <div ref={transcript} className="transcript" role="log" aria-label="Conversation messages" aria-live="off" onScroll={event => { const el = event.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
+    <div className="transcript-container"><div ref={transcript} className="transcript" role="log" aria-label="Conversation messages" aria-live="off" onWheel={event => { if (event.deltaY < 0) { following.current = false; setShowLatest(true); } }} onTouchMove={() => { following.current = false; }} onScroll={event => {
+      const el = event.currentTarget;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      // Intermediate events from our smooth scroll must not disable following.
+      if (el.scrollTop < lastScrollTop.current - 1) following.current = false;
+      if (nearBottom) following.current = true;
+      lastScrollTop.current = el.scrollTop;
+      setShowLatest(!following.current);
+    }}>
+      <div ref={content} className="transcript-content">
       {loading ? <Skeleton className="screen-skeleton" label="Loading conversation" /> : !messages.length && <EmptyState title="What’s on your mind?" description="A little space to think things through. Your companion asks before taking action." icon={<Avatar seed={avatarSeed ?? "v2:c=slate;h=none;p=none"} size={72} />} />}
-      {messages.map((message, index) => <Fragment key={message.id}><article className={`chat-message chat-message--${message.role}`} aria-busy={message.id === streamingId} aria-label={message.role === "user" ? "Your message" : "Companion reply"}>
-        <p className="sr-only">{message.role === "user" ? "You" : "Companion"}</p><p className="message-text">{message.text || (busy ? "Thinking…" : "")}</p>
-        {message.tool_calls?.map(call => <p className="tool-record" key={call.call_id}><Badge>{call.status.replaceAll("_", " ")}</Badge> {call.summary}</p>)}
-        {message.role === "assistant" && <UsageStamp model={message.usage?.model ?? "Model not reported"} effort={message.usage?.effort ?? "Unreported"} credits={message.usage?.credits ?? null} />}
-        {message.approval_id && approvals[message.approval_id] && <ApprovalCard approval={approvals[message.approval_id]} onDecision={result => {
-          const id = result.approval.id; approvalRequests.current.set(id, (approvalRequests.current.get(id) ?? 0) + 1);
-          setApprovals(items => ({ ...items, [id]: result.approval }));
-        }} />}
-      </article>{index === lastUserIndex && readTime && <p className="chat-read-receipt" aria-label="Message read time" title="Your companion has started responding"><span>Read </span><time dateTime={readAt}>{readTime}</time></p>}</Fragment>)}
-    </div>
+      {messages.map((message, index) => <Fragment key={message.renderKey ?? message.id}>
+        <MessageBubble message={message} streaming={busy && message.role === "assistant" && (!!message.pending || message.id === streamingId || message.id === `${streamingId}_a`)} approval={message.approval_id ? approvals[message.approval_id] : undefined} onDecision={onDecision} />
+        {index === lastUserIndex && <p className="chat-read-receipt" aria-label={readTime ? "Message read time" : undefined} aria-hidden={!readTime} title={readTime ? "Your companion has started responding" : undefined}>{readTime ? <><span>Read </span><time dateTime={readAt}>{readTime}</time></> : "\u00a0"}</p>}
+      </Fragment>)}
+      </div>
+    </div>{showLatest && <Button variant="secondary" className="jump-to-latest" onClick={() => { following.current = true; setShowLatest(false); scrollToLatest(); }}><ArrowDown size={16} />Jump to latest</Button>}</div>
     <form className="chat-composer" onSubmit={event => { event.preventDefault(); send(); }}>
       <IconButton label="Start a new conversation" title="Start a new conversation" onClick={onNewChat} disabled={busy || !!text.trim()}><Plus size={24} /></IconButton>
-      <Textarea label="Message your companion" placeholder="Send a message" rows={1} value={text} onChange={event => setText(event.target.value)} hint="Enter to send. Shift + Enter for a new line." onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} />
+      <Textarea ref={composer} label="Message your companion" placeholder="Send a message" rows={1} value={text} onChange={event => setText(event.target.value)} hint="Enter to send. Shift + Enter for a new line." onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} />
       <IconButton label="Voice input unavailable" title="Voice input is not available yet" className="voice-button" disabled><Mic size={22} strokeWidth={1.7} /></IconButton>
-      <IconButton label="Send message" title="Send message" className="send-button" type="submit" disabled={!text.trim() || busy || state !== "connected" || loading}><ArrowUp size={22} /></IconButton>
+      <IconButton label="Send message" title={busy ? "Companion is responding" : "Send message"} loading={busy} className="send-button" type="submit" disabled={!text.trim() || state !== "connected" || loading}>{!busy && <ArrowUp size={22} />}</IconButton>
     </form>
   </section>;
 }

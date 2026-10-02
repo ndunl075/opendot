@@ -17,6 +17,80 @@ class Socket extends EventTarget {
 const status: ChatGPTStatus = { state: "signed_in", eligible: true, plan: "eligible_plus", manage_usage_url: "https://chatgpt.com/settings/usage" };
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); Socket.instances = []; });
 
+it.each(["user", "user_a"])("protects the user bubble and dedupes refetched history (stream id: %s)", async messageId => {
+  vi.stubGlobal("WebSocket", Socket);
+  const user = { id: "user", role: "user", text: "My original words", created_at: "2026-10-02" };
+  const reply = { id: "user_a", role: "assistant", text: "The reply", created_at: "2026-10-02" };
+  vi.spyOn(api, "call").mockImplementation(async name => {
+    if (name === "chatgpt_status") return status as never;
+    if (name === "chat_send") return { conversation_id: "c", message_id: "user" } as never;
+    if (name === "chat_conversation") return { id: "c", messages: [user, reply, reply] } as never;
+    return { conversations: [] } as never;
+  });
+  render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  await waitFor(() => expect(Socket.instances).toHaveLength(1));
+  const socket = Socket.instances[0]; act(() => socket.open());
+  fireEvent.change(screen.getByLabelText("Message your companion"), { target: { value: user.text } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(socket.sent).toHaveLength(1));
+  const base = { conversation_id: "c", message_id: messageId };
+  act(() => {
+    socket.event({ ...base, type: "message_started", seq: 1 });
+    socket.event({ ...base, type: "text_delta", seq: 2, text: "The " });
+    socket.event({ ...base, type: "completed", seq: 3, text: reply.text, usage: { model: "test", effort: "low", credits: 0 } });
+  });
+  const bubble = screen.getByLabelText("Companion reply");
+  expect(screen.getByLabelText("Your message")).toHaveTextContent(user.text);
+  expect(bubble).toHaveTextContent(reply.text);
+  act(() => socket.close());
+  fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+  await waitFor(() => expect(Socket.instances).toHaveLength(2));
+  expect(screen.getAllByLabelText("Companion reply")).toHaveLength(1);
+  expect(screen.getByLabelText("Companion reply")).toBe(bubble);
+  expect(screen.getByLabelText("Your message")).toHaveTextContent(user.text);
+});
+
+it("shows both bubbles immediately, clears and focuses the composer before REST accepts", async () => {
+  vi.stubGlobal("WebSocket", Socket);
+  vi.spyOn(api, "call").mockImplementation(async name => {
+    if (name === "chatgpt_status") return status as never;
+    if (name === "chat_send") return await new Promise(() => {});
+    return { conversations: [] } as never;
+  });
+  render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  await waitFor(() => expect(Socket.instances).toHaveLength(1)); act(() => Socket.instances[0].open());
+  const input = screen.getByLabelText("Message your companion");
+  fireEvent.change(input, { target: { value: "Immediate" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  expect(screen.getByLabelText("Your message")).toHaveTextContent("Immediate");
+  expect(screen.getByLabelText("Companion reply")).toHaveTextContent("Companion is typing");
+  expect(input).toHaveValue("");
+  expect(input).toHaveFocus();
+});
+
+it("restores a failed send without losing a newer draft", async () => {
+  vi.stubGlobal("WebSocket", Socket);
+  let reject!: (error: Error) => void;
+  const pending = new Promise((_, fail) => { reject = fail; });
+  vi.spyOn(api, "call").mockImplementation(async name => {
+    if (name === "chatgpt_status") return status as never;
+    if (name === "chat_send") return await pending as never;
+    return { conversations: [] } as never;
+  });
+  render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  await waitFor(() => expect(Socket.instances).toHaveLength(1)); act(() => Socket.instances[0].open());
+  const input = screen.getByLabelText("Message your companion");
+  fireEvent.change(input, { target: { value: "Keep these words" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  fireEvent.change(input, { target: { value: "A newer draft" } });
+  await act(async () => reject(new Error("Connection lost")));
+  expect(input).toHaveValue("A newer draft");
+  expect(screen.getByLabelText("Your message")).toHaveTextContent("Keep these words");
+  expect(screen.getByLabelText("Your message")).toHaveTextContent("Not sent");
+  expect(screen.queryByLabelText("Companion reply")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+});
+
 it("sends through REST, ignores foreign broadcasts, and announces only final replies", async () => {
   vi.stubGlobal("WebSocket", Socket);
   const approval = { id: "a", title: "Draft reply", action: "gmail.create_draft", created_at: "2026-09-30", status: "pending", payload: { body: "Hello" }, preview: "Draft only.", review_note: "Check the recipient.", review_verdict: "concern" } as const;
