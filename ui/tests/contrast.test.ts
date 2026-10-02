@@ -14,6 +14,8 @@ describe.each(["light", "dark"])("%s theme WCAG AA", theme => {
   const textPairs = [
     ...["bg", "surface", "surface-raised", "surface-muted"].flatMap(background => ["text", "text-muted", "accent"].map(foreground => [foreground, background])),
     ["on-accent", "accent"], ["on-accent", "accent-hover"], ["on-danger", "danger"], ["on-danger", "danger-hover"],
+    ["on-primary", "primary"], ["on-primary", "primary-hover"],
+    ["on-chat-accent", "chat-accent"], ["on-chat-accent", "chat-accent-hover"],
     ...["accent", "success", "warning", "danger"].map(role => [role, `${role}-soft`]),
   ];
   it.each(textPairs)("%s on %s has at least 4.5:1 contrast", (foreground, background) => {

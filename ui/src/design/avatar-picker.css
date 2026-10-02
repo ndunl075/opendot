@@ -1,0 +1,26 @@
+.avatar-picker { min-width: 0; display: grid; gap: 22px; }
+.avatar-picker-section { min-width: 0; }
+.avatar-picker-heading { display: flex; align-items: center; justify-content: space-between; padding-right: 36px; margin-bottom: 12px; }
+.avatar-picker-heading h3 { color: var(--color-text-muted); font-size: 20px; line-height: 1.4; font-weight: 400; }
+.avatar-picker-arrows { display: flex; gap: 16px; }
+.avatar-picker-arrows button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 10px; color: var(--color-text-muted); background: transparent; cursor: pointer; }
+.avatar-picker-arrows button:hover:not(:disabled) { background: var(--color-surface-muted); color: var(--color-text); }
+.avatar-picker-arrows button:disabled { opacity: .3; cursor: default; }
+.avatar-picker-row { position: relative; display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding: 4px 36px 4px 4px; margin-left: -4px; scroll-padding: 4px; }
+.avatar-picker-row::-webkit-scrollbar { display: none; }
+.avatar-tile { flex: 0 0 120px; width: 120px; height: 120px; padding: 10px; display: grid; place-items: center; border: 2px solid transparent; border-radius: 24px; background: transparent; cursor: pointer; }
+.avatar-tile:hover:not(:disabled) { background: var(--color-surface-muted); }
+.avatar-tile[aria-checked='true'] { border-color: var(--color-text); }
+.avatar-tile:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 1px; }
+.avatar-tile:disabled { cursor: default; opacity: .6; }
+.avatar-tile-art, .avatar-tile-art > svg, .avatar-swatch, .avatar-none { display: block; width: 96px; height: 96px; }
+.avatar-swatch { border-radius: 50%; }
+.avatar-none { display: grid; place-items: center; background: var(--color-surface-muted); color: var(--color-text); border-radius: 50%; }
+@media (max-width: 800px) {
+  .avatar-picker { gap: 14px; }
+  .avatar-picker-heading { padding-right: 20px; margin-bottom: 4px; }
+  .avatar-picker-heading h3 { font-size: 16px; }
+  .avatar-picker-row { padding-right: 20px; gap: 8px; }
+  .avatar-tile { width: 96px; height: 96px; flex-basis: 96px; padding: 6px; border-radius: 20px; }
+  .avatar-tile-art, .avatar-tile-art > svg, .avatar-swatch, .avatar-none { width: 80px; height: 80px; }
+}

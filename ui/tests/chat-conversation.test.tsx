@@ -77,6 +77,7 @@ it.each([true, false])("uses authoritative approval state across replay and fetc
     throw new Error(`Unexpected ${name}`);
   });
   render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Conversation history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Saved conversation/ }));
   await screen.findByText("Saved reply");
   await waitFor(() => expect(Socket.instances).toHaveLength(2));
@@ -122,6 +123,7 @@ it("shows unavailable history without inventing conversation data", async () => 
   vi.stubGlobal("WebSocket", Socket);
   vi.spyOn(api, "call").mockResolvedValueOnce({ conversations: [{ id: "c", title: "Previous chat", message_count: 1, updated_at: "2026-09-30" }] }).mockResolvedValueOnce(status).mockRejectedValue(new ApiError(501, "not_implemented", "Not served"));
   render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Conversation history" }));
   fireEvent.click(await screen.findByRole("button", { name: /Previous chat/ }));
   expect(await screen.findByText("Not available in this version yet")).toBeInTheDocument();
 });

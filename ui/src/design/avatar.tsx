@@ -1,4 +1,29 @@
-import type { SVGProps } from "react";
+import { useId, type SVGProps } from "react";
+import { avatarColors, characters, pets, type CharacterId, type PetId } from "./characters/catalog";
+import { Character } from "./characters/Character";
+import { PixelPet } from "./characters/PixelPet";
+
+export interface AvatarChoices { color: string; character: string; pet: string }
+export const DEFAULT_AVATAR: Readonly<AvatarChoices> = { color: "slate", character: "none", pet: "none" };
+
+function validChoices(value: AvatarChoices): boolean {
+  return avatarColors.some(color => color.id === value.color)
+    && (value.character === "none" || characters.some(character => character.id === value.character))
+    && (value.pet === "none" || pets.some(pet => pet.id === value.pet));
+}
+
+/** null means a legacy ribbon; malformed v2 seeds use the safe plain slate circle. */
+export function parseAvatarSeed(seed: string): AvatarChoices | null {
+  if (!seed.startsWith("v2:")) return null;
+  const match = seed.length <= 64 ? /^v2:c=([a-z]+);h=([a-z]+);p=([a-z]+)$/.exec(seed) : null;
+  const choices = match && match[0] === seed ? { color: match[1], character: match[2], pet: match[3] } : null;
+  return choices && validChoices(choices) ? choices : { ...DEFAULT_AVATAR };
+}
+
+export function encodeAvatarSeed(choices: AvatarChoices): string {
+  const { color, character, pet } = validChoices(choices) ? choices : DEFAULT_AVATAR;
+  return `v2:c=${color};h=${character};p=${pet}`;
+}
 
 export interface AvatarProps extends Omit<SVGProps<SVGSVGElement>, "children" | "role" | "aria-label"> {
   seed: string;
@@ -16,14 +41,25 @@ function sequence(seed: string) {
 /** A new seed is the only random step. Persist it with the companion in the daemon. */
 export function createAvatarSeed(): string { return crypto.randomUUID(); }
 
-export function Avatar({ seed, label = "Companion's woven ribbon avatar", size = 88, ...props }: AvatarProps) {
+export function Avatar({ seed, ...props }: AvatarProps) {
+  const choices = parseAvatarSeed(seed);
+  return choices ? <ComposedAvatar choices={choices} {...props} /> : <RibbonAvatar seed={seed} {...props} />;
+}
+
+function ComposedAvatar({ choices, label = "Companion avatar", size = 88, ...props }: Omit<AvatarProps, "seed"> & { choices: AvatarChoices }) {
+  const uid = useId();
+  const color = avatarColors.find(color => color.id === choices.color) ?? avatarColors[0];
+  return <svg width={size} height={size} viewBox="0 0 100 100" {...props} role="img" aria-label={label}>
+    <defs><radialGradient id={`${uid}-color`} cx="32%" cy="25%" r="80%"><stop stopColor={color.light} /><stop offset="1" stopColor={color.color} /></radialGradient></defs>
+    <circle cx="50" cy="50" r="46" fill={`url(#${uid}-color)`} />
+    {choices.character !== "none" && <g transform="translate(7 4) scale(.86)"><Character id={choices.character as CharacterId} /></g>}
+    {choices.pet !== "none" && <g transform="translate(65 65) scale(2.15)"><PixelPet id={choices.pet as PetId} /></g>}
+  </svg>;
+}
+
+function RibbonAvatar({ seed, label = "Companion's woven ribbon avatar", size = 88, ...props }: AvatarProps) {
   const random = sequence(seed);
-  const palettes = [
-    ["#e0edef", "#245c6a", "#71959a", "#c5a67c"],
-    ["#ece9e2", "#455b61", "#84958b", "#b58b68"],
-    ["#e8e9ee", "#465d7a", "#90a5b1", "#b9a68f"],
-    ["#ede9e1", "#62594c", "#8e9c96", "#c19d73"],
-  ];
+  const palettes = [1, 2, 3, 4].map(index => ["bg", "ink", "mid", "tip"].map(part => `var(--avatar-${index}-${part})`));
   const colors = palettes[Math.floor(random() * palettes.length)];
   const bend = Math.round(30 + random() * 22);
   const rise = Math.round(21 + random() * 17);

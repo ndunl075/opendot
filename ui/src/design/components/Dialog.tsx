@@ -11,6 +11,7 @@ export interface DialogProps {
   description?: string;
   children: ReactNode;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  className?: string;
 }
 
 function focusable(dialog: HTMLDialogElement): HTMLElement[] {
@@ -24,7 +25,7 @@ function focusable(dialog: HTMLDialogElement): HTMLElement[] {
   });
 }
 
-export function Dialog({ open, onClose, title, description, children, initialFocusRef }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, initialFocusRef, className = "" }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
   useEffect(() => {
@@ -51,7 +52,7 @@ export function Dialog({ open, onClose, title, description, children, initialFoc
     }
   }
   if (!open) return null;
-  return createPortal(<dialog ref={ref} className="dialog" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined}
+  return createPortal(<dialog ref={ref} className={`dialog ${className}`} aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined}
     onKeyDown={keyboard} onCancel={event => { event.preventDefault(); onClose(); }}>
     <div className="dialog-heading"><h2 id={`${id}-title`}>{title}</h2><IconButton label="Close dialog" onClick={onClose}><X size={20} /></IconButton></div>
     {description && <p className="dialog-description" id={`${id}-description`}>{description}</p>}
