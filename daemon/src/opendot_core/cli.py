@@ -260,7 +260,7 @@ def running_opendot_runner(database: Database, args: argparse.Namespace) -> Iter
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opendot", description="OpenDot local CLI")
-    parser.add_argument("--db", help="SQLite database path; defaults to OPENDOT_DB_PATH or .opendot/opendot.db")
+    parser.add_argument("--db", help="SQLite database path; defaults to OPENDOT_DB_PATH, else opendot.db in OpenDot's data folder")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     api_contract_add_parsers(subcommands)

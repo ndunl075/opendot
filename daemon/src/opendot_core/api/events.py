@@ -15,6 +15,15 @@ from .models import ApiModel, ApprovalItem, ToolCallRecord, UsageStamp
 CHAT_STREAM_PATH = "/v1/chat/stream"
 
 
+def assistant_id(message_id: str) -> str:
+    """The id of the assistant reply to the user message ``message_id``.
+
+    Stream events carry this id, and the stored reply uses it, so a client never mistakes the reply
+    for the user's own message (which keeps ``message_id``).
+    """
+    return f"{message_id}_a"
+
+
 class _Event(ApiModel):
     seq: int = Field(ge=0)
     conversation_id: str

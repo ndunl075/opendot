@@ -18,6 +18,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from ...db import Database
+from ..events import assistant_id
 from ..models import (
     API_VERSION,
     ChatMessage,
@@ -28,6 +29,9 @@ from ..models import (
     UsageStamp,
 )
 from ._common import error, parse_time, reply, utcnow
+
+PRIOR_TURNS = 20
+"""Earlier turns a new chat message carries; longer conversations are compacted by the agent loop."""
 
 if TYPE_CHECKING:
     from . import ApiContext
@@ -63,6 +67,16 @@ class ConversationRecorder:
                     "VALUES (?, ?, 'user', ?, ?, ?) ON CONFLICT(id) DO NOTHING",
                     (message_id, conversation_id, text, now, task_id),
                 )
+
+    def recent_turns(self, conversation_id: str, limit: int = PRIOR_TURNS) -> list[tuple[str, str]]:
+        """The last ``limit`` user and assistant turns with text, oldest first."""
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT role, text FROM conversation_messages WHERE conversation_id = ? "
+                "AND role IN ('user', 'assistant') AND text <> '' ORDER BY seq DESC LIMIT ?",
+                (conversation_id, limit),
+            ).fetchall()
+        return [(row["role"], row["text"]) for row in reversed(rows)]
 
     def on_event(self, conversation_id: str, message_id: str, event: dict[str, Any]) -> None:
         """Fold one published stream event into the assistant reply for this message."""
@@ -154,11 +168,6 @@ class ConversationRecorder:
             for r in rows
         ]
         return Conversation(id=head["id"], title=head["title"], messages=messages, paused=paused)
-
-
-def assistant_id(message_id: str) -> str:
-    """The stored id of the assistant reply to the user message ``message_id``."""
-    return f"{message_id}_a"
 
 
 def _when(value: str) -> datetime:

@@ -276,3 +276,10 @@ section 1. Newest last.
 - 2026-10-01 (M4, security review): The agent never sends email in v0.1 (`message_send_propose` is not
   offered and `gmail_message_send` approvals are refused by its executor); Google connections, scopes,
   syncs and write switches are per app. Reason: S7, S9, S11.
+- 2026-10-02: Data moves out of the working directory. The default data folder is the OS app-data folder
+  the service and desktop app already use (`%APPDATA%\org.opendot.desktop`, `~/Library/Application
+  Support/org.opendot.desktop`, `$XDG_DATA_HOME/org.opendot.desktop`), overridable with
+  `OPENDOT_DATA_DIR`; `opendot.db` and `chatgpt_plan.json` live there. `OPENDOT_DB_PATH` and `--db` still
+  win. Reason: `.opendot/` relative to the current directory meant different data per start folder, and it
+  sat inside the source checkout where it could be committed. `.opendot/` is now git-ignored. Supersedes the
+  2026-09-30 data-directory entry above.

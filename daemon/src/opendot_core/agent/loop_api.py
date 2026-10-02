@@ -91,8 +91,12 @@ class AgentLoopProtocol(Protocol):
         chat_id: int | None = None,
         preapproved_actions: frozenset[str] = frozenset(),
         tool_group: Sequence[str] | None = None,
+        prior_turns: Sequence[tuple[str, str]] = (),
     ) -> str:
-        """Create a durable task and return its id. Does not call a model."""
+        """Create a durable task and return its id. Does not call a model.
+
+        ``prior_turns`` are earlier ``(role, text)`` chat turns of the same conversation, oldest first;
+        they seed the task's history so the model sees the conversation so far."""
         ...
 
     def run(self, task_id: str) -> Iterator[LoopEvent]:

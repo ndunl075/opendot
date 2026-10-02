@@ -808,7 +808,7 @@ def parse_stdio_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="local-mcp",
         help="local client identity; must already have its own 'opendot client-grant' scope (default: local-mcp)",
     )
-    parser.add_argument("--db", help="SQLite database path; defaults to OPENDOT_DB_PATH or .opendot/opendot.db")
+    parser.add_argument("--db", help="SQLite database path; defaults to OPENDOT_DB_PATH, else opendot.db in OpenDot's data folder")
     return parser.parse_args(argv)
 
 

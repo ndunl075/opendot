@@ -189,6 +189,15 @@ class AgentLoop:
     def _set_state(self, task_id: str, state: TaskState, detail: str = "") -> None:
         self._update(task_id, state=state.value, detail=detail)
 
+    def _model_steps_done(self, task_id: str) -> int:
+        with self.database.connect() as connection:
+            return int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM agent_steps WHERE task_id = ? AND kind = 'model' AND state = 'done'",
+                    (task_id,),
+                ).fetchone()[0]
+            )
+
     def _history(self, task_id: str, start: int = 0) -> list[InputItem]:
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -238,8 +247,11 @@ class AgentLoop:
         chat_id: int | None = None,
         preapproved_actions: frozenset[str] = frozenset(),
         tool_group: Sequence[str] | None = None,
+        prior_turns: Sequence[tuple[str, str]] = (),
     ) -> str:
-        """``tool_group`` fixes the task's tools by name (an empty tuple means no tools at all, which is
+        """``prior_turns`` seeds the history with the conversation so far (``(role, text)``, oldest first,
+        roles ``user`` or ``assistant``); the new message still goes last, as the first step's tail.
+        ``tool_group`` fixes the task's tools by name (an empty tuple means no tools at all, which is
         how read-only background routines run); the default picks the group from the message."""
         if job_type not in _JOB_FOR_TYPE:
             raise ValueError(f"unknown job type {job_type!r}")
@@ -270,6 +282,13 @@ class AgentLoop:
                         now,
                     ),
                 )
+                seeded = [
+                    InputItem(role="user" if role == "user" else "assistant", content=text)
+                    for role, text in prior_turns
+                    if role in ("user", "assistant") and text.strip()
+                ]
+                if seeded:
+                    self._append_history(connection, task_id, seeded)
         return task_id
 
     def abandon(self, task_id: str, reason: str) -> None:
@@ -495,7 +514,7 @@ class AgentLoop:
         group = set(json.loads(row["tool_group_json"]))
         tools = [spec for spec in self.tools.specs() if spec.name in group]
         history = self._history(task_id, int(row["history_start"]))
-        first_step = not self._history(task_id)
+        first_step = not self._model_steps_done(task_id)  # seeded prior turns are history too
         tail = Tail(message=row["message"] if first_step else CONTINUE_MESSAGE, now=self._now())
         packed = self.packer.pack(
             persona=self.persona,
