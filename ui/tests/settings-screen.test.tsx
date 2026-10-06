@@ -128,6 +128,30 @@ it("saves only model overrides and confirms automatic top-tier use", async () =>
   await waitFor(() => expect(api.call).toHaveBeenCalledWith("settings_update", { body: { tier_overrides: [] } }));
 });
 
+it("keeps plan attribution and safe usage management beside automatic model selection", async () => {
+  const original = vi.mocked(api.call).getMockImplementation()!;
+  vi.mocked(api.call).mockImplementation(async (name, options) => name === "chatgpt_status"
+    ? { state: "signed_in", eligible: true, plan: "eligible_plus", manage_usage_url: "https://chatgpt.com/#settings/Usage" } as never
+    : original(name, options));
+  render(<ThemeProvider><SettingsScreen section="models" /></ThemeProvider>);
+  const model = await screen.findByRole("region", { name: "Plan models" });
+  expect(await within(model).findByText("Using ChatGPT plan")).toBeInTheDocument();
+  expect(within(model).getByText("Model selected automatically")).toBeInTheDocument();
+  expect(within(model).getByRole("link", { name: "Manage usage" })).toHaveAttribute("href", "https://chatgpt.com/#settings/Usage");
+});
+
+it("does not claim plan use or render an unsafe usage link when signed out", async () => {
+  const original = vi.mocked(api.call).getMockImplementation()!;
+  vi.mocked(api.call).mockImplementation(async (name, options) => name === "chatgpt_status"
+    ? { state: "signed_out", eligible: false, plan: "unknown", manage_usage_url: "javascript:alert(1)" } as never
+    : original(name, options));
+  render(<ThemeProvider><SettingsScreen section="models" /></ThemeProvider>);
+  const model = await screen.findByRole("region", { name: "Plan models" });
+  expect(await within(model).findByText("ChatGPT plan")).toBeInTheDocument();
+  expect(within(model).queryByText("Using ChatGPT plan")).not.toBeInTheDocument();
+  expect(within(model).queryByRole("link", { name: "Manage usage" })).not.toBeInTheDocument();
+});
+
 it("refreshes feature availability after an API key is saved", async () => {
   const original = vi.mocked(api.call).getMockImplementation()!;
   let saved = false;

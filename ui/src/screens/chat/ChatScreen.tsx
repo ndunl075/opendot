@@ -1,13 +1,13 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, Ellipsis, MessageSquare, Mic, PanelRight, Plus, SquarePen } from "lucide-react";
+import { ArrowDown, ArrowUp, Ellipsis, Mic, PanelRight, Plus, SquarePen } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import { ChatStream, type StreamState } from "../../api/stream";
 import type { StreamEvent } from "../../api/endpoints.gen";
 import type { ApprovalItem, ApprovalDecisionResult, PausedEvent } from "../../api/types.gen";
 import { Badge, EmptyState, ErrorState, IconButton, Button, Skeleton, Textarea } from "../../design/components";
 import { Avatar } from "../../design/avatar";
-import { safeExternalUrl, useResource } from "../shared";
+import { useResource } from "../shared";
 import { CompanionDetails } from "./CompanionDetails";
 import { MessageBubble } from "./MessageBubble";
 import { applyStreamEvent, dedupeMessages, mergeHistory, type Message } from "./messages";
@@ -38,11 +38,7 @@ export default function ChatScreen() {
         {!conversations.data?.conversations.length && <p className="muted">Your conversations will appear here.</p>}
         <nav aria-label="Conversations" className="conversation-list">{conversations.data?.conversations.map(item => <button key={item.id} type="button" aria-current={selection === item.id ? "page" : undefined} onClick={() => setSelection(item.id)}><span>{item.title}</span><small>{item.message_count} messages</small></button>)}</nav>
       </>}
-    </section><div className="chat-plan"><MessageSquare size={15} aria-hidden="true" />
-      {/* Official OpenAI DevKit assets are not in this repository. Text only. */}
-      <span>{plan.data?.state === "signed_in" && plan.data.eligible ? "Using ChatGPT plan" : "ChatGPT plan"}</span>
-      {safeExternalUrl(plan.data?.manage_usage_url) && <a href={safeExternalUrl(plan.data?.manage_usage_url)} target="_blank" rel="noreferrer">Manage usage</a>}
-    </div>
+    </section>
       <ConversationPanel key={`${selection ?? "new"}-${session}`} conversationId={selection} avatarSeed={companion.data?.avatar_seed} manageUsageUrl={plan.data?.manage_usage_url} onChanged={conversations.reload} onNewChat={newChat} />
     </div>{detailsOpen && <CompanionDetails onUpdated={companion.setData} onClose={() => { setDetailsOpen(false); detailsButton.current?.focus(); }} />}</div>
   </section>;
@@ -229,7 +225,7 @@ function ConversationPanel({ conversationId, avatarSeed, manageUsageUrl, onChang
       setShowLatest(!following.current);
     }}>
       <div ref={content} className="transcript-content">
-      {loading ? <Skeleton className="screen-skeleton" label="Loading conversation" /> : !messages.length && <EmptyState title="What’s on your mind?" description="A little space to think things through. Your companion asks before taking action." icon={<Avatar seed={avatarSeed ?? "v2:c=slate;h=none;p=none"} size={72} />} />}
+      {loading ? <Skeleton className="screen-skeleton" label="Loading conversation" /> : !messages.length && <EmptyState title="What’s on your mind?" icon={<Avatar seed={avatarSeed ?? "v2:c=slate;h=none;p=none"} size={72} />} />}
       {messages.map((message, index) => <Fragment key={message.renderKey ?? message.id}>
         <MessageBubble message={message} streaming={busy && message.role === "assistant" && (!!message.pending || message.id === streamingId || message.id === `${streamingId}_a`)} approval={message.approval_id ? approvals[message.approval_id] : undefined} onDecision={onDecision} />
         {index === lastUserIndex && <p className="chat-read-receipt" aria-label={readTime ? "Message read time" : undefined} aria-hidden={!readTime} title={readTime ? "Your companion has started responding" : undefined}>{readTime ? <><span>Read </span><time dateTime={readAt}>{readTime}</time></> : "\u00a0"}</p>}

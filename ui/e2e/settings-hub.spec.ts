@@ -17,6 +17,51 @@ test.afterEach(async ({ page }) => {
   await page.unrouteAll({ behavior: "wait" });
 });
 
+test("Appearance lives only in General and preserves explicit and system themes", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.goto("/chat");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Appearance" })).toHaveCount(0);
+  await expect(page.locator(".chat-plan")).toHaveCount(0);
+  const empty = page.locator(".transcript .empty-state");
+  await expect(empty.getByRole("heading", { name: "What’s on your mind?" })).toBeVisible();
+  await expect(empty.locator(".state-icon svg")).toBeVisible();
+  await expect(empty.locator("p")).toHaveCount(0);
+  await mkdir(".visual-check", { recursive: true });
+  await page.screenshot({ path: ".visual-check/tidy-chat-empty-light.png" });
+
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings" }).click();
+  const appearance = page.getByRole("region", { name: "General", exact: true }).getByRole("combobox", { name: "Appearance" });
+  await expect(appearance).toHaveText("System");
+  await expect(page.locator(".sidebar").getByRole("combobox", { name: "Appearance" })).toHaveCount(0);
+  for (const theme of ["Dark", "Light"] as const) {
+    await appearance.click();
+    await page.getByRole("option", { name: theme, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme.toLowerCase());
+    expect(await page.evaluate(() => localStorage.getItem("opendot-theme"))).toBe(theme.toLowerCase());
+    await page.reload();
+    await expect(appearance).toHaveText(theme);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme.toLowerCase());
+    await appearance.click();
+    await page.screenshot({ path: `.visual-check/tidy-settings-appearance-${theme.toLowerCase()}.png` });
+    await appearance.press("Escape");
+  }
+  await appearance.click();
+  await page.getByRole("option", { name: "System", exact: true }).click();
+  expect(await page.evaluate(() => localStorage.getItem("opendot-theme"))).toBeNull();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Chat" }).click();
+  await expect(page.getByRole("combobox", { name: "Appearance" })).toHaveCount(0);
+  await expect(empty).toBeVisible();
+  await page.screenshot({ path: ".visual-check/tidy-chat-empty-dark.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".chat-composer")).toBeInViewport({ ratio: 1 });
+  await expect(empty).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: ".visual-check/tidy-chat-empty-mobile.png" });
+});
+
 test("desktop settings has only the requested rail, ordered sections and keyboard focus", async ({ page }) => {
   await page.goto("/settings");
   const rail = page.locator(".sidebar");
@@ -48,6 +93,20 @@ test("desktop settings has only the requested rail, ordered sections and keyboar
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.getByRole("combobox", { name: "Appearance" })).toContainText("Dark");
+});
+
+test("Settings retains plan attribution and usage management", async ({ page }) => {
+  await page.goto("/settings/models");
+  const models = page.getByRole("region", { name: "Plan models" });
+  await expect(models.getByText("Using ChatGPT plan", { exact: true })).toBeVisible();
+  await expect(models.getByRole("heading", { name: "Model selected automatically" })).toBeVisible();
+  await expect(models.getByRole("link", { name: "Manage usage" })).toHaveAttribute("href", /^https:\/\/chatgpt\.com\//);
+  await page.screenshot({ path: ".visual-check/tidy-settings-models.png" });
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Providers", exact: true }).click();
+  await expect(page.getByText("Using ChatGPT plan", { exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Usage", exact: true }).click();
+  await expect(page.getByText("Using ChatGPT plan", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Manage usage" })).toHaveAttribute("href", /^https:\/\/chatgpt\.com\//);
 });
 
 for (const name of sections.slice(1)) {

@@ -132,13 +132,48 @@ it("sends through REST, ignores foreign broadcasts, and announces only final rep
   expect(screen.queryByText("catalog-model")).not.toBeInTheDocument();
   expect(screen.queryByText("0.2 credits")).not.toBeInTheDocument();
   expect(screen.queryByText("low effort")).not.toBeInTheDocument();
-  expect(screen.getByText("Using ChatGPT plan")).toBeInTheDocument();
+  expect(screen.queryByText("Using ChatGPT plan")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Companion reply")).toHaveAttribute("aria-busy", "false");
   expect(screen.getByLabelText("Completed reply")).toHaveTextContent("I can help.");
   fireEvent.change(screen.getByLabelText("Message your companion"), { target: { value: "Next message" } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(call).toHaveBeenCalledWith("chat_send", { body: { conversation_id: "c", text: "Next message" } }));
   await waitFor(() => expect(screen.queryByLabelText("Message read time")).not.toBeInTheDocument());
+});
+
+it("keeps the empty chat to its centered avatar and title without the plan strip", async () => {
+  vi.stubGlobal("WebSocket", Socket);
+  vi.spyOn(api, "call").mockImplementation(async name => {
+    if (name === "chatgpt_status") return status as never;
+    return { conversations: [] } as never;
+  });
+  const { container } = render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  await waitFor(() => expect(Socket.instances).toHaveLength(1));
+  const heading = screen.getByRole("heading", { name: "What’s on your mind?" });
+  expect(heading.parentElement?.querySelector(".state-icon svg")).toBeInTheDocument();
+  expect(heading.parentElement?.querySelector("p")).toBeNull();
+  expect(screen.queryByText("A little space to think things through. Your companion asks before taking action.")).not.toBeInTheDocument();
+  expect(container.querySelector(".chat-plan")).toBeNull();
+  expect(screen.queryByRole("link", { name: "Manage usage" })).not.toBeInTheDocument();
+});
+
+it("still passes the plan usage URL to the primary action when chat pauses at its limit", async () => {
+  vi.stubGlobal("WebSocket", Socket);
+  vi.spyOn(api, "call").mockImplementation(async name => {
+    if (name === "chatgpt_status") return status as never;
+    if (name === "chat_send") return { conversation_id: "c", message_id: "user" } as never;
+    return { conversations: [] } as never;
+  });
+  render(<MemoryRouter><ChatScreen /></MemoryRouter>);
+  await waitFor(() => expect(Socket.instances).toHaveLength(1));
+  const socket = Socket.instances[0];
+  act(() => socket.open());
+  fireEvent.change(screen.getByLabelText("Message your companion"), { target: { value: "Hello" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(socket.sent).toHaveLength(1));
+  act(() => socket.event({ type: "paused", conversation_id: "c", message_id: "user_a", seq: 1, reason: "rate_limited", message: "Plan limit reached" }));
+  expect(screen.getByRole("link", { name: "Manage usage" })).toHaveAttribute("href", status.manage_usage_url);
+  expect(screen.getByRole("link", { name: "Manage usage" })).toHaveClass("button--primary");
 });
 
 it.each([true, false])("uses authoritative approval state across replay and fetch ordering (fetch first: %s)", async fetchFirst => {
