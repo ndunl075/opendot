@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { api } from "../../api/client";
 import type { Settings, SettingsUpdateRequest } from "../../api/types.gen";
-import { Button, Card, ConfirmDialog, ErrorState, Input, Select, Switch } from "../../design/components";
+import { Badge, Button, Card, ConfirmDialog, ErrorState, Input, Select, Switch } from "../../design/components";
 import { useTheme, type ThemePreference } from "../../design/theme";
-import { useMutation } from "../shared";
+import { Resource, safeExternalUrl, useMutation, useResource } from "../shared";
 
 type SettingsProps = { settings: Settings; onSaved: (settings: Settings) => void };
 
@@ -56,6 +56,17 @@ export function AvailabilitySettings({ settings, onSaved }: SettingsProps) {
   </form>;
 }
 
+const loadPlan = () => api.call("chatgpt_status");
+
+function PlanModels() {
+  const plan = useResource(loadPlan);
+  return <section aria-label="Plan models"><Resource resource={plan}>{status => <Card className="section-card form-stack">
+    <div className="section-heading"><h2>Model selected automatically</h2><Badge>{status.state === "signed_in" && status.eligible ? "Using ChatGPT plan" : "ChatGPT plan"}</Badge></div>
+    <p className="muted">OpenDot chooses a model from your account for each job. Use the tier controls below to adjust routing.</p>
+    {safeExternalUrl(status.manage_usage_url) && <a href={safeExternalUrl(status.manage_usage_url)} target="_blank" rel="noreferrer">Manage usage</a>}
+  </Card>}</Resource></section>;
+}
+
 export function ModelSettings({ settings, onSaved }: SettingsProps) {
   const [overrides, setOverrideDraft] = useState(settings.tier_overrides);
   const [confirmTop, setConfirmTop] = useState(false);
@@ -66,6 +77,7 @@ export function ModelSettings({ settings, onSaved }: SettingsProps) {
   }
   return <>
     <form className="screen-stack" onSubmit={event => { event.preventDefault(); void save({ tier_overrides: overrides }); }}>
+      <PlanModels />
       <fieldset className="settings-fields" aria-label="Model choices" disabled={mutation.pending}>
       <Card className="section-card form-stack"><h2>Model choices</h2><p className="muted">Use cheap models by default. Overrides choose a tier for a job; the daemon discovers the models available in your account.</p>
         <Switch label="Automatic top-tier use" checked={settings.auto_top_tier ?? false} disabled={mutation.pending} onChange={event => { if (event.target.checked) setConfirmTop(true); else void save({ auto_top_tier: false }); }} hint="Top-tier work uses substantially more plan credits. Otherwise, your companion asks first." />

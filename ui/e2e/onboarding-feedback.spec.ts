@@ -75,9 +75,9 @@ for (const action of ["Continue to introduction", "Skip for now"]) {
 test("programmatically focused headings keep the soft surface in both themes", async ({ page }, testInfo) => {
   await page.goto("/onboarding");
   const heading = page.getByRole("heading", { name: "Welcome to OpenDot" });
-  for (const theme of ["light", "dark"]) {
-    await page.getByRole("combobox", { name: "Appearance" }).click();
-  await page.getByRole("option", { name: theme === "light" ? "Light" : "Dark", exact: true }).click();
+  for (const theme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await page.keyboard.press("Tab");
     await heading.evaluate(element => { element.tabIndex = -1; element.focus(); });
     await expect(heading).toBeFocused();

@@ -3,8 +3,7 @@ import { Cable, ChevronRight, LogOut, Menu, MessageCircle, Settings, X, type Luc
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, ApiError } from "./api/client";
 import { isWebApp, signOut } from "./api/connection";
-import { EmptyState, ErrorState, IconButton, Select, Skeleton } from "./design/components";
-import { useTheme, type ThemePreference } from "./design/theme";
+import { EmptyState, ErrorState, IconButton, Skeleton } from "./design/components";
 import { useResource } from "./screens/shared";
 import OnboardingScreen from "./screens/onboarding/OnboardingScreen";
 import ChatScreen from "./screens/chat/ChatScreen";
@@ -43,7 +42,6 @@ function ConnectionStatus() {
 }
 
 export function App() {
-  const { preference, setTheme } = useTheme();
   const onboarding = useResource(loadOnboarding);
   const navigate = useNavigate();
   const location = useLocation();
@@ -77,8 +75,7 @@ export function App() {
         </div>
       </div>
     </aside>
-    <div className={`workspace ${current === "Chat" ? "workspace--chat" : inSettings ? "workspace--settings" : ""}`}>{!inSettings && <div className="topbar"><div className="breadcrumb"><span>OpenDot</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
-      <Select label="Appearance" value={preference} onChange={value => setTheme(value as ThemePreference)} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />
+    <div className={`workspace ${current === "Chat" ? "workspace--chat" : inSettings ? "workspace--settings" : ""}`}>{!inSettings && current !== "Chat" && <div className="topbar"><div className="breadcrumb"><span>OpenDot</span><ChevronRight size={14} aria-hidden="true" /><span>{current}</span></div>
     </div>}
       <ConnectionStatus />
       <main id="main" ref={main} tabIndex={-1} className="main-content">{!isAbout && onboarding.loading ? <Skeleton className="screen-skeleton" label="Checking setup" /> : !isAbout && onboarding.error && !gateUnavailable ? <ErrorState error={onboarding.error} onRetry={onboarding.reload} /> : mustOnboard && !isAbout && location.pathname !== "/onboarding" ? <Navigate to="/onboarding" replace /> : <Routes>

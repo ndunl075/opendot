@@ -3,9 +3,9 @@ import { Archive, CircleAlert, Info, X } from "lucide-react";
 import { ApiError, isSessionError, isStaleItemError } from "../../api/client";
 import { Button, IconButton } from "./primitives";
 
-export interface EmptyStateProps { title: string; description: string; icon?: ReactNode; action?: ReactNode }
+export interface EmptyStateProps { title: string; description?: string; icon?: ReactNode; action?: ReactNode }
 export function EmptyState({ title, description, icon = <Archive size={26} />, action }: EmptyStateProps) {
-  return <div className="empty-state"><div className="state-icon" aria-hidden="true">{icon}</div><h2>{title}</h2><p>{description}</p>{action && <div className="state-action">{action}</div>}</div>;
+  return <div className="empty-state"><div className="state-icon" aria-hidden="true">{icon}</div><h2>{title}</h2>{description && <p>{description}</p>}{action && <div className="state-action">{action}</div>}</div>;
 }
 
 export interface ErrorStateProps { error: unknown; onRetry?: () => void }

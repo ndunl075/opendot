@@ -24,10 +24,13 @@ test("all routes, About copy, self-hosted fonts, and persisted OS/override theme
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   await expect(page.locator("footer")).toHaveCount(0);
   await expect(page.getByText("Daemon connected", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Appearance" })).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings" }).click();
   await page.getByRole("combobox", { name: "Appearance" }).click();
   await page.getByRole("option", { name: "Light", exact: true }).click();
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Chat" }).click();
   await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeVisible();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings" }).click();
   for (const name of ["General", "Companion", "Connections", "Memory", "Rules", "Usage", "Activity"]) {

@@ -10,8 +10,8 @@ test.beforeEach(async ({ page }) => {
 test("theme menu appearance, keyboard selection, dismissal and narrow viewport in both themes", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto("/chat");
-  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await page.goto("/settings/general");
+  await expect(page.getByRole("heading", { name: "General", level: 1 })).toBeVisible();
   const trigger = page.getByRole("combobox", { name: "Appearance" });
   const menu = page.getByRole("listbox", { name: "Appearance" });
   for (const theme of ["Light", "Dark"]) {
@@ -37,7 +37,7 @@ test("theme menu appearance, keyboard selection, dismissal and narrow viewport i
   await expect(trigger).toHaveText("Light");
   await trigger.press("End"); await trigger.press("Space"); await expect(trigger).toHaveText("Dark");
   await trigger.press("s"); await trigger.press("y"); await trigger.press("Enter"); await expect(trigger).toHaveText("System");
-  await trigger.click(); await page.getByLabel("Message your companion").click(); await expect(menu).toHaveCount(0);
+  await trigger.click(); await page.getByRole("heading", { name: "General", level: 1 }).click(); await expect(menu).toHaveCount(0);
   await trigger.press("Home"); await trigger.press("Tab"); await expect(menu).toHaveCount(0); await expect(trigger).not.toBeFocused();
   await page.setViewportSize({ width: 320, height: 740 });
   await trigger.click();
