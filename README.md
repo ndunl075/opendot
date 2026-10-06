@@ -9,11 +9,27 @@ asks before it acts.
 > endorsed by, or sponsored by OpenAI or Anthropic. ChatGPT is a trademark of
 > OpenAI.
 
-**Status: early development.** The daemon, model access and agent loop are
-built (milestones M0 to M2). The desktop and web UI arrive in M3, and the
-always-on service and connector setup in M4. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for the plan and [STATUS.md](STATUS.md) for
-where things stand.
+**Status: developer preview ([v0.1.0](https://github.com/ndunl075/opendot/releases/tag/v0.1.0)).**
+Chat, the always-on loop, approvals, budgets and the Gmail, Calendar and
+GitHub connectors work. There is no installer yet, so run it from source (see
+**Quick start**). See [ARCHITECTURE.md](ARCHITECTURE.md) for the plan and
+[STATUS.md](STATUS.md) for where things stand.
+
+## Quick start
+
+Needs Python 3.12, [`uv`](https://docs.astral.sh/uv/), Node 20+ with pnpm, and
+a ChatGPT Plus or Pro plan.
+
+```bash
+git clone https://github.com/ndunl075/opendot.git
+cd opendot
+uv sync --project daemon
+cd ui && pnpm install --frozen-lockfile && pnpm build && cd ..
+uv run --project daemon opendot serve
+```
+
+In a second terminal, run `uv run --project daemon opendot open`, type the
+one-time code it prints into the page that opens, and sign in with ChatGPT.
 
 ## How it works
 
